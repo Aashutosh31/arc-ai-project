@@ -1,0 +1,11 @@
+# .gitignore content
+/node_modules
+.DS_Store
+.env
+.env.local
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+# OS generated files
+.vscode
