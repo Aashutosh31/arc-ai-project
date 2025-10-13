@@ -16,6 +16,16 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json()); // Body parser for JSON requests
 
+// Import the routes after middleware
+const authRoutes = require('./routes/auth');
+// Simple REST Test Route (Keep for sanity check)
+app.get('/', (req, res) => {
+    res.status(200).send('ARC-AI Server Running. Status: Operational.');
+});
+
+// Use the authentication routes
+app.use('/api/auth', authRoutes);
+
 // --- 2. Database Connection (MongoDB) ---
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('🟢 MongoDB Atlas connected successfully.'))
@@ -40,12 +50,6 @@ io.on('connection', (socket) => {
         console.log(`User disconnected: ${socket.id}`);
     });
 });
-
-// --- 4. Simple REST Test Route ---
-app.get('/', (req, res) => {
-    res.status(200).send('ARC-AI Server Running. Status: Operational.');
-});
-
 
 // --- 5. Start Server ---
 server.listen(PORT, () => {
