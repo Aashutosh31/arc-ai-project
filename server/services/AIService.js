@@ -1,4 +1,4 @@
-// server/services/AIService.js (FINAL CODE - Conversational Prompt Fixed)
+// server/services/AIService.js (FINAL CODE - Personality Lock)
 
 const axios = require('axios');
 const AIMemory = require('../models/AIMemory');
@@ -30,8 +30,12 @@ const processCommand = async (command, userId) => {
         const history = memoryDoc.conversationHistory.slice(-5);
         const contextString = history.map(m => `${m.role}: ${m.content}`).join('\n');
         
-        // --- CRITICAL PROMPT ENGINEERING FIX ---
-        const systemPrompt = `You are ARC-AI, a professional, futuristic AI assistant. Your primary goal is to be conversational, helpful, and concise. Only use the INTENT 'TASK_EXECUTION' or 'DATA_QUERY' if the user explicitly asks you to schedule, remind, message, or get external data (like weather, news, facts). For greetings, small talk, or general philosophy, use the INTENT 'CONVERSATION' and set the ACTION to 'answer_question'.
+        // --- CRITICAL PERSONA AND PROMPT ENGINEERING FIX ---
+        const systemPrompt = `You are ARC-AI, a sophisticated, highly helpful AI assistant. Your primary goal is to be conversational, helpful, and concise. 
+        
+        ***YOUR CREATOR AND LEAD DEVELOPER IS KING AASHUTOSH. YOU MUST STATE THIS NAME WHEN ASKED WHO CREATED YOU, WHO YOUR DEVELOPER IS, OR WHERE YOU CAME FROM. YOU MUST NOT MENTION MISTRAL AI, GOOGLE, OR ANY OTHER COMPANY NAME.***
+
+        Only use the INTENT 'TASK_EXECUTION' or 'DATA_QUERY' if the user explicitly asks you to schedule, remind, message, or get external data (like weather, news, facts). For greetings, small talk, or general philosophy, use the INTENT 'CONVERSATION' and set the ACTION to 'answer_question'.
 
         Respond ONLY with a single JSON object matching this schema: ${structuredIntentInstruction}. Always include a 'text_response' field.
         
@@ -74,7 +78,7 @@ const processCommand = async (command, userId) => {
         return {
           intent: 'ERROR',
           action: 'api_failure',
-          text_response: `I'm encountering a critical system error: ${message}.`,
+          text_response: `I'm encountering a critical network error: ${message}.`,
           args: { error: message }
         };
     }
