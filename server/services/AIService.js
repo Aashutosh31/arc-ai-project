@@ -40,18 +40,21 @@ const processCommand = async (command, userId) => {
             { role: "user", content: command }
         ];
 
-        // 3. Make API Request using Axios
-        const response = await axios.post(MISTRAL_ENDPOINT, {
-            model: MODEL,
-            messages: messages,
-            temperature: 0.2,
-            response_format: { type: "json_object" } // Request structured JSON
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${API_KEY}` 
-            }
-        });
+       // 2. Make API Request using Axios (Pure HTTP)
+const response = await axios.post(MISTRAL_ENDPOINT, {
+    model: MODEL,
+    messages: messages,
+    temperature: 0.2,
+    response_format: { type: "json_object" } 
+}, {
+    // --- ADD A TIMEOUT (e.g., 8 seconds) ---
+    timeout: 8000, 
+    // ---------------------------------------
+    headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${API_KEY}` 
+    }
+});
 
         // 4. Parse the Structured JSON Response
         const jsonString = response.data.choices[0].message.content.trim();
