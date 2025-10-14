@@ -13,6 +13,11 @@ const generateToken = (id) => {
 
 // @desc    Register new user
 // @route   POST /api/auth/register
+const getMe = async (req, res) => {
+    // req.user is set by the protect middleware
+    res.status(200).json(req.user);
+};
+
 const registerUser = async (req, res) => {
     const { username, email, password } = req.body;
 
@@ -86,5 +91,5 @@ const loginUser = async (req, res) => {
 module.exports = {
     registerUser,
     loginUser,
-    // getMe // Placeholder
+     getMe 
 };

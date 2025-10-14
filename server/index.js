@@ -1,13 +1,20 @@
 // server/index.js
-
+// server/index.js (Inside io.on('connection'))
+const { processCommand } = require('./services/AIService'); // Import service
 // Core Dependencies
 require('dotenv').config();
+// --- FINAL DOTENV CHECK ---
+if (!process.env.GOOGLE_API_KEY) {
+    console.error('🔴 CRITICAL: GOOGLE_API_KEY is NOT loaded by dotenv. Check .env file path/name.');
+} else {
+    console.log('✅ GOOGLE_API_KEY successfully loaded from .env.');
+}
 const express = require('express');
 const mongoose = require('mongoose');
 const http = require('http'); // Required for Socket.IO
 const { Server } = require('socket.io'); // Socket.IO server class
 const cors = require('cors');
-
+const jwt = require('jsonwebtoken')
 const app = express();
 const server = http.createServer(app); // Create HTTP server instance
 const PORT = process.env.PORT || 5000;
@@ -39,15 +46,66 @@ const io = new Server(server, {
     }
 });
 
+// --- CRITICAL: Socket.IO Authentication Middleware ---
+io.use((socket, next) => {
+    const token = socket.handshake.auth.token;
+    const userId = socket.handshake.auth.userId;
+
+    if (!token || !userId) {
+        console.log('🚫 Socket rejected: Missing auth credentials.');
+        return next(new Error('Authentication error: Missing token or userId'));
+    }
+
+    try {
+        // Verify the token
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        // Attach user data to the socket object for later use
+        socket.userId = decoded.id; 
+        console.log(`✅ Socket authenticated for user: ${socket.userId}`);
+        next();
+    } catch (err) {
+        console.log('🚫 Socket rejected: Token verification failed.');
+        return next(new Error('Authentication error: Invalid token'));
+    }
+});
+
 // Simple Socket.IO Connection Test
 io.on('connection', (socket) => {
-    console.log(`📡 User connected: ${socket.id}`);
-
+      console.log(`📡 User connected: ${socket.id} (Authenticated ID: ${socket.userId})`);
     // Placeholder for real-time AI logic (Phase 3)
     // socket.on('ai:stt:final', ...); 
 
-    socket.on('disconnect', () => {
-        console.log(`User disconnected: ${socket.id}`);
+  // --- Core AI Command Listener ---
+    socket.on('ai:stt:final', async (data) => {
+        const { command } = data; // userId is now on socket.userId
+
+        // 1. Get AI response (structured intent and text)
+        const aiResponse = await processCommand(command, socket.userId);
+
+        // 2. If it's a conversation or action, send the response text back
+        if (aiResponse) {
+            const responseText = aiResponse.text_response;
+
+            // 3. Save AI's response to history (before streaming)
+            // NOTE: This will require a function in the AI controller/service to save the AI's response text.
+
+            // 4. --- Real-Time Streaming back to client (ai:tts:response:chunk) ---
+            // For simplicity, we'll send it as one chunk for now (streaming needs custom implementation)
+            // For true streaming: you'd use the Gemini streaming API and pipe chunks here.
+            socket.emit('ai:tts:response:chunk', {
+                chunk: responseText,
+                isFinal: true, // Send as final chunk
+                intent: aiResponse
+            });
+
+            // 5. Trigger Task Execution (if intent is TASK_EXECUTION)
+            if (aiResponse.intent === 'TASK_EXECUTION') {
+                // Placeholder: In Phase 5, we'll implement this TaskExecutor
+                console.log(`⏰ Task Execution Required: ${aiResponse.action}`);
+                // TaskExecutor.execute(aiResponse); 
+            }
+        }
     });
 });
 
