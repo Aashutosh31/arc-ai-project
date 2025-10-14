@@ -2,6 +2,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { SocketProvider } from './components/SocketProvider';
+import { ChatProvider } from './contexts/ChatContext';
 import AuthPage from './pages/AuthPage';
 import DashboardPage from './pages/DashboardPage'; // We will create this next
 import styled from 'styled-components';
@@ -28,6 +29,7 @@ const App = () => {
     return (
         <Router>
             <SocketProvider>
+                <ChatProvider>
                 <GlobalContainer>
                     <Routes>
                         <Route path="/login" element={<AuthPage isRegister={false} />} />
@@ -47,6 +49,7 @@ const App = () => {
                         <Route path="/" element={<Navigate to="/dashboard" replace />} />
                     </Routes>
                 </GlobalContainer>
+                </ChatProvider>
             </SocketProvider>
         </Router>
     );

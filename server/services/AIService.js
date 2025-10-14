@@ -1,92 +1,82 @@
-// server/services/AIService.js
-const { GoogleGenAI } = require('@google/genai');
+// server/services/AIService.js (COMPLETE CODE)
+
+const axios = require('axios');
 const AIMemory = require('../models/AIMemory');
 
-// Initialize Gemini (uses GOOGLE_API_KEY from .env)
-const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
-
-
-if (GOOGLE_API_KEY) {
-    // Force the environment variable used by the SDK to be set in the current process.
-    // This is the variable the SDK relies on when initialized with no arguments.
-    process.env.GEMINI_API_KEY = GOOGLE_API_KEY; 
-    console.log('✅ GEMINI_API_KEY forced into environment scope.');
-} else {
-    console.error("🔴 API Key is missing. The next step will fail.");
-    // It's still good practice to check, but the issue is usually the lookup, not the existence.
-}
-// 2. Initialize Gemini client. 
-// We use the empty constructor, which should now correctly find the key 
-// because we set process.env.GEMINI_API_KEY just above.
-const ai = new GoogleGenAI({}); 
-
-// NOTE: If this fails, the only other option is to install the deprecated 
-// 'google-auth-library' and manually disable ADC, but this direct manipulation 
-// of process.env is the modern fix.
+// --- Module-level constants (Read from environment when module loads) ---
+const API_KEY = process.env.MISTRAL_API_KEY; 
+const MODEL = process.env.MISTRAL_MODEL || 'mistral-tiny'; // Default to a fast model
+const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions'; 
 
 // Define the structure for task execution (CRITICAL for "Jarvis")
-const structuredIntentSchema = {
-  type: "object",
-  properties: {
-    intent: { 
-      type: "string", 
-      description: "A category like CONVERSATION, TASK_EXECUTION, DATA_QUERY."
-    },
-    action: { 
-      type: "string", 
-      description: "Specific action like get_weather, schedule_reminder, answer_question." 
-    },
-    args: { 
-      type: "object", 
-      description: "JSON arguments for the action, e.g., {location: 'London', time: 'tomorrow'}."
-    },
-    text_response: {
-      type: "string",
-      description: "The natural language response ARC-AI should say to the user."
-    }
-  },
-  required: ["intent", "action", "text_response"]
-};
+const structuredIntentInstruction = JSON.stringify({
+    intent: "A category like CONVERSATION, TASK_EXECUTION, DATA_QUERY.",
+    action: "Specific action like schedule_reminder, answer_question, get_weather.",
+    args: "JSON arguments for the action, e.g., {location: 'London', time: 'tomorrow'}.",
+    text_response: "The natural language response ARC-AI should say to the user."
+});
 
+
+// --- ASYNC FUNCTION: The entire core logic is safely placed inside here ---
 const processCommand = async (command, userId) => {
-  try {
-    // 1. Get Contextual Memory
-    const memoryDoc = await AIMemory.findOne({ userId });
-    const history = memoryDoc.conversationHistory.slice(-5); // Use last 5 messages for context
-    const contextString = history.map(m => `${m.role}: ${m.content}`).join('\n');
+    
+    // 1. FINAL CHECK for API Key
+    if (!API_KEY) {
+        console.error("🔴 MISTRAL_API_KEY is MISSING! Cannot process command.");
+        return { intent: 'ERROR', action: 'config_error', text_response: "System key configuration failure (Backend).", args: {} };
+    }
+    
+    try {
+        // 2. Get Contextual Memory and Build Prompt
+        // The await is now safe because we are inside the async function block.
+        const memoryDoc = await AIMemory.findOne({ userId }); 
+        const history = memoryDoc.conversationHistory.slice(-5); // Last 5 messages for context
+        const contextString = history.map(m => `${m.role}: ${m.content}`).join('\n');
+        
+        const systemPrompt = `You are ARC-AI, a professional, futuristic AI assistant. Analyze the user command and context. Respond ONLY with a single JSON object matching this schema: ${structuredIntentInstruction}. Always include a 'text_response' field. Context: ${contextString}`;
 
-    // 2. Build the System Prompt
-    const systemPrompt = `You are ARC-AI, a sophisticated, highly helpful AI assistant for the user. Your personality is professional and slightly futuristic. Analyze the user's command and previous context. If a task or action is implied (like a reminder, message, or data query), use the 'TASK_EXECUTION' intent. Always respond with the structured JSON object, and always include a natural language reply in the 'text_response' field. Context: ${contextString}`;
+        const messages = [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: command }
+        ];
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash', // Use the fast, free tier model
-        contents: [
-            { role: 'user', parts: [{ text: systemPrompt + '\n\nUser Command: ' + command }] }
-        ],
-        config: {
-            responseMimeType: "application/json", // CRITICAL for structured output
-            responseSchema: structuredIntentSchema,
-            temperature: 0.2, // Keep it precise
-        },
-    });
+        // 3. Make API Request using Axios
+        const response = await axios.post(MISTRAL_ENDPOINT, {
+            model: MODEL,
+            messages: messages,
+            temperature: 0.2,
+            response_format: { type: "json_object" } // Request structured JSON
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_KEY}` 
+            }
+        });
 
-    // The response text should be the structured JSON string
-    const jsonResponse = JSON.parse(response.text);
+        // 4. Parse the Structured JSON Response
+        const jsonString = response.data.choices[0].message.content.trim();
+        const aiResponse = JSON.parse(jsonString);
+        
+        // 5. Save to History 
+        // We save the original command first
+        memoryDoc.conversationHistory.push({ role: 'user', content: command });
+        // Then we save the AI's response text for future context
+        memoryDoc.conversationHistory.push({ role: 'assistant', content: aiResponse.text_response }); 
+        await memoryDoc.save();
 
-    // 3. Save to History (User command)
-    memoryDoc.conversationHistory.push({ role: 'user', content: command });
-    await memoryDoc.save();
+        // 6. Return the structured response for task execution
+        return aiResponse;
 
-    return jsonResponse;
-  } catch (error) {
-    console.error('Gemini API Error or JSON Parsing Failed:', error);
-    return {
-      intent: 'ERROR',
-      action: 'error_response',
-      text_response: "I apologize, an error occurred while processing your request. Please try again.",
-      args: { error: error.message }
-    };
-  }
+    } catch (error) {
+        // Log the full error for debugging, but send a graceful response to the user
+        console.error('AI API Request or JSON Parsing Failed:', error.response?.data || error.message);
+        return {
+          intent: 'ERROR',
+          action: 'api_failure',
+          text_response: `I'm encountering a critical system error. The AI brain is currently offline. Please check the network or your API key.`,
+          args: { error: error.message }
+        };
+    }
 };
 
 module.exports = { processCommand };
