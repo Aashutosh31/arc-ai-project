@@ -3,26 +3,27 @@ import React from 'react';
 import styled from 'styled-components';
 import { useSocket } from '../hooks/useSocket';
 import VoiceButton from '../components/VoiceButton';
+import ChatInterface from '../components/ChatInterface.jsx'; // <--- CHAT WINDOW IMPORTED HERE ---
 
 const StatusText = styled.h1`
     color: ${props => props.$isConnected ? '#00FF00' : '#FF0000'};
     text-shadow: 0 0 10px ${props => props.$isConnected ? '#00FF00' : '#FF0000'};
 `;
 
+// ... DashboardPage component definition ...
 const DashboardPage = () => {
     const { isConnected } = useSocket();
 
     return (
-        <div style={{ padding: '50px', textAlign: 'center' }}>
+        <div style={{ padding: '20px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '90%' }}>
             <StatusText $isConnected={isConnected}>
                 ARC-AI Status: {isConnected ? 'ONLINE' : 'OFFLINE'}
             </StatusText>
-            <p style={{ color: '#00FFFF', marginTop: '10px' }}>
-                System Core Activated. Click the mic button to speak your command.
-            </p>
+            
+            <ChatInterface /> {/* <--- CHAT WINDOW ADDED HERE --- */}
+            
             <VoiceButton />
-            {/* TODO: In Phase 5, this will be replaced by the full ChatInterface and Widgets
-            */}
+            {/* If TaskPanel was fully built, it would go here */}
         </div>
     );
 };
