@@ -31,7 +31,7 @@ mongoose.connect(process.env.MONGO_URI)
 // --- 3. Socket.IO Setup with Auth Middleware ---
 const io = new Server(server, {
     cors: {
-        origin: "http://localhost:5000", // Adjust port if needed
+        origin: "https://arc-ai-project.vercel.app", // Adjust port if needed
         methods: ["GET", "POST"]
     }
 });
