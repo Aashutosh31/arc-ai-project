@@ -1,10 +1,8 @@
-// server/services/AIService.js (CLEANED FINAL CODE)
+// server/services/AIService.js (FINAL CODE - Conversational Prompt Fixed)
 
 const axios = require('axios');
 const AIMemory = require('../models/AIMemory');
-// Removed: const https = require('https'); 
 
-// --- Module-level constants ---
 const API_KEY = process.env.MISTRAL_API_KEY; 
 const MODEL = process.env.MISTRAL_MODEL || 'mistral-tiny'; 
 const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions'; 
@@ -32,23 +30,27 @@ const processCommand = async (command, userId) => {
         const history = memoryDoc.conversationHistory.slice(-5);
         const contextString = history.map(m => `${m.role}: ${m.content}`).join('\n');
         
-        const systemPrompt = `You are ARC-AI, a professional, futuristic AI assistant. Analyze the user command and context. Respond ONLY with a single JSON object matching this schema: ${structuredIntentInstruction}. Always include a 'text_response' field. Context: ${contextString}`;
+        // --- CRITICAL PROMPT ENGINEERING FIX ---
+        const systemPrompt = `You are ARC-AI, a professional, futuristic AI assistant. Your primary goal is to be conversational, helpful, and concise. Only use the INTENT 'TASK_EXECUTION' or 'DATA_QUERY' if the user explicitly asks you to schedule, remind, message, or get external data (like weather, news, facts). For greetings, small talk, or general philosophy, use the INTENT 'CONVERSATION' and set the ACTION to 'answer_question'.
+
+        Respond ONLY with a single JSON object matching this schema: ${structuredIntentInstruction}. Always include a 'text_response' field.
+        
+        Context: ${contextString}`;
+        // ----------------------------------------
 
         const messages = [
             { role: "system", content: systemPrompt },
             { role: "user", content: command }
         ];
 
-        // 2. Make API Request using Axios (Simplified Config)
+        // 2. Make API Request using Axios (with Timeout)
         const response = await axios.post(MISTRAL_ENDPOINT, {
             model: MODEL,
             messages: messages,
             temperature: 0.2,
             response_format: { type: "json_object" } 
         }, {
-            // --- CRITICAL AXIOS CONFIGURATION ---
             timeout: 15000, 
-            // Removed: httpsAgent is no longer needed
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${API_KEY}` 
@@ -66,14 +68,13 @@ const processCommand = async (command, userId) => {
         return aiResponse;
 
     } catch (error) {
-        // Log the full error message for debugging
         const message = error.code === 'ECONNABORTED' ? 'Request Timeout Exceeded (Network/Firewall Block)' : error.message;
         console.error(`🔴 AI Error: ${message}`);
         
         return {
           intent: 'ERROR',
           action: 'api_failure',
-          text_response: `The AI brain encountered a critical network error: ${message}.`,
+          text_response: `I'm encountering a critical system error: ${message}.`,
           args: { error: message }
         };
     }
