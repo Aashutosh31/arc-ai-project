@@ -23,6 +23,33 @@ const MessageContainer = styled.div`
     padding: 15px;
     margin-top: 20px;
     box-shadow: 0 0 30px rgba(0, 255, 255, 0.3);
+
+    /* Custom Scrollbar Styling */
+    &::-webkit-scrollbar {
+        width: 10px;
+    }
+
+    &::-webkit-scrollbar-track {
+        background: rgba(10, 10, 30, 0.9);
+        border-radius: 10px;
+        margin: 15px 0;
+    }
+
+    &::-webkit-scrollbar-thumb {
+        background: linear-gradient(180deg, #00FFFF, #0077CC);
+        border-radius: 10px;
+        border: 2px solid rgba(10, 10, 30, 0.9);
+        transition: all 0.3s ease;
+    }
+
+    &::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(180deg, #00FFFF, #00BFFF);
+        box-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+    }
+
+    /* Firefox Scrollbar */
+    scrollbar-width: thin;
+    scrollbar-color: #00FFFF rgba(10, 10, 30, 0.9);
 `;
 const MessageBubble = styled.div`
     margin: 8px 0;
