@@ -1,4 +1,4 @@
-// server/index.js (COMPLETE CODE - Focus on Socket.IO)
+// server/index.js (COMPLETE CODE - FINAL AUTH FIX)
 
 // Core Dependencies
 require('dotenv').config();
@@ -13,7 +13,7 @@ const jwt = require('jsonwebtoken');
 const { protect } = require('./middleware/authMiddleware'); // For REST routes
 const authRoutes = require('./routes/auth');
 const { processCommand } = require('./services/AIService'); // AI Core
-const { executeTask } = require('./services/TaskExecutor'); // Placeholder for Phase 5.1
+const { executeTask } = require('./services/TaskExecutor'); 
 
 const app = express();
 const server = http.createServer(app); 
@@ -31,7 +31,8 @@ mongoose.connect(process.env.MONGO_URI)
 // --- 3. Socket.IO Setup with Auth Middleware ---
 const io = new Server(server, {
     cors: {
-        origin: "https://arc-ai-project.vercel.app", // Adjust port if needed
+        // Adjust origin based on your deployed web app and local client (if needed)
+        origin: ["https://arc-ai-project.vercel.app", "http://localhost:19000", "http://10.0.2.2:19000"], 
         methods: ["GET", "POST"]
     }
 });
@@ -40,18 +41,30 @@ io.use((socket, next) => {
     const token = socket.handshake.auth.token;
     const userId = socket.handshake.auth.userId;
 
+    // --- CRITICAL FIX: MOBILE APP STATIC TOKEN BYPASS ---
+    const MOCK_USER_ID = '68ed56d7602c9b4cea260704'; // King Aashutosh's registered ID
+
+    if (token === `STATIC_MOBILE_TOKEN_FOR_${MOCK_USER_ID}` && userId === MOCK_USER_ID) {
+        // If the static token matches the expected pattern, trust the mobile client.
+        socket.userId = MOCK_USER_ID; 
+        console.log('✅ Socket authenticated via STATIC MOBILE BYPASS.');
+        return next();
+    }
+    // ----------------------------------------------------
+
     if (!token || !userId) {
         console.log('🚫 Socket rejected: Missing auth credentials.');
         return next(new Error('Authentication error: Missing token or userId'));
     }
 
     try {
+        // Original JWT verification logic for web app
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         socket.userId = decoded.id; 
-        console.log(`✅ Socket authenticated for user: ${socket.userId}`);
+        console.log(`✅ Socket authenticated for web user: ${socket.userId}`);
         next();
     } catch (err) {
-        console.log('🚫 Socket rejected: Token verification failed.');
+        console.log('🚫 Socket rejected: Token verification failed (Invalid token).');
         return next(new Error('Authentication error: Invalid token'));
     }
 });
@@ -63,24 +76,20 @@ io.on('connection', (socket) => {
     // Listener for the final transcribed command
     socket.on('ai:stt:final', async (data) => {
         const { command } = data; 
-        const userId = socket.userId; // Get user ID from authenticated socket
+        const userId = socket.userId; 
 
         console.log(`🧠 Processing command from user ${userId}: "${command}"`);
 
-        // 1. Get structured intent from the AI model
         const aiResponse = await processCommand(command, userId);
 
         if (aiResponse) {
             let finalResponseText = aiResponse.text_response;
 
-            // 2. Trigger Task Execution if needed (Phase 5.1)
-            if (aiResponse.intent === 'TASK_EXECUTION') {
+            if (aiResponse.intent === 'TASK_EXECUTION' || aiResponse.intent === 'DATA_QUERY') {
                 const taskResult = await executeTask(aiResponse, userId);
-                // Prepend task status to the user's response
                 finalResponseText = `[Task Status: ${taskResult}] ${finalResponseText}`;
             }
 
-            // 3. Send the final response back to the client
             socket.emit('ai:tts:response:chunk', {
                 chunk: finalResponseText,
                 isFinal: true, 
