@@ -4,7 +4,7 @@ const axios = require('axios');
 const AIMemory = require('../models/AIMemory');
 
 const API_KEY = process.env.MISTRAL_API_KEY; 
-const MODEL = process.env.MISTRAL_MODEL || 'mistral-tiny'; 
+const MODEL = process.env.MISTRAL_MODEL; 
 const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions'; 
 
 // Define the structure for task execution (CRITICAL for "Jarvis")
