@@ -32,7 +32,7 @@ mongoose.connect(process.env.MONGO_URI)
 const io = new Server(server, {
     cors: {
         // Adjust origin based on your deployed web app and local client (if needed)
-        origin: ["https://www.aashutoshbairagi.me/", "https://arc-ai-project.vercel.app","https://arc-ai-project-git-master-aashutosh31s-projects.vercel.app/", "http://localhost:19000", "http://10.0.2.2:19000"], 
+        origin: ["https://www.aashutoshbairagi.me","https://aashutoshbairagi.me","https://arc-ai-project.vercel.app","http://localhost:3000","http://localhost:5173"], 
         methods: ["GET", "POST"]
     }
 });
