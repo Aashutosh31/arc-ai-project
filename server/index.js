@@ -6,6 +6,8 @@ const express = require('express');
 const mongoose = require('mongoose');
 const http = require('http'); 
 const { Server } = require('socket.io'); 
+const {marked} = require('marked');
+const emojiRegex = require('emoji-regex');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 
@@ -22,6 +24,21 @@ const frontendOrigins = (process.env.FRONTEND_URL || '')
     .split(',')
     .map(origin => origin.trim())
     .filter(Boolean);
+
+// Enhanced function to prepare text for speech synthesis, removing emojis and normalizing spacing
+function prepareTextForSpeech(markdown) {
+  // Convert markdown → plain text
+  const html = marked.parse(markdown);
+  let text = html.replace(/<[^>]+>/g, ' ');
+
+  // Remove emojis completely
+  text = text.replace(emojiRegex(), '');
+
+  // Normalize spacing
+  return text
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 // --- 1. Middleware Setup ---
 app.use(cors({
@@ -91,7 +108,8 @@ io.on('connection', (socket) => {
         const aiResponse = await processCommand(command, userId);
 
         if (aiResponse) {
-            let finalResponseText = aiResponse.text_response;
+            const rawText = aiResponse.text_response;        // for UI
+            const speechText = prepareTextForSpeech(rawText); // for TTS
 
             if (aiResponse.intent === 'TASK_EXECUTION' || aiResponse.intent === 'DATA_QUERY') {
                 const taskResult = await executeTask(aiResponse, userId);
@@ -99,7 +117,8 @@ io.on('connection', (socket) => {
             }
 
             socket.emit('ai:tts:response:chunk', {
-                chunk: finalResponseText,
+                chunk: speechText,
+                displayText: rawText,
                 isFinal: true, 
                 intent: aiResponse
             });
