@@ -20,10 +20,8 @@ const MicButton = styled.button`
   font-size: 26px;
   cursor: pointer;
   transition: all 0.25s ease-in-out;
-  position: fixed;
-  bottom: 50px;
-  right: 50px;
-  z-index: 1000;
+  position: relative;
+  z-index: 1;
 
   ${props =>
     props.$listening &&
@@ -41,8 +39,6 @@ const MicButton = styled.button`
     width: 64px;
     height: 64px;
     font-size: 22px;
-    bottom: 24px;
-    right: 24px;
     border-width: 3px;
   }
 
@@ -50,8 +46,6 @@ const MicButton = styled.button`
     width: 56px;
     height: 56px;
     font-size: 20px;
-    bottom: 18px;
-    right: 18px;
   }
 `;
 
