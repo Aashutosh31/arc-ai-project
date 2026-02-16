@@ -10,17 +10,25 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 
 // Import services and middleware
-const { protect } = require('./middleware/authMiddleware'); // For REST routes
-const authRoutes = require('./routes/auth');
-const { processCommand } = require('./services/AIService'); // AI Core
-const { executeTask } = require('./services/TaskExecutor'); 
+const { protect } = require('./middleware/authMiddleware.js'); // For REST routes
+const authRoutes = require('./routes/auth.js');
+const { processCommand } = require('./services/AIService.js'); // AI Core
+const { executeTask } = require('./services/TaskExecutor.js'); 
 
 const app = express();
 const server = http.createServer(app); 
 const PORT = process.env.PORT || 5000;
+const frontendOrigins = (process.env.FRONTEND_URL || '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
 
 // --- 1. Middleware Setup ---
-app.use(cors());
+app.use(cors({
+    origin: frontendOrigins.length ? frontendOrigins : false,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    credentials: true
+}));
 app.use(express.json()); 
 
 // --- 2. Database Connection ---
@@ -31,9 +39,9 @@ mongoose.connect(process.env.MONGO_URI)
 // --- 3. Socket.IO Setup with Auth Middleware ---
 const io = new Server(server, {
     cors: {
-        // Adjust origin based on your deployed web app and local client (if needed)
-        origin: ["https://www.aashutoshbairagi.me","https://aashutoshbairagi.me","https://arc-ai-project.vercel.app","http://localhost:3000","http://localhost:5173"], 
-        methods: ["GET", "POST"]
+        origin: frontendOrigins.length ? frontendOrigins : false,
+        methods: ["GET", "POST"],
+        credentials: true
     }
 });
 
