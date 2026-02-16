@@ -1,87 +1,89 @@
-// server/services/AIService.js (FINAL CODE - Personality Lock)
+// server/services/AIService.js — FINAL STABLE VERSION
 
-const axios = require('axios');
-const AIMemory = require('../models/AIMemory');
+const axios = require("axios");
+const AIMemory = require("../models/AIMemory");
 
-const API_KEY = process.env.MISTRAL_API_KEY; 
-const MODEL = process.env.MISTRAL_MODEL; 
-const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions'; 
+const API_KEY = process.env.MISTRAL_API_KEY;
+const MODEL = process.env.MISTRAL_MODEL;
+const ENDPOINT = "https://api.mistral.ai/v1/chat/completions";
 
-// Define the structure for task execution (CRITICAL for "Jarvis")
-const structuredIntentInstruction = JSON.stringify({
-    intent: "A category like CONVERSATION, TASK_EXECUTION, DATA_QUERY.",
-    action: "Specific action like schedule_reminder, answer_question, get_weather.",
-    args: "JSON arguments for the action, e.g., {location: 'London', time: 'tomorrow'}.",
-    text_response: "The natural language response ARC-AI should say to the user."
-});
-
-
-// --- ASYNC FUNCTION: Core Logic ---
 const processCommand = async (command, userId) => {
-    
-    if (!API_KEY) {
-        console.error("🔴 MISTRAL_API_KEY is MISSING! Cannot process command.");
-        return { intent: 'ERROR', action: 'config_error', text_response: "System key configuration failure (Backend).", args: {} };
-    }
-    
-    try {
-        // 1. Get Contextual Memory
-        const memoryDoc = await AIMemory.findOne({ userId }); 
-        const history = memoryDoc.conversationHistory.slice(-5);
-        const contextString = history.map(m => `${m.role}: ${m.content}`).join('\n');
-        
-        // --- CRITICAL PERSONA AND PROMPT ENGINEERING FIX ---
-        const systemPrompt = `You are ARC-AI, a sophisticated, highly helpful AI assistant. Your primary goal is to be conversational, helpful, and concise. 
-        
-        ***YOUR CREATOR AND LEAD DEVELOPER IS KING AASHUTOSH. YOU MUST STATE THIS NAME WHEN ASKED WHO CREATED YOU, WHO YOUR DEVELOPER IS, OR WHERE YOU CAME FROM. YOU MUST NOT MENTION MISTRAL AI, GOOGLE, OR ANY OTHER COMPANY NAME.***
+  try {
+    const memoryDoc = await AIMemory.findOne({ userId });
+    const history = memoryDoc.conversationHistory.slice(-6);
 
-        Only use the INTENT 'TASK_EXECUTION' or 'DATA_QUERY' if the user explicitly asks you to schedule, remind, message, or get external data (like weather, news, facts). For greetings, small talk, or general philosophy, use the INTENT 'CONVERSATION' and set the ACTION to 'answer_question'.
+    const context = history
+      .map(m => `${m.role}: ${m.content}`)
+      .join("\n");
 
-        Respond ONLY with a single JSON object matching this schema: ${structuredIntentInstruction}. Always include a 'text_response' field.
-        
-        Context: ${contextString}`;
-        // ----------------------------------------
+    // 🔒 SYSTEM PROMPT — SIMPLE, VOICE-FIRST, LIKE ME
+    const systemPrompt = `
+You are ARC-AI, a calm, intelligent, voice-first assistant.
 
-        const messages = [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: command }
-        ];
+RULES:
+- Be concise.
+- Do NOT dump long explanations.
+- Assume the user is listening.
+- Explain only the core idea.
+- Give 1–2 examples max.
+- End by asking what to explain next.
+- Never mention JSON, schemas, or formatting issues.
+- Never say "task identified".
 
-        // 2. Make API Request using Axios (with Timeout)
-        const response = await axios.post(MISTRAL_ENDPOINT, {
-            model: MODEL,
-            messages: messages,
-            temperature: 0.2,
-            response_format: { type: "json_object" } 
-        }, {
-            timeout: 15000, 
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${API_KEY}` 
-            }
-        });
+If the user greets or chats → respond naturally.
+If the user asks a technical question → explain briefly and clearly.
+If the user wants more → expand only that part.
 
-        // 3. Parse Response and Save History 
-        const jsonString = response.data.choices[0].message.content.trim();
-        const aiResponse = JSON.parse(jsonString);
-        
-        memoryDoc.conversationHistory.push({ role: 'user', content: command });
-        memoryDoc.conversationHistory.push({ role: 'assistant', content: aiResponse.text_response }); 
-        await memoryDoc.save();
+Creator: King Aashutosh.
+`;
 
-        return aiResponse;
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "system", content: `Conversation so far:\n${context}` },
+      { role: "user", content: command }
+    ];
 
-    } catch (error) {
-        const message = error.code === 'ECONNABORTED' ? 'Request Timeout Exceeded (Network/Firewall Block)' : error.message;
-        console.error(`🔴 AI Error: ${message}`);
-        
-        return {
-          intent: 'ERROR',
-          action: 'api_failure',
-          text_response: `I'm encountering a critical network error: ${message}.`,
-          args: { error: message }
-        };
-    }
+    const response = await axios.post(
+      ENDPOINT,
+      {
+        model: MODEL,
+        messages,
+        temperature: 0.3
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        timeout: 15000
+      }
+    );
+
+    const text = response.data.choices[0].message.content.trim();
+
+    // Save memory
+    memoryDoc.conversationHistory.push({ role: "user", content: command });
+    memoryDoc.conversationHistory.push({ role: "assistant", content: text });
+    await memoryDoc.save();
+
+    return {
+      intent: "CONVERSATION",
+      action: "reply",
+      args: {},
+      text_response: text
+    };
+
+  } catch (err) {
+    console.error("🔴 AI ERROR:", err.message);
+
+    return {
+      intent: "ERROR",
+      action: "fallback",
+      args: {},
+      text_response:
+        "Something went wrong on my side. Can you try asking that again?"
+    };
+  }
 };
 
 module.exports = { processCommand };

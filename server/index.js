@@ -31,6 +31,9 @@ function prepareTextForSpeech(markdown) {
   const html = marked.parse(markdown);
   let text = html.replace(/<[^>]+>/g, ' ');
 
+  // Decode HTML entities like &#39; 
+  text = text.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+
   // Remove emojis completely
   text = text.replace(emojiRegex(), '');
 
