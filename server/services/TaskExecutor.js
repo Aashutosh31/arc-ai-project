@@ -1,63 +1,35 @@
-// server/services/TaskExecutor.js (FINAL CODE - Fixed Intent Logic)
-const Task = require('../models/Task');
-const cron = require('node-cron');
+const toolRegistry = require('../tools/index');
 
-// A simple dummy function to "execute" a reminder (free tier compliant)
-const mockReminderAlert = (title, userId) => {
-    console.log(`\n🔔 ARC-AI ALERT: Task Alert triggered for User ${userId}: ${title}`);
-    console.log(`🔔 Action Executed at: ${new Date().toLocaleTimeString()}`);
-};
-
-const executeTask = async (intent, userId) => {
-    const { action, args, intent: intentType } = intent; 
-    let resultMessage = '';
-
-    // --- NEW: Immediately return if the AI only wants to chat ---
-    // If the intent is CONVERSATION, we skip all execution logic.
-    if (intentType === 'CONVERSATION') {
-        return `INFO: AI handled conversational query.`;
-    }
-    // -------------------------------------------------------------
-    
-    // Logic runs ONLY for TASK_EXECUTION or DATA_QUERY
-    if (action === 'schedule_reminder') {
-        const { title, time } = args;
-        if (!title || !time) {
-            return "Error: Reminder details incomplete.";
-        }
+/**
+ * TaskExecutor now acts as a secure bridge between the AI logic
+ * and the Modular Tool Registry. 
+ */
+class TaskExecutor {
+    async executeTool(toolName, args, userId) {
+        console.log(`[TaskExecutor] Routing execution to tool: ${toolName}`, args);
         
         try {
-            const task = await Task.create({
-                userId, actionType: 'REMINDER', title, details: `Scheduled for time: ${time}`, scheduledTime: new Date(time)
-            });
+            const tool = toolRegistry.getTool(toolName);
+            
+            if (!tool) {
+                console.warn(`[TaskExecutor] AI requested an unknown tool: ${toolName}`);
+                return { success: false, error: `Tool ${toolName} not found in system registry.` };
+            }
 
-            setTimeout(() => {
-                mockReminderAlert(title, userId);
-            }, 5000); 
-
-            resultMessage = `SUCCESS: Reminder titled "${title}" has been scheduled for future execution.`;
-
+            // Package the context (e.g., who is requesting this)
+            const context = { userId };
+            
+            // Execute the tool's modular logic
+            const result = await tool.execute(args, context);
+            
+            console.log(`[TaskExecutor] Tool ${toolName} execution complete.`);
+            return result;
+            
         } catch (error) {
-            console.error('Task Scheduling Error:', error);
-            resultMessage = `FAILURE: Could not schedule task due to database error.`;
+            console.error(`[TaskExecutor] Critical failure in tool ${toolName}:`, error);
+            return { success: false, error: error.message };
         }
-
-    } else if (action === 'get_weather') {
-        // Since the AI provides the answer directly in its response (like in your image),
-        // we SIMULATE fetching data here to confirm the action occurred.
-        const location = args.location || 'current location';
-        console.log(`\n☁️ ARC-AI MOCK ACTION: Fetching weather data for ${location}.`);
-        resultMessage = `SUCCESS: External data for ${location} fetched and integrated into AI response.`;
-        
-    } else if (action === 'send_message' || action === 'open_app') {
-        // Mocking other system/external API actions
-        console.log(`\n🖥️ ARC-AI MOCK ACTION: Executing ${action} to ${JSON.stringify(args)}`);
-        resultMessage = `SUCCESS: Simulated ${action} action. (Free-tier compliant).`;
-    } else {
-        resultMessage = `ERROR: Task action "${action}" not recognized.`;
     }
+}
 
-    return resultMessage;
-};
-
-module.exports = { executeTask };
+module.exports = new TaskExecutor();

@@ -123,7 +123,7 @@ io.on('connection', (socket) => {
                 chunk: speechText,
                 displayText: rawText,
                 isFinal: true, 
-                intent: aiResponse
+                intent: aiResponse.intent
             });
         }
     });
