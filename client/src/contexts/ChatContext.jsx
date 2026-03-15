@@ -1,30 +1,61 @@
-// client/src/contexts/ChatContext.js (CORRECTED CODE)
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useState, useContext } from 'react';
 
-const ChatContext = createContext(null); // Use null as default value for safety
+const ChatContext = createContext();
 
-export const useChat = () => {
-    const context = useContext(ChatContext);
-    if (context === undefined) {
-        // This helpful message appears if the hook is used outside the provider
-        throw new Error('useChat must be used within a ChatProvider');
-    }
-    return context;
-};
+export const useChat = () => useContext(ChatContext);
 
 export const ChatProvider = ({ children }) => {
-    const [history, setHistory] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-    const addMessage = (role, content) => {
-        setHistory(prev => [...prev, { role, content, timestamp: new Date() }]);
-    };
+  // Add a standard, complete message
+  const addMessage = (message) => {
+    setMessages((prev) => [...prev, message]);
+  };
 
-    // --- CRITICAL: Ensure all desired values are passed in the value prop ---
-    const contextValue = { history, addMessage, setHistory }; 
+  // Appends a streaming chunk to the current AI message
+  const appendBotChunk = (chunk) => {
+    setMessages((prev) => {
+      const lastMsg = prev[prev.length - 1];
+      
+      // If the last message is already a streaming AI message, append to it
+      if (lastMsg && lastMsg.sender === 'ai' && lastMsg.isStreaming) {
+        const updated = [...prev];
+        updated[updated.length - 1] = { 
+            ...lastMsg, 
+            text: lastMsg.text + chunk 
+        };
+        return updated;
+      } else {
+        // Otherwise, create the first chunk of a new AI message
+        return [...prev, { sender: 'ai', text: chunk, isStreaming: true }];
+      }
+    });
+  };
 
-    return (
-        <ChatContext.Provider value={contextValue}>
-            {children}
-        </ChatContext.Provider>
-    );
+  // Marks the stream as complete
+  const finishBotStream = () => {
+    setMessages((prev) => {
+      const updated = [...prev];
+      const lastMsg = updated[updated.length - 1];
+      if (lastMsg && lastMsg.sender === 'ai') {
+        lastMsg.isStreaming = false;
+      }
+      return updated;
+    });
+    setIsProcessing(false);
+  };
+
+  return (
+    <ChatContext.Provider value={{ 
+        messages, 
+        addMessage, 
+        appendBotChunk, 
+        finishBotStream,
+        isProcessing, 
+        setIsProcessing 
+    }}>
+      {children}
+    </ChatContext.Provider>
+  );
 };

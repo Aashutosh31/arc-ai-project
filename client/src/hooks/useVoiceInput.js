@@ -1,19 +1,17 @@
-// client/src/hooks/useVoiceInput.js (COMPLETE CODE with fixes for lag and errors)
 import { useState, useRef, useEffect } from 'react';
 import { useSocket } from './useSocket';
-import { useChat } from '../contexts/ChatContext.jsx'; 
 
 // Get the browser-native speech recognition object
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 export const useVoiceInput = () => {
-    const { socket, isConnected } = useSocket();
-    const { addMessage } = useChat();
+    // 🚀 FIX 2: We extract 'sendCommand' to display your voice text in the UI
+    const { socket, isConnected, sendCommand } = useSocket();
     
     const [isListening, setIsListening] = useState(false);
     const [transcript, setTranscript] = useState('');
     const recognitionRef = useRef(null);
-    const finalCommandRef = useRef(''); // CRITICAL FIX for command -1 bug
+    const finalCommandRef = useRef(''); 
 
     const startListening = () => {
         if (!SpeechRecognition) {
@@ -25,9 +23,8 @@ export const useVoiceInput = () => {
              return;
         }
 
-        if (isListening) return; // Prevent double start
+        if (isListening) return; 
 
-        // 1. Initialization and Setup
         const recognition = new SpeechRecognition();
         recognition.continuous = false; 
         recognition.interimResults = true; 
@@ -36,63 +33,34 @@ export const useVoiceInput = () => {
         recognition.onstart = () => {
             setIsListening(true);
             setTranscript('');
-            finalCommandRef.current = ''; // Reset the ref on start
-            console.log('🎙️ ARC-AI: Listening...');
+            finalCommandRef.current = ''; 
         };
 
-        // 2. Real-Time Fragment Handling (ai:stt:fragment)
         recognition.onresult = (event) => {
             let interimTranscript = '';
             let finalTranscript = '';
 
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                const transcription = event.results[i][0].transcript;
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
                 if (event.results[i].isFinal) {
-                    // Accumulate final text (in case of multiple short phrases)
-                    finalTranscript += transcription;
+                    finalTranscript += event.results[i][0].transcript;
                 } else {
-                    interimTranscript += transcription;
+                    interimTranscript += event.results[i][0].transcript;
                 }
             }
 
-            const currentText = finalTranscript || interimTranscript;
-            setTranscript(currentText);
+            setTranscript(finalTranscript || interimTranscript);
 
-            // CRITICAL FIX: Update the ref with the DEFINITIVE final command
             if (finalTranscript) {
-                finalCommandRef.current = finalTranscript;
-            }
-
-            // Stream the current text (fragment or final) for live UI feedback
-            if (socket) {
-                socket.emit('ai:stt:fragment', { 
-                    text: currentText, 
-                    userId: localStorage.getItem('userId') 
-                });
-            }
-        };
-
-        // 3. Command Finalization (ai:stt:final)
-        recognition.onend = () => {
-            setIsListening(false);
-            const definitiveCommand = finalCommandRef.current.trim(); 
-
-            if (definitiveCommand.length > 0) {
-                console.log(`🧠 ARC-AI: Sending definitive command: "${definitiveCommand}"`);
+                const definitiveCommand = finalTranscript.trim();
+                finalCommandRef.current = definitiveCommand; 
                 
-                // 1. ADD USER MESSAGE TO HISTORY
-                addMessage('user', definitiveCommand); 
-                
-                // 2. Send final command to the server 
-                if (socket) {
-                    socket.emit('ai:stt:final', {
-                        command: definitiveCommand, 
-                        userId: localStorage.getItem('userId'),
-                    });
+                // 🚀 FIX 2: Use sendCommand instead of a raw socket.emit!
+                if (sendCommand && definitiveCommand) {
+                    sendCommand(definitiveCommand);
                 }
+                
+                setTranscript('');
             }
-             // Reset the displayed transcript after processing
-             setTranscript('');
         };
 
         recognition.onerror = (event) => {
@@ -100,11 +68,14 @@ export const useVoiceInput = () => {
             console.error('STT Error:', event.error);
             setTranscript(`Error: ${event.error}`);
 
-            // --- GRACEFUL RESTART LOGIC (Step 4.18 Fix) ---
             if (event.error === 'network' || event.error === 'aborted') {
                  console.log("Attempting graceful restart of STT...");
                  setTimeout(startListening, 500); 
             }
+        };
+
+        recognition.onend = () => {
+            setIsListening(false);
         };
 
         recognitionRef.current = recognition;
@@ -117,7 +88,6 @@ export const useVoiceInput = () => {
         }
     };
     
-    // Cleanup on unmount
     useEffect(() => {
         return () => {
             if (recognitionRef.current) {
@@ -128,7 +98,7 @@ export const useVoiceInput = () => {
 
     return {
         isListening,
-        transcript, // This is what the UI displays while speaking
+        transcript, 
         startListening,
         stopListening,
     };

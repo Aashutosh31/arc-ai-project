@@ -1,49 +1,55 @@
-// client/src/hooks/useTextToSpeech.js (COMPLETE CODE)
-import { useState, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
 
-// This custom hook wraps the browser's native, free SpeechSynthesis API.
-const useTextToSpeech = () => {
-    const [isSpeaking, setIsSpeaking] = useState(false);
+export const useTextToSpeech = () => {
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const sentenceBuffer = useRef(''); // Holds words until a sentence is formed
+
+  const speak = useCallback((text) => {
+    if (!('speechSynthesis' in window) || !text) return;
     
-    const synth = window.speechSynthesis;
-
-    useEffect(() => {
-        if (!synth) {
-            console.warn('Text-to-Speech is not supported in this browser.');
-        }
-    }, [synth]);
-
-    const speak = (text) => {
-        if (!synth || !text) return;
-
-        // Stop any current speech
-        if (synth.speaking) {
-            synth.cancel();
-        }
-
-        const utterance = new SpeechSynthesisUtterance(text);
-        
-        // Optional: Customize voice/rate for the futuristic ARC-AI feel
-        utterance.rate = 1.05; // Slightly faster for an AI effect
-
-        utterance.onstart = () => setIsSpeaking(true);
-        utterance.onend = () => setIsSpeaking(false);
-        utterance.onerror = (event) => {
-            console.error('TTS Error:', event.error);
-            setIsSpeaking(false);
-        };
-
-        synth.speak(utterance);
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    // Optional: Make it sound more like Jarvis (faster, deeper)
+    utterance.rate = 1.1; 
+    utterance.pitch = 0.9;
+    
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => {
+      // Only set to false if the queue is entirely empty
+      if (window.speechSynthesis.pending === false) {
+        setIsSpeaking(false);
+      }
     };
+    
+    window.speechSynthesis.speak(utterance);
+  }, []);
 
-    const stop = () => {
-        if (synth.speaking) {
-            synth.cancel();
-            setIsSpeaking(false);
+  // NEW: Processes incoming chunks for real-time speech
+  const processStreamChunk = useCallback((chunk, isFinal) => {
+    if (chunk) {
+        sentenceBuffer.current += chunk;
+    }
+
+    // Regex to detect end of sentences (., !, ?, or newlines)
+    const sentenceEndRegex = /[.!?\n]/;
+
+    if (sentenceEndRegex.test(chunk) || isFinal) {
+        const sentenceToSpeak = sentenceBuffer.current.trim();
+        if (sentenceToSpeak) {
+            speak(sentenceToSpeak);
         }
-    };
+        // Clear the buffer for the next sentence
+        sentenceBuffer.current = '';
+    }
+  }, [speak]);
 
-    return { speak, stop, isSpeaking };
+  const stop = useCallback(() => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      sentenceBuffer.current = ''; // clear buffer on stop
+      setIsSpeaking(false);
+    }
+  }, []);
+
+  return { isSpeaking, speak, processStreamChunk, stop };
 };
-
-export default useTextToSpeech;
