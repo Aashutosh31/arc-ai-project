@@ -1,10 +1,7 @@
-import React, { useEffect, useRef, useContext } from 'react';
+import React, { useEffect, useRef } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { useChat } from '../contexts/ChatContext';
-import { SocketContext } from '../contexts/SocketContext';
-import { useTextToSpeech } from '../hooks/useTextToSpeech';
-
-// --- Styled Components & Animations ---
+import { useSocket } from '../hooks/useSocket';
 
 const Waveform = keyframes`
   0%, 100% { height: 10px; transform: translateY(0); }
@@ -31,7 +28,6 @@ const MessageContainer = styled.div`
   min-height: 260px;
   max-height: 100%;
 
-  /* Custom Scrollbar */
   &::-webkit-scrollbar { width: 8px; }
   &::-webkit-scrollbar-track { background: rgba(10, 10, 30, 0.3); }
   &::-webkit-scrollbar-thumb { background: #00ffff; border-radius: 4px; }
@@ -64,7 +60,6 @@ const WaveformBars = styled.div`
     border-radius: 2px;
     animation: ${Waveform} 1s ease-in-out infinite;
   }
-
   div:nth-child(2) { animation-delay: 0.1s; }
   div:nth-child(3) { animation-delay: 0.2s; }
   div:nth-child(4) { animation-delay: 0.3s; }
@@ -88,51 +83,57 @@ const TypingIndicator = styled.div`
   span:nth-child(2) { animation-delay: -0.16s; }
 `;
 
-// --- React Component ---
+const StopButton = styled.button`
+  align-self: center;
+  background: rgba(255, 0, 0, 0.15);
+  border: 1px solid rgba(255, 0, 0, 0.4);
+  color: #ff4d4d;
+  padding: 8px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  margin-top: 10px;
+  font-size: 14px;
+  display: inline-block;
+  transition: all 0.2s;
+
+  &:hover {
+    background: rgba(255, 0, 0, 0.3);
+    color: #fff;
+  }
+`;
 
 const ChatInterface = () => {
-  const { messages, isProcessing, appendBotChunk, finishBotStream, addMessage } = useChat();
-  const { socket } = useContext(SocketContext) || {};
-  const { processStreamChunk } = useTextToSpeech();
+  const { messages, isProcessing, isSpeaking } = useChat();
+  const { interruptStream } = useSocket(); 
   const chatEndRef = useRef(null);
 
+  const isBusy = isProcessing || isSpeaking;
+
+  // 🚀 NEW: Global Spacebar Shortcut Listener
   useEffect(() => {
-    if (!socket) {
-      return undefined;
-    }
-
-    const handleChunk = (data) => {
-      const { chunk, displayText, isFinal } = data;
-      const nextChunk = displayText || chunk;
-
-      if (!isFinal) {
-        appendBotChunk(nextChunk);
-        processStreamChunk(nextChunk, false);
+    const handleKeyDown = (event) => {
+      // Ignore if the user is typing in a text input field somewhere else
+      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
         return;
       }
 
-      finishBotStream();
-      processStreamChunk('', true);
+      // If the AI is busy and the user presses Space, stop it!
+      if (event.code === 'Space' && isBusy) {
+        event.preventDefault(); // Prevents the browser from scrolling down the page
+        interruptStream();
+      }
     };
 
-    const handleError = (errorMsg) => {
-      finishBotStream();
-      addMessage({ sender: 'ai', text: `[Error]: ${errorMsg}` });
-    };
+    window.addEventListener('keydown', handleKeyDown);
+    
+    // Cleanup listener when component unmounts
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isBusy, interruptStream]);
 
-    socket.on('ai:tts:response:chunk', handleChunk);
-    socket.on('bot_error', handleError);
-
-    return () => {
-      socket.off('ai:tts:response:chunk', handleChunk);
-      socket.off('bot_error', handleError);
-    };
-  }, [socket, appendBotChunk, processStreamChunk, finishBotStream, addMessage]);
-
-  // Auto-scroll to bottom when messages update
+  // Auto-scroll when messages update or states change
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, isProcessing, isSpeaking]);
 
   return (
     <MessageContainer>
@@ -141,11 +142,8 @@ const ChatInterface = () => {
           {msg.sender === 'ai' && (
             <span style={{ fontWeight: 'bold' }}>ARC-AI: </span>
           )}
-          
           {msg.text}
-
-          {/* Show Waveform indicator if this specific AI message is currently streaming */}
-          {msg.sender === 'ai' && msg.isStreaming && index === messages.length - 1 && (
+          {msg.sender === 'ai' && (msg.isStreaming || (isSpeaking && index === messages.length - 1)) && (
             <WaveformBars>
               <div></div><div></div><div></div><div></div><div></div>
             </WaveformBars>
@@ -153,13 +151,18 @@ const ChatInterface = () => {
         </MessageBubble>
       ))}
 
-      {/* Show a general typing indicator while waiting for the AI's first chunk to arrive */}
       {isProcessing && (messages.length === 0 || messages[messages.length - 1].sender !== 'ai') && (
         <MessageBubble $role="assistant">
           <TypingIndicator>
             <span></span><span></span><span></span>
           </TypingIndicator>
         </MessageBubble>
+      )}
+
+      {isBusy && (
+        <StopButton onClick={interruptStream}>
+          ⏹ {isSpeaking ? "Stop Speaking" : "Stop Generating"} (Press Space)
+        </StopButton>
       )}
 
       <div ref={chatEndRef} />

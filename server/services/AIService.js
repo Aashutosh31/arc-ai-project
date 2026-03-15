@@ -14,6 +14,17 @@ class AIService {
     // Accept the socket as a parameter to emit data instantly
     async processQuery(userId, text, socket = null) {
         try {
+            // 🚀 NEW: Get the absolute real-time date and time
+            const now = new Date();
+            const currentDateString = now.toLocaleString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
             // 1. Fetch Context (Short-Term & Long-Term Memory)
             const recentMemories = await AIMemory.find({ userId }).sort({ timestamp: -1 }).limit(5);
             
@@ -36,6 +47,7 @@ class AIService {
                 {
                     role: 'system',
                     content: `You are ARC-AI, an advanced, highly capable AI assistant created by Aashutosh.
+                    The current system date and time is: ${currentDateString}.
                     You are equipped with real-time tools. If a user asks a question or makes a request 
                     that requires a tool, USE THE APPROPRIATE TOOL.
                     Do not hallucinate answers if a tool is available. Be conversational and helpful.
@@ -119,7 +131,7 @@ class AIService {
     }
 
     // Helper method to pipe real tokens from Mistral directly to the socket
-    async streamMistralResponse(messages, socket) {
+async streamMistralResponse(messages, socket) {
         let accumulatedText = "";
         
         const stream = await this.client.chat.stream({
@@ -128,11 +140,16 @@ class AIService {
         });
 
         for await (const chunk of stream) {
+            // 🚀 NEW: Check if the user clicked Stop!
+            if (socket && socket.isInterrupted) {
+                console.log("[Agent Router] Stream aborted by user to save tokens.");
+                break; // Exit the Mistral generation loop instantly!
+            }
+
             const content = chunk.data.choices[0].delta.content;
             if (content) {
                 accumulatedText += content;
                 if (socket) {
-                    // Emit exact format your frontend previously expected
                     socket.emit('ai:tts:response:chunk', {
                         chunk: content,
                         displayText: content,
@@ -147,3 +164,4 @@ class AIService {
 }
 
 module.exports = new AIService();
+

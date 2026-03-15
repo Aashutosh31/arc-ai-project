@@ -1,5 +1,3 @@
-// server/index.js
-
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -8,19 +6,14 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 
-// Import services and middleware
 const authRoutes = require('./routes/auth.js');
-const AIService = require('./services/AIService.js'); // 🚀 Using our new Agent Router!
+const AIService = require('./services/AIService.js'); 
 
 const app = express();
 const server = http.createServer(app); 
 const PORT = process.env.PORT || 5000;
 
-// Dynamic CORS configuration based on your original setup
-const frontendOrigins = (process.env.FRONTEND_URL || '')
-    .split(',')
-    .map(origin => origin.trim())
-    .filter(Boolean);
+const frontendOrigins = (process.env.FRONTEND_URL || '').split(',').map(origin => origin.trim()).filter(Boolean);
 
 app.use(cors({
     origin: frontendOrigins.length > 0 ? frontendOrigins : '*',
@@ -30,20 +23,19 @@ app.use(cors({
 
 app.use(express.json());
 
-// MongoDB Connection
 mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log('🟢 MongoDB Atlas connected successfully.'))
+    .then(async () => {
+        console.log('🟢 MongoDB Atlas connected successfully.');
+        try {
+            await mongoose.connection.collection('aimemories').dropIndex('userId_1');
+        } catch (err) { }
+    })
     .catch(err => console.error('MongoDB connection error:', err));
 
-// Socket.IO Setup
 const io = new Server(server, {
-    cors: {
-        origin: frontendOrigins.length > 0 ? frontendOrigins : '*',
-        methods: ['GET', 'POST']
-    }
+    cors: { origin: frontendOrigins.length > 0 ? frontendOrigins : '*', methods: ['GET', 'POST'] }
 });
 
-// Socket Authentication Middleware
 io.use((socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) return next(new Error('Authentication error'));
@@ -57,19 +49,22 @@ io.use((socket, next) => {
     }
 });
 
-// Socket Connection Handling
 io.on('connection', (socket) => {
     console.log(`📡 User connected: ${socket.id} (Authenticated ID: ${socket.userId})`);
 
-    // Listener for the transcribed command
+    // 🚀 NEW: Listener for the Stop Command
+    socket.on('ai:stream:stop', () => {
+        console.log(`🛑 User ${socket.userId} interrupted the stream.`);
+        socket.isInterrupted = true; // Set a flag on this specific user's socket
+    });
+
     socket.on('ai:stt:final', async (data) => {
         const { command } = data; 
         const userId = socket.userId; 
+        
+        socket.isInterrupted = false; // Reset the flag for the new command!
 
         console.log(`🧠 Processing command from user ${userId}: "${command}"`);
-
-        // 🚀 THE MAGIC: We pass the socket directly to the Agent Router!
-        // The router will handle tools, memory, and stream chunks right back to the client.
         await AIService.processQuery(userId, command, socket);
     });
 
@@ -78,13 +73,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// REST Routes
-app.get('/', (req, res) => {
-    res.status(200).send('ARC-AI Server Running. Status: Operational.');
-});
+app.get('/', (req, res) => res.status(200).send('ARC-AI Server Running. Status: Operational.'));
 app.use('/api/auth', authRoutes);
 
-// Start Server
-server.listen(PORT, () => {
-    console.log(`🌐 Server running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));
