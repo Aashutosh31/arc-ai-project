@@ -1,13 +1,19 @@
-// client/src/components/ChatInterface.jsx
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useContext } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { useChat } from '../contexts/ChatContext';
-import { useSocket } from '../hooks/useSocket';
-import useTextToSpeech from '../hooks/useTextToSpeech';
+import { SocketContext } from '../contexts/SocketContext';
+import { useTextToSpeech } from '../hooks/useTextToSpeech';
+
+// --- Styled Components & Animations ---
 
 const Waveform = keyframes`
   0%, 100% { height: 10px; transform: translateY(0); }
   50% { height: 20px; transform: translateY(-5px); }
+`;
+
+const typing = keyframes`
+  0%, 100% { transform: translateY(0); opacity: 0.5; }
+  50% { transform: translateY(-5px); opacity: 1; }
 `;
 
 const MessageContainer = styled.div`
@@ -22,167 +28,133 @@ const MessageContainer = styled.div`
   overflow-y: auto;
   padding: 14px 14px 10px;
   box-shadow: 0 0 22px rgba(0, 255, 255, 0.25);
-
-  /* Constrain height inside parent */
   min-height: 260px;
   max-height: 100%;
 
-  /* Custom Scrollbar Styling */
-  &::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: rgba(10, 10, 30, 0.9);
-    border-radius: 10px;
-    margin: 10px 0;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, #00ffff, #0077cc);
-    border-radius: 10px;
-    border: 2px solid rgba(10, 10, 30, 0.9);
-    transition: all 0.3s ease;
-  }
-
-  &::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(180deg, #00ffff, #00bfff);
-    box-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
-  }
-
-  scrollbar-width: thin;
-  scrollbar-color: #00ffff rgba(10, 10, 30, 0.9);
-
-  @media (max-width: 600px) {
-    padding: 10px 10px 8px;
-    border-width: 1px;
-  }
+  /* Custom Scrollbar */
+  &::-webkit-scrollbar { width: 8px; }
+  &::-webkit-scrollbar-track { background: rgba(10, 10, 30, 0.3); }
+  &::-webkit-scrollbar-thumb { background: #00ffff; border-radius: 4px; }
 `;
 
 const MessageBubble = styled.div`
-  margin: 6px 0;
-  padding: 10px 14px;
-  border-radius: 18px;
-  max-width: 90%;
-  font-size: 0.95rem;
+  max-width: 80%;
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  border-radius: 12px;
   line-height: 1.4;
-  transition: all 0.25s ease-in-out;
-  word-break: break-word;
-
-  align-self: ${props => (props.$role === 'user' ? 'flex-end' : 'flex-start')};
-  background: ${props =>
-    props.$role === 'user'
-      ? 'linear-gradient(135deg, #00bfff, #0077cc)'
-      : 'rgba(0, 255, 255, 0.08)'};
-  color: ${props => (props.$role === 'user' ? '#fff' : '#00ffff')};
-  border: ${props => (props.$role === 'assistant' ? '1px solid #00ffff' : 'none')};
-
-  @media (min-width: 768px) {
-    font-size: 1rem;
-    max-width: 80%;
-  }
-`;
-
-const TypingIndicator = styled.div`
-  margin-left: 4px;
-
-  span {
-    display: inline-block;
-    width: 4px;
-    height: 4px;
-    background: #00ffff;
-    border-radius: 50%;
-    margin: 0 2px;
-    animation: blink 0.7s infinite;
-  }
-
-  @keyframes blink {
-    0% { opacity: 0.3; }
-    50% { opacity: 1; }
-    100% { opacity: 0.3; }
-  }
-
-  span:nth-child(2) { animation-delay: 0.2s; }
-  span:nth-child(3) { animation-delay: 0.4s; }
+  align-self: ${props => props.$role === 'user' ? 'flex-end' : 'flex-start'};
+  background: ${props => props.$role === 'user' ? 'rgba(0, 255, 255, 0.15)' : 'rgba(255, 0, 255, 0.15)'};
+  border: 1px solid ${props => props.$role === 'user' ? 'rgba(0, 255, 255, 0.4)' : 'rgba(255, 0, 255, 0.4)'};
+  color: #fff;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 `;
 
 const WaveformBars = styled.div`
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
-  height: 24px;
-  margin-top: 6px;
+  gap: 3px;
+  margin-left: 10px;
+  height: 20px;
 
   div {
-    width: 4px;
-    height: 10px;
-    background: #ff00ff;
-    margin: 0 2px;
+    width: 3px;
+    background: #00ffff;
     border-radius: 2px;
-    animation: ${Waveform} 0.5s infinite alternate;
-
-    &:nth-child(1) { animation-delay: 0s; }
-    &:nth-child(2) { animation-delay: 0.1s; }
-    &:nth-child(3) { animation-delay: 0.2s; }
-    &:nth-child(4) { animation-delay: 0.3s; }
-    &:nth-child(5) { animation-delay: 0.4s; }
+    animation: ${Waveform} 1s ease-in-out infinite;
   }
+
+  div:nth-child(2) { animation-delay: 0.1s; }
+  div:nth-child(3) { animation-delay: 0.2s; }
+  div:nth-child(4) { animation-delay: 0.3s; }
+  div:nth-child(5) { animation-delay: 0.4s; }
 `;
 
+const TypingIndicator = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+
+  span {
+    width: 6px;
+    height: 6px;
+    background: #ff00ff;
+    border-radius: 50%;
+    animation: ${typing} 1.4s infinite ease-in-out both;
+  }
+  span:nth-child(1) { animation-delay: -0.32s; }
+  span:nth-child(2) { animation-delay: -0.16s; }
+`;
+
+// --- React Component ---
+
 const ChatInterface = () => {
-  const { history, addMessage } = useChat();
-  const { socket } = useSocket();
-  const { speak, isSpeaking } = useTextToSpeech();
+  const { messages, isProcessing, appendBotChunk, finishBotStream, addMessage } = useChat();
+  const { socket } = useContext(SocketContext) || {};
+  const { processStreamChunk } = useTextToSpeech();
   const chatEndRef = useRef(null);
 
-  const [streamingText, setStreamingText] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-
   useEffect(() => {
-    if (socket) {
-      socket.on('ai:tts:response:chunk', (data) => {
-        if (!isTyping) setIsTyping(true);
-
-        if (data.isFinal) {
-          const finalContent = data.chunk;
-
-          addMessage('assistant', finalContent);
-          speak(finalContent);
-
-          setStreamingText('');
-          setIsTyping(false);
-        } else {
-          setStreamingText(prev => prev + data.chunk);
-        }
-      });
-
-      return () => socket.off('ai:tts:response:chunk');
+    if (!socket) {
+      return undefined;
     }
-  }, [socket, addMessage, speak, isTyping]);
 
+    const handleChunk = (data) => {
+      const { chunk, displayText, isFinal } = data;
+      const nextChunk = displayText || chunk;
+
+      if (!isFinal) {
+        appendBotChunk(nextChunk);
+        processStreamChunk(nextChunk, false);
+        return;
+      }
+
+      finishBotStream();
+      processStreamChunk('', true);
+    };
+
+    const handleError = (errorMsg) => {
+      finishBotStream();
+      addMessage({ sender: 'ai', text: `[Error]: ${errorMsg}` });
+    };
+
+    socket.on('ai:tts:response:chunk', handleChunk);
+    socket.on('bot_error', handleError);
+
+    return () => {
+      socket.off('ai:tts:response:chunk', handleChunk);
+      socket.off('bot_error', handleError);
+    };
+  }, [socket, appendBotChunk, processStreamChunk, finishBotStream, addMessage]);
+
+  // Auto-scroll to bottom when messages update
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [history, streamingText]);
+  }, [messages]);
 
   return (
     <MessageContainer>
-      {history.map((msg, index) => (
-        <MessageBubble key={index} $role={msg.role}>
-          {msg.role === 'assistant' && (
+      {messages.map((msg, index) => (
+        <MessageBubble key={index} $role={msg.sender === 'ai' ? 'assistant' : 'user'}>
+          {msg.sender === 'ai' && (
             <span style={{ fontWeight: 'bold' }}>ARC-AI: </span>
           )}
-          {msg.content}
-          {msg.role === 'assistant' &&
-            isSpeaking &&
-            index === history.length - 1 && (
-              <WaveformBars>
-                <div></div><div></div><div></div><div></div><div></div>
-              </WaveformBars>
-            )}
+          
+          {msg.text}
+
+          {/* Show Waveform indicator if this specific AI message is currently streaming */}
+          {msg.sender === 'ai' && msg.isStreaming && index === messages.length - 1 && (
+            <WaveformBars>
+              <div></div><div></div><div></div><div></div><div></div>
+            </WaveformBars>
+          )}
         </MessageBubble>
       ))}
 
-      {isTyping && (
+      {/* Show a general typing indicator while waiting for the AI's first chunk to arrive */}
+      {isProcessing && (messages.length === 0 || messages[messages.length - 1].sender !== 'ai') && (
         <MessageBubble $role="assistant">
           <TypingIndicator>
             <span></span><span></span><span></span>

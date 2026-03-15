@@ -1,89 +1,149 @@
-// server/services/AIService.js — FINAL STABLE VERSION
+const { Mistral } = require('@mistralai/mistralai');
+const AIMemory = require('../models/AIMemory');
+const UserFact = require('../models/UserFact');
+const TaskExecutor = require('./TaskExecutor');
+const toolRegistry = require('../tools/index');
 
-const axios = require("axios");
-const AIMemory = require("../models/AIMemory");
+class AIService {
+    constructor() {
+        const apiKey = process.env.MISTRAL_API_KEY;
+        this.client = new Mistral({ apiKey: apiKey });
+        this.model = process.env.MISTRAL_MODEL || 'mistral-tiny';
+    }
 
-const API_KEY = process.env.MISTRAL_API_KEY;
-const MODEL = process.env.MISTRAL_MODEL;
-const ENDPOINT = "https://api.mistral.ai/v1/chat/completions";
+    // Accept the socket as a parameter to emit data instantly
+    async processQuery(userId, text, socket = null) {
+        try {
+            // 1. Fetch Context (Short-Term & Long-Term Memory)
+            const recentMemories = await AIMemory.find({ userId }).sort({ timestamp: -1 }).limit(5);
+            
+            // 🚀 FIX: Filter out corrupted memories and strictly ensure content is a string
+            const history = recentMemories.reverse()
+                .filter(mem => mem.query && mem.response) // Must exist!
+                .map(mem => [
+                    { role: 'user', content: String(mem.query) },
+                    { role: 'assistant', content: String(mem.response) }
+                ]).flat();
 
-const processCommand = async (command, userId) => {
-  try {
-    const memoryDoc = await AIMemory.findOne({ userId });
-    const history = memoryDoc.conversationHistory.slice(-6);
+            const userFacts = await UserFact.find({ userId });
+            let longTermMemoryText = "";
+            if (userFacts.length > 0) {
+                longTermMemoryText = "\n\nHere are permanent facts you know about this user:\n" + 
+                    userFacts.map(f => `- ${f.fact}`).join("\n");
+            }
 
-    const context = history
-      .map(m => `${m.role}: ${m.content}`)
-      .join("\n");
+            const messages = [
+                {
+                    role: 'system',
+                    content: `You are ARC-AI, an advanced, highly capable AI assistant created by Aashutosh.
+                    You are equipped with real-time tools. If a user asks a question or makes a request 
+                    that requires a tool, USE THE APPROPRIATE TOOL.
+                    Do not hallucinate answers if a tool is available. Be conversational and helpful.
+                    ${longTermMemoryText}` 
+                },
+                ...history,
+                { role: 'user', content: text }
+            ];
 
-    // 🔒 SYSTEM PROMPT — SIMPLE, VOICE-FIRST, LIKE ME
-    const systemPrompt = `
-You are ARC-AI, a calm, intelligent, voice-first assistant.
+            const tools = toolRegistry.getSchemas();
 
-RULES:
-- Be concise.
-- Do NOT dump long explanations.
-- Assume the user is listening.
-- Explain only the core idea.
-- Give 1–2 examples max.
-- End by asking what to explain next.
-- Never mention JSON, schemas, or formatting issues.
-- Never say "task identified".
+            // 2. Reasoning Phase (Fast, non-streamed check to see if a tool is needed)
+            const response = await this.client.chat.complete({
+                model: this.model,
+                messages: messages,
+                tools: tools.length > 0 ? tools : undefined,
+                toolChoice: tools.length > 0 ? "auto" : "none",
+            });
 
-If the user greets or chats → respond naturally.
-If the user asks a technical question → explain briefly and clearly.
-If the user wants more → expand only that part.
+            const message = response.choices[0].message;
+            let finalOutputText = "";
+            const toolCalls = message.toolCalls || message.tool_calls;
 
-Creator: King Aashutosh.
-`;
+            if (toolCalls && toolCalls.length > 0) {
+                console.log(`[Agent Router] AI requested ${toolCalls.length} tool(s). Executing...`);
+                messages.push(message);
 
-    const messages = [
-      { role: "system", content: systemPrompt },
-      { role: "system", content: `Conversation so far:\n${context}` },
-      { role: "user", content: command }
-    ];
+                for (const toolCall of toolCalls) {
+                    const functionName = toolCall.function.name;
+                    const args = typeof toolCall.function.arguments === 'string' 
+                        ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
 
-    const response = await axios.post(
-      ENDPOINT,
-      {
-        model: MODEL,
-        messages,
-        temperature: 0.3
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        timeout: 15000
-      }
-    );
+                    const toolResult = await TaskExecutor.executeTool(functionName, args, userId);
 
-    const text = response.data.choices[0].message.content.trim();
+                    messages.push({
+                        role: 'tool',
+                        name: functionName,
+                        content: JSON.stringify(toolResult),
+                        toolCallId: toolCall.id
+                    });
+                }
+                
+                // 3a. Synthesis Phase: Tools finished, generate the streaming response
+                console.log(`[Agent Router] Tools executed. Streaming final response...`);
+                finalOutputText = await this.streamMistralResponse(messages, socket);
+            } else {
+                // 3b. Synthesis Phase: No tools needed, just stream the response normally
+                messages.push(message); // Wait, if no tool, we must re-prompt or just stream the original text.
+                // Mistral already generated the text in the complete call. To make it truly stream,
+                // we should bypass the first `.complete()` if no tools exist, OR just artificially stream the result.
+                // Since Mistral v1 doesn't stream tools well, we'll artificially emit the fast response:
+                finalOutputText = message.content;
+                if (socket) {
+                    // Split by words to simulate stream effect for the UI
+                    const words = finalOutputText.split(' ');
+                    for (const word of words) {
+                        socket.emit('ai:tts:response:chunk', { chunk: word + ' ', displayText: word + ' ', isFinal: false });
+                        await new Promise(r => setTimeout(r, 20)); // tiny delay for visual effect
+                    }
+                }
+            }
 
-    // Save memory
-    memoryDoc.conversationHistory.push({ role: "user", content: command });
-    memoryDoc.conversationHistory.push({ role: "assistant", content: text });
-    await memoryDoc.save();
+            // 4. Signal that the stream is completely finished
+            if (socket) {
+                socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
+            }
 
-    return {
-      intent: "CONVERSATION",
-      action: "reply",
-      args: {},
-      text_response: text
-    };
+            // 5. Save the final conversation to short-term memory (Only if valid)
+            if (text && finalOutputText) {
+                const newMemory = new AIMemory({ userId, query: text, response: finalOutputText });
+                await newMemory.save();
+            }
 
-  } catch (err) {
-    console.error("🔴 AI ERROR:", err.message);
+            return finalOutputText;
 
-    return {
-      intent: "ERROR",
-      action: "fallback",
-      args: {},
-      text_response:
-        "Something went wrong on my side. Can you try asking that again?"
-    };
-  }
-};
+        } catch (error) {
+            console.error("[AIService] Error processing query:", error);
+            if (socket) socket.emit('ai:tts:response:chunk', { chunk: "Error", displayText: "Internal error occurred.", isFinal: true });
+            return "Error";
+        }
+    }
 
-module.exports = { processCommand };
+    // Helper method to pipe real tokens from Mistral directly to the socket
+    async streamMistralResponse(messages, socket) {
+        let accumulatedText = "";
+        
+        const stream = await this.client.chat.stream({
+            model: this.model,
+            messages: messages
+        });
+
+        for await (const chunk of stream) {
+            const content = chunk.data.choices[0].delta.content;
+            if (content) {
+                accumulatedText += content;
+                if (socket) {
+                    // Emit exact format your frontend previously expected
+                    socket.emit('ai:tts:response:chunk', {
+                        chunk: content,
+                        displayText: content,
+                        isFinal: false
+                    });
+                }
+            }
+        }
+        
+        return accumulatedText;
+    }
+}
+
+module.exports = new AIService();
