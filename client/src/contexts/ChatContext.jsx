@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext } from 'react';
+import React, { createContext, useState, useContext, useRef } from 'react';
 
 const ChatContext = createContext();
 
@@ -7,33 +7,28 @@ export const useChat = () => useContext(ChatContext);
 export const ChatProvider = ({ children }) => {
   const [messages, setMessages] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // 🚀 FIX: Global states for audio and interruption
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const isInterruptedRef = useRef(false);
 
-  // Add a standard, complete message
   const addMessage = (message) => {
     setMessages((prev) => [...prev, message]);
   };
 
-  // Appends a streaming chunk to the current AI message
   const appendBotChunk = (chunk) => {
     setMessages((prev) => {
       const lastMsg = prev[prev.length - 1];
-      
-      // If the last message is already a streaming AI message, append to it
       if (lastMsg && lastMsg.sender === 'ai' && lastMsg.isStreaming) {
         const updated = [...prev];
-        updated[updated.length - 1] = { 
-            ...lastMsg, 
-            text: lastMsg.text + chunk 
-        };
+        updated[updated.length - 1] = { ...lastMsg, text: lastMsg.text + chunk };
         return updated;
       } else {
-        // Otherwise, create the first chunk of a new AI message
         return [...prev, { sender: 'ai', text: chunk, isStreaming: true }];
       }
     });
   };
 
-  // Marks the stream as complete
   const finishBotStream = () => {
     setMessages((prev) => {
       const updated = [...prev];
@@ -53,7 +48,10 @@ export const ChatProvider = ({ children }) => {
         appendBotChunk, 
         finishBotStream,
         isProcessing, 
-        setIsProcessing 
+        setIsProcessing,
+        isSpeaking,           // Exported for UI
+        setIsSpeaking,        // Exported for TTS Engine
+        isInterruptedRef      // Exported for Socket Engine
     }}>
       {children}
     </ChatContext.Provider>
