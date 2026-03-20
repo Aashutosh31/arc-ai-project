@@ -6,7 +6,6 @@ import { useTextToSpeech } from './useTextToSpeech';
 export const useSocket = () => {
   const { socket, isConnected } = useContext(SocketContext) || {}; 
   
-  // 🚀 FIX: Pull in the global interruption reference
   const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef } = useChat();
   const { processStreamChunk, stop } = useTextToSpeech();
 
@@ -15,9 +14,9 @@ export const useSocket = () => {
 
     socket.off('ai:tts:response:chunk');
     socket.off('bot_error');
+    socket.off('ai:client:action'); // 🚀 NEW: Clean up action listener
 
     socket.on('ai:tts:response:chunk', (data) => {
-      // 🚀 CRITICAL FIX: If user clicked stop, DROP ALL INCOMING DATA!
       if (isInterruptedRef.current) return; 
 
       const { chunk, displayText, isFinal } = data;
@@ -31,6 +30,14 @@ export const useSocket = () => {
       }
     });
 
+    // 🚀 NEW: Listen for actions triggered by backend tools!
+    socket.on('ai:client:action', (action) => {
+      console.log('Received Client Action:', action);
+      if (action.type === 'OPEN_URL') {
+        window.open(action.url, '_blank');
+      }
+    });
+
     socket.on('bot_error', (errorMsg) => {
       finishBotStream();
       addMessage({ sender: 'ai', text: `[Error]: ${errorMsg}` });
@@ -39,12 +46,13 @@ export const useSocket = () => {
     return () => {
       socket.off('ai:tts:response:chunk');
       socket.off('bot_error');
+      socket.off('ai:client:action');
     };
   }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef]);
 
   const sendCommand = (text) => {
     if (socket) {
-      isInterruptedRef.current = false; // Reset interruption flag for new prompt
+      isInterruptedRef.current = false; 
       stop();
       setIsProcessing(true);
       addMessage({ sender: 'user', text }); 
@@ -54,10 +62,10 @@ export const useSocket = () => {
 
   const interruptStream = () => {
     if (socket) {
-      isInterruptedRef.current = true; // Block incoming chunks instantly
-      socket.emit('ai:stream:stop');   // Tell backend to stop generating
-      stop();                          // Stop browser TTS audio
-      finishBotStream();               // Stop UI typing animation
+      isInterruptedRef.current = true; 
+      socket.emit('ai:stream:stop');   
+      stop();                          
+      finishBotStream();               
     }
   };
 

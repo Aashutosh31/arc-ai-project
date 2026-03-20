@@ -11,26 +11,17 @@ class AIService {
         this.model = process.env.MISTRAL_MODEL || 'mistral-tiny';
     }
 
-    // Accept the socket as a parameter to emit data instantly
     async processQuery(userId, text, socket = null) {
         try {
-            // 🚀 NEW: Get the absolute real-time date and time
             const now = new Date();
-            const currentDateString = now.toLocaleString('en-US', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
+            const currentDateString = now.toLocaleString('en-US', { 
+                weekday: 'long', year: 'numeric', month: 'long', 
+                day: 'numeric', hour: '2-digit', minute: '2-digit'
             });
 
-            // 1. Fetch Context (Short-Term & Long-Term Memory)
             const recentMemories = await AIMemory.find({ userId }).sort({ timestamp: -1 }).limit(5);
-            
-            // 🚀 FIX: Filter out corrupted memories and strictly ensure content is a string
             const history = recentMemories.reverse()
-                .filter(mem => mem.query && mem.response) // Must exist!
+                .filter(mem => mem.query && mem.response)
                 .map(mem => [
                     { role: 'user', content: String(mem.query) },
                     { role: 'assistant', content: String(mem.response) }
@@ -59,7 +50,6 @@ class AIService {
 
             const tools = toolRegistry.getSchemas();
 
-            // 2. Reasoning Phase (Fast, non-streamed check to see if a tool is needed)
             const response = await this.client.chat.complete({
                 model: this.model,
                 messages: messages,
@@ -82,6 +72,11 @@ class AIService {
 
                     const toolResult = await TaskExecutor.executeTool(functionName, args, userId);
 
+                    // 🚀 NEW: If the tool wants to trigger a UI action, emit it to the client!
+                    if (toolResult.clientAction && socket) {
+                        socket.emit('ai:client:action', toolResult.clientAction);
+                    }
+
                     messages.push({
                         role: 'tool',
                         name: functionName,
@@ -90,32 +85,23 @@ class AIService {
                     });
                 }
                 
-                // 3a. Synthesis Phase: Tools finished, generate the streaming response
                 console.log(`[Agent Router] Tools executed. Streaming final response...`);
                 finalOutputText = await this.streamMistralResponse(messages, socket);
             } else {
-                // 3b. Synthesis Phase: No tools needed, just stream the response normally
-                messages.push(message); // Wait, if no tool, we must re-prompt or just stream the original text.
-                // Mistral already generated the text in the complete call. To make it truly stream,
-                // we should bypass the first `.complete()` if no tools exist, OR just artificially stream the result.
-                // Since Mistral v1 doesn't stream tools well, we'll artificially emit the fast response:
                 finalOutputText = message.content;
                 if (socket) {
-                    // Split by words to simulate stream effect for the UI
                     const words = finalOutputText.split(' ');
                     for (const word of words) {
                         socket.emit('ai:tts:response:chunk', { chunk: word + ' ', displayText: word + ' ', isFinal: false });
-                        await new Promise(r => setTimeout(r, 20)); // tiny delay for visual effect
+                        await new Promise(r => setTimeout(r, 20)); 
                     }
                 }
             }
 
-            // 4. Signal that the stream is completely finished
             if (socket) {
                 socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
             }
 
-            // 5. Save the final conversation to short-term memory (Only if valid)
             if (text && finalOutputText) {
                 const newMemory = new AIMemory({ userId, query: text, response: finalOutputText });
                 await newMemory.save();
@@ -130,20 +116,17 @@ class AIService {
         }
     }
 
-    // Helper method to pipe real tokens from Mistral directly to the socket
-async streamMistralResponse(messages, socket) {
+    async streamMistralResponse(messages, socket) {
         let accumulatedText = "";
-        
         const stream = await this.client.chat.stream({
             model: this.model,
             messages: messages
         });
 
         for await (const chunk of stream) {
-            // 🚀 NEW: Check if the user clicked Stop!
             if (socket && socket.isInterrupted) {
                 console.log("[Agent Router] Stream aborted by user to save tokens.");
-                break; // Exit the Mistral generation loop instantly!
+                break; 
             }
 
             const content = chunk.data.choices[0].delta.content;
@@ -164,4 +147,3 @@ async streamMistralResponse(messages, socket) {
 }
 
 module.exports = new AIService();
-
