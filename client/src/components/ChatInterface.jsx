@@ -1,7 +1,9 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { useChat } from '../contexts/ChatContext';
 import { useSocket } from '../hooks/useSocket';
+
+// --- Styled Components & Animations ---
 
 const Waveform = keyframes`
   0%, 100% { height: 10px; transform: translateY(0); }
@@ -13,11 +15,20 @@ const typing = keyframes`
   50% { transform: translateY(-5px); opacity: 1; }
 `;
 
-const MessageContainer = styled.div`
+// 🚀 NEW: Wrapper to hold both the chat window and the input field
+const ChatWrapper = styled.div`
   display: flex;
   flex-direction: column;
   flex: 1;
   width: 100%;
+  height: 100%;
+  gap: 12px;
+`;
+
+const MessageContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  flex: 1;
   background: rgba(10, 10, 30, 0.7);
   backdrop-filter: blur(8px);
   border: 2px solid #00ffff;
@@ -26,7 +37,6 @@ const MessageContainer = styled.div`
   padding: 14px 14px 10px;
   box-shadow: 0 0 22px rgba(0, 255, 255, 0.25);
   min-height: 260px;
-  max-height: 100%;
 
   &::-webkit-scrollbar { width: 8px; }
   &::-webkit-scrollbar-track { background: rgba(10, 10, 30, 0.3); }
@@ -102,71 +112,146 @@ const StopButton = styled.button`
   }
 `;
 
+// 🚀 NEW: Styled components for the text input area
+const InputForm = styled.form`
+  display: flex;
+  gap: 10px;
+  width: 100%;
+`;
+
+const TextInput = styled.input`
+  flex: 1;
+  background: rgba(10, 10, 30, 0.7);
+  border: 1px solid rgba(0, 255, 255, 0.4);
+  color: #fff;
+  padding: 12px 18px;
+  border-radius: 24px;
+  font-size: 15px;
+  outline: none;
+  transition: all 0.2s;
+
+  &:focus {
+    border-color: #00ffff;
+    box-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
+  }
+
+  &::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+  }
+`;
+
+const SendButton = styled.button`
+  background: #00ffff;
+  color: #020314;
+  border: none;
+  padding: 0 24px;
+  border-radius: 24px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    background: #00cccc;
+    box-shadow: 0 0 15px rgba(0, 255, 255, 0.4);
+  }
+
+  &:disabled {
+    background: rgba(0, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.5);
+    cursor: not-allowed;
+  }
+`;
+
+// --- React Component ---
+
 const ChatInterface = () => {
   const { messages, isProcessing, isSpeaking } = useChat();
-  const { interruptStream } = useSocket(); 
+  
+  // 🚀 NEW: Pull sendCommand to fire off typed text, and state for the input
+  const { interruptStream, sendCommand } = useSocket(); 
+  const [inputText, setInputText] = useState('');
   const chatEndRef = useRef(null);
 
   const isBusy = isProcessing || isSpeaking;
 
-  // 🚀 NEW: Global Spacebar Shortcut Listener
+  // Global Spacebar Shortcut Listener
   useEffect(() => {
     const handleKeyDown = (event) => {
-      // Ignore if the user is typing in a text input field somewhere else
       if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
         return;
       }
-
-      // If the AI is busy and the user presses Space, stop it!
       if (event.code === 'Space' && isBusy) {
-        event.preventDefault(); // Prevents the browser from scrolling down the page
+        event.preventDefault(); 
         interruptStream();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    
-    // Cleanup listener when component unmounts
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isBusy, interruptStream]);
 
-  // Auto-scroll when messages update or states change
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isProcessing, isSpeaking]);
 
+  // 🚀 NEW: Handle form submission
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!inputText.trim() || isBusy) return;
+    
+    sendCommand(inputText.trim());
+    setInputText(''); // Clear the input after sending
+  };
+
   return (
-    <MessageContainer>
-      {messages.map((msg, index) => (
-        <MessageBubble key={index} $role={msg.sender === 'ai' ? 'assistant' : 'user'}>
-          {msg.sender === 'ai' && (
-            <span style={{ fontWeight: 'bold' }}>ARC-AI: </span>
-          )}
-          {msg.text}
-          {msg.sender === 'ai' && (msg.isStreaming || (isSpeaking && index === messages.length - 1)) && (
-            <WaveformBars>
-              <div></div><div></div><div></div><div></div><div></div>
-            </WaveformBars>
-          )}
-        </MessageBubble>
-      ))}
+    <ChatWrapper>
+      <MessageContainer>
+        {messages.map((msg, index) => (
+          <MessageBubble key={index} $role={msg.sender === 'ai' ? 'assistant' : 'user'}>
+            {msg.sender === 'ai' && (
+              <span style={{ fontWeight: 'bold' }}>ARC-AI: </span>
+            )}
+            {msg.text}
+            {msg.sender === 'ai' && (msg.isStreaming || (isSpeaking && index === messages.length - 1)) && (
+              <WaveformBars>
+                <div></div><div></div><div></div><div></div><div></div>
+              </WaveformBars>
+            )}
+          </MessageBubble>
+        ))}
 
-      {isProcessing && (messages.length === 0 || messages[messages.length - 1].sender !== 'ai') && (
-        <MessageBubble $role="assistant">
-          <TypingIndicator>
-            <span></span><span></span><span></span>
-          </TypingIndicator>
-        </MessageBubble>
-      )}
+        {isProcessing && (messages.length === 0 || messages[messages.length - 1].sender !== 'ai') && (
+          <MessageBubble $role="assistant">
+            <TypingIndicator>
+              <span></span><span></span><span></span>
+            </TypingIndicator>
+          </MessageBubble>
+        )}
 
-      {isBusy && (
-        <StopButton onClick={interruptStream}>
-          ⏹ {isSpeaking ? "Stop Speaking" : "Stop Generating"} (Press Space)
-        </StopButton>
-      )}
+        {isBusy && (
+          <StopButton onClick={interruptStream}>
+            ⏹ {isSpeaking ? "Stop Speaking" : "Stop Generating"} (Press Space)
+          </StopButton>
+        )}
 
-      <div ref={chatEndRef} />
-    </MessageContainer>
+        <div ref={chatEndRef} />
+      </MessageContainer>
+
+      {/* 🚀 NEW: The Text Input Form */}
+      <InputForm onSubmit={handleSubmit}>
+        <TextInput 
+          type="text" 
+          placeholder="Message ARC-AI..." 
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          disabled={isBusy}
+          autoComplete="off"
+        />
+        <SendButton type="submit" disabled={!inputText.trim() || isBusy}>
+          Send
+        </SendButton>
+      </InputForm>
+    </ChatWrapper>
   );
 };
 
