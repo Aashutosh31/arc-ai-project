@@ -8,7 +8,8 @@ class AIService {
     constructor() {
         const apiKey = process.env.MISTRAL_API_KEY;
         this.client = new Mistral({ apiKey: apiKey });
-        this.model = process.env.MISTRAL_MODEL || 'mistral-tiny';
+        // 🚀 UPGRADE: Switch default from 'mistral-tiny' to a much smarter reasoning model
+        this.model = process.env.MISTRAL_MODEL || 'mistral-small-latest'; 
     }
 
     async processQuery(userId, text, socket = null) {
@@ -19,7 +20,8 @@ class AIService {
                 day: 'numeric', hour: '2-digit', minute: '2-digit'
             });
 
-            const recentMemories = await AIMemory.find({ userId }).sort({ timestamp: -1 }).limit(5);
+            // 🚀 UPGRADE: Tripled the short-term memory span from 5 to 15!
+            const recentMemories = await AIMemory.find({ userId }).sort({ timestamp: -1 }).limit(15);
             const history = recentMemories.reverse()
                 .filter(mem => mem.query && mem.response)
                 .map(mem => [
@@ -30,18 +32,22 @@ class AIService {
             const userFacts = await UserFact.find({ userId });
             let longTermMemoryText = "";
             if (userFacts.length > 0) {
-                longTermMemoryText = "\n\nHere are permanent facts you know about this user:\n" + 
+                longTermMemoryText = "\n\nCRITICAL CONTEXT - You permanently know these facts about the user:\n" + 
                     userFacts.map(f => `- ${f.fact}`).join("\n");
             }
 
+            // 🚀 UPGRADE: A highly advanced, strict, Agentic System Prompt
             const messages = [
                 {
                     role: 'system',
-                    content: `You are ARC-AI, an advanced, highly capable AI assistant created by Aashutosh.
+                    content: `You are ARC-AI, an advanced, highly intelligent autonomous agent created by Aashutosh.
                     The current system date and time is: ${currentDateString}.
-                    You are equipped with real-time tools. If a user asks a question or makes a request 
-                    that requires a tool, USE THE APPROPRIATE TOOL.
-                    Do not hallucinate answers if a tool is available. Be conversational and helpful.
+                    
+                    CORE DIRECTIVES:
+                    1. BE PROACTIVE: You are equipped with tools. DO NOT hallucinate facts. If asked about the news, time, or web, USE YOUR TOOLS.
+                    2. LONG-TERM MEMORY: If the user tells you their name, preferences, or a personal fact, YOU MUST immediately use the 'storeUserFact' tool to remember it forever.
+                    3. UI CONTROL: If the user asks to open a website, use the 'openWebsite' tool.
+                    4. TONE: Be conversational, sharp, and highly capable, like JARVIS from Iron Man. Avoid overly robotic responses.
                     ${longTermMemoryText}` 
                 },
                 ...history,
@@ -72,7 +78,6 @@ class AIService {
 
                     const toolResult = await TaskExecutor.executeTool(functionName, args, userId);
 
-                    // 🚀 NEW: If the tool wants to trigger a UI action, emit it to the client!
                     if (toolResult.clientAction && socket) {
                         socket.emit('ai:client:action', toolResult.clientAction);
                     }
