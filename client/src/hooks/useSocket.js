@@ -14,7 +14,7 @@ export const useSocket = () => {
 
     socket.off('ai:tts:response:chunk');
     socket.off('bot_error');
-    socket.off('ai:client:action'); // 🚀 NEW: Clean up action listener
+    socket.off('ai:client:action'); 
 
     socket.on('ai:tts:response:chunk', (data) => {
       if (isInterruptedRef.current) return; 
@@ -30,11 +30,31 @@ export const useSocket = () => {
       }
     });
 
-    // 🚀 NEW: Listen for actions triggered by backend tools!
-    socket.on('ai:client:action', (action) => {
+    // 🚀 UPDATED: Listen for multiple types of client actions!
+    socket.on('ai:client:action', async (action) => {
       console.log('Received Client Action:', action);
+      
       if (action.type === 'OPEN_URL') {
         window.open(action.url, '_blank');
+      } 
+      else if (action.type === 'COPY_TO_CLIPBOARD') {
+        try {
+            // Modern browsers: use the Clipboard API
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(action.text);
+            } else {
+                // Fallback for older browsers
+                const textArea = document.createElement("textarea");
+                textArea.value = action.text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                textArea.remove();
+            }
+            console.log("✅ Successfully copied to clipboard!");
+        } catch (err) {
+            console.error('❌ Failed to copy to clipboard:', err);
+        }
       }
     });
 
