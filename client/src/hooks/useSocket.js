@@ -5,7 +5,6 @@ import { useTextToSpeech } from './useTextToSpeech';
 
 export const useSocket = () => {
   const { socket, isConnected } = useContext(SocketContext) || {}; 
-  
   const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef } = useChat();
   const { processStreamChunk, stop } = useTextToSpeech();
 
@@ -30,7 +29,6 @@ export const useSocket = () => {
       }
     });
 
-    // 🚀 UPDATED: Listen for multiple types of client actions!
     socket.on('ai:client:action', async (action) => {
       console.log('Received Client Action:', action);
       
@@ -39,11 +37,9 @@ export const useSocket = () => {
       } 
       else if (action.type === 'COPY_TO_CLIPBOARD') {
         try {
-            // Modern browsers: use the Clipboard API
             if (navigator.clipboard && window.isSecureContext) {
                 await navigator.clipboard.writeText(action.text);
             } else {
-                // Fallback for older browsers
                 const textArea = document.createElement("textarea");
                 textArea.value = action.text;
                 document.body.appendChild(textArea);
@@ -51,10 +47,13 @@ export const useSocket = () => {
                 document.execCommand('copy');
                 textArea.remove();
             }
-            console.log("✅ Successfully copied to clipboard!");
         } catch (err) {
-            console.error('❌ Failed to copy to clipboard:', err);
+            console.error('Failed to copy:', err);
         }
+      }
+      // 🚀 UPGRADE: Inject the theme into the document root!
+      else if (action.type === 'CHANGE_THEME') {
+        document.documentElement.setAttribute('data-theme', action.theme);
       }
     });
 
