@@ -20,7 +20,7 @@ const ChatWrapper = styled.div`
   width: 100%;
   height: 100%;
   gap: 12px;
-  position: relative; /* Anchor for floating elements */
+  position: relative; 
 `;
 
 const MessageContainer = styled.div`
@@ -55,6 +55,13 @@ const MessageBubble = styled.div`
   white-space: pre-wrap;
   word-wrap: break-word;
   transition: all 0.5s ease;
+`;
+
+const BubbleImage = styled.img`
+  max-width: 100%;
+  border-radius: 8px;
+  margin-top: 8px;
+  border: 1px solid rgba(255,255,255,0.2);
 `;
 
 const WaveformBars = styled.div`
@@ -109,10 +116,70 @@ const StopButton = styled.button`
   &:hover { background: rgba(255, 0, 0, 0.3); color: #fff; }
 `;
 
+const InputContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+`;
+
+const ImagePreviewContainer = styled.div`
+  position: relative;
+  display: inline-block;
+  width: max-content;
+`;
+
+const ImagePreview = styled.img`
+  max-height: 80px;
+  border-radius: 8px;
+  border: 2px solid var(--primary-hex);
+`;
+
+const RemoveImageButton = styled.button`
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: red;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+`;
+
 const InputForm = styled.form`
   display: flex;
   gap: 10px;
   width: 100%;
+  align-items: center;
+`;
+
+const UploadLabel = styled.label`
+  background: rgba(var(--primary-rgb), 0.15);
+  border: 1px solid rgba(var(--primary-rgb), 0.4);
+  color: var(--primary-hex);
+  padding: 12px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+  font-size: 18px;
+
+  &:hover {
+    background: rgba(var(--primary-rgb), 0.3);
+    box-shadow: 0 0 10px rgba(var(--primary-rgb), 0.4);
+  }
+`;
+
+const HiddenInput = styled.input`
+  display: none;
 `;
 
 const TextInput = styled.input`
@@ -139,6 +206,7 @@ const SendButton = styled.button`
   border: none;
   padding: 0 24px;
   border-radius: 24px;
+  height: 45px;
   font-weight: bold;
   cursor: pointer;
   transition: all 0.5s ease;
@@ -154,7 +222,6 @@ const SendButton = styled.button`
   }
 `;
 
-// 🚀 NEW: Styled Components for the Floating YouTube Player
 const FloatingPlayerContainer = styled.div`
   position: absolute;
   top: 15px;
@@ -193,19 +260,66 @@ const ClosePlayerButton = styled.button`
   justify-content: center;
   font-size: 12px;
   box-shadow: 0 2px 5px rgba(0,0,0,0.5);
-
   &:hover { background: darkred; }
 `;
 
-
 const ChatInterface = () => {
-  // 🚀 Added mediaData and setMediaData
   const { messages, isProcessing, isSpeaking, mediaData, setMediaData } = useChat();
   const { interruptStream, sendCommand } = useSocket(); 
   const [inputText, setInputText] = useState('');
+  const [selectedImage, setSelectedImage] = useState(null); 
   const chatEndRef = useRef(null);
 
   const isBusy = isProcessing || isSpeaking;
+
+  // 🚀 CRITICAL FIX: Image Compression Algorithm
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // Create an invisible image object to read dimensions
+        const img = new Image();
+        img.onload = () => {
+          // Create an invisible canvas
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 800;
+          const MAX_HEIGHT = 800;
+          let width = img.width;
+          let height = img.height;
+
+          // Scale down the dimensions if it's too big
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          
+          // Draw the shrunken image onto the canvas
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // 🚀 Export as JPEG with 70% quality (Massive size reduction!)
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          const base64String = compressedDataUrl.split(',')[1];
+          
+          setSelectedImage({ file: URL.createObjectURL(file), base64: base64String });
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    }
+    e.target.value = null; 
+  };
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -225,24 +339,23 @@ const ChatInterface = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!inputText.trim() || isBusy) return;
-    sendCommand(inputText.trim());
+    if ((!inputText.trim() && !selectedImage) || isBusy) return;
+    
+    sendCommand(inputText.trim(), selectedImage?.base64);
+    
     setInputText('');
+    setSelectedImage(null); 
   };
 
   return (
     <ChatWrapper>
-      
-      {/* 🚀 NEW: Render the floating player if mediaData exists! */}
       {mediaData && (
         <FloatingPlayerContainer>
           <ClosePlayerButton onClick={() => setMediaData(null)}>X</ClosePlayerButton>
           <iframe 
-            width="100%" 
-            height="100%" 
+            width="100%" height="100%" 
             src={`https://www.youtube.com/embed/${mediaData.videoId}?autoplay=1`} 
-            title="ARC-AI Media Player" 
-            frameBorder="0" 
+            title="ARC-AI Media Player" frameBorder="0" 
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
             allowFullScreen
           ></iframe>
@@ -254,6 +367,9 @@ const ChatInterface = () => {
           <MessageBubble key={index} $role={msg.sender === 'ai' ? 'assistant' : 'user'}>
             {msg.sender === 'ai' && <span style={{ fontWeight: 'bold' }}>ARC-AI: </span>}
             {msg.text}
+            
+            {msg.image && <><br/><BubbleImage src={msg.image} alt="User upload" /></>}
+
             {msg.sender === 'ai' && (msg.isStreaming || (isSpeaking && index === messages.length - 1)) && (
               <WaveformBars><div></div><div></div><div></div><div></div><div></div></WaveformBars>
             )}
@@ -271,18 +387,31 @@ const ChatInterface = () => {
             ⏹ {isSpeaking ? "Stop Speaking" : "Stop Generating"} (Press Space)
           </StopButton>
         )}
-
         <div ref={chatEndRef} />
       </MessageContainer>
 
-      <InputForm onSubmit={handleSubmit}>
-        <TextInput 
-          type="text" placeholder="Message ARC-AI..." 
-          value={inputText} onChange={(e) => setInputText(e.target.value)}
-          disabled={isBusy} autoComplete="off"
-        />
-        <SendButton type="submit" disabled={!inputText.trim() || isBusy}>Send</SendButton>
-      </InputForm>
+      <InputContainer>
+        {selectedImage && (
+          <ImagePreviewContainer>
+            <RemoveImageButton onClick={() => setSelectedImage(null)}>X</RemoveImageButton>
+            <ImagePreview src={selectedImage.file} alt="Preview" />
+          </ImagePreviewContainer>
+        )}
+
+        <InputForm onSubmit={handleSubmit}>
+          <UploadLabel>
+            📷
+            <HiddenInput type="file" accept="image/png, image/jpeg, image/webp" onChange={handleImageUpload} disabled={isBusy} />
+          </UploadLabel>
+
+          <TextInput 
+            type="text" placeholder="Message or describe an image..." 
+            value={inputText} onChange={(e) => setInputText(e.target.value)}
+            disabled={isBusy} autoComplete="off"
+          />
+          <SendButton type="submit" disabled={(!inputText.trim() && !selectedImage) || isBusy}>Send</SendButton>
+        </InputForm>
+      </InputContainer>
     </ChatWrapper>
   );
 };

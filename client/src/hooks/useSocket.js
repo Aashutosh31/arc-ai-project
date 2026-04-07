@@ -5,8 +5,6 @@ import { useTextToSpeech } from './useTextToSpeech';
 
 export const useSocket = () => {
   const { socket, isConnected } = useContext(SocketContext) || {}; 
-  
-  // 🚀 Make sure setMediaData is extracted from useChat!
   const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef, setMediaData } = useChat();
   const { processStreamChunk, stop } = useTextToSpeech();
 
@@ -33,7 +31,6 @@ export const useSocket = () => {
 
     socket.on('ai:client:action', async (action) => {
       console.log('Received Client Action:', action);
-      
       if (action.type === 'OPEN_URL') {
         window.open(action.url, '_blank');
       } 
@@ -49,9 +46,7 @@ export const useSocket = () => {
                 document.execCommand('copy');
                 textArea.remove();
             }
-        } catch (err) {
-            console.error('Failed to copy:', err);
-        }
+        } catch (err) {}
       }
       else if (action.type === 'CHANGE_THEME') {
         document.documentElement.setAttribute('data-theme', action.theme);
@@ -59,9 +54,8 @@ export const useSocket = () => {
       else if (action.type === 'PLAY_MEDIA') {
         setMediaData({ videoId: action.videoId, title: action.title });
       }
-      // 🚀 NEW: Catch the Stop Media action!
       else if (action.type === 'STOP_MEDIA') {
-        setMediaData(null); // This unmounts the YouTube iframe!
+        setMediaData(null); 
       }
     });
 
@@ -77,13 +71,19 @@ export const useSocket = () => {
     };
   }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef, setMediaData]);
 
-  const sendCommand = (text) => {
+  // 🚀 NEW: Accept imageBase64 
+  const sendCommand = (text, imageBase64 = null) => {
     if (socket) {
       isInterruptedRef.current = false; 
       stop();
       setIsProcessing(true);
-      addMessage({ sender: 'user', text }); 
-      socket.emit('ai:stt:final', { command: text }); 
+      
+      // Pass the image URL to the UI so you can see what you sent
+      const displayImage = imageBase64 ? `data:image/jpeg;base64,${imageBase64}` : null;
+      addMessage({ sender: 'user', text, image: displayImage }); 
+      
+      // Emit the text AND the raw base64 string to the backend
+      socket.emit('ai:stt:final', { command: text, image: imageBase64 }); 
     }
   };
 
