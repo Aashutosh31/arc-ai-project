@@ -20,9 +20,9 @@ const ChatWrapper = styled.div`
   width: 100%;
   height: 100%;
   gap: 12px;
+  position: relative; /* Anchor for floating elements */
 `;
 
-// 🚀 UPGRADE: Swapped hardcoded colors for CSS Variables!
 const MessageContainer = styled.div`
   display: flex;
   flex-direction: column;
@@ -154,8 +154,53 @@ const SendButton = styled.button`
   }
 `;
 
+// 🚀 NEW: Styled Components for the Floating YouTube Player
+const FloatingPlayerContainer = styled.div`
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  width: 320px;
+  height: 180px;
+  background: #000;
+  border: 2px solid var(--primary-hex);
+  border-radius: 12px;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.8);
+  z-index: 1000;
+  overflow: hidden;
+  animation: slideIn 0.3s ease-out forwards;
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+`;
+
+const ClosePlayerButton = styled.button`
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 25px;
+  height: 25px;
+  background: red;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  font-weight: bold;
+  cursor: pointer;
+  z-index: 1001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+
+  &:hover { background: darkred; }
+`;
+
+
 const ChatInterface = () => {
-  const { messages, isProcessing, isSpeaking } = useChat();
+  // 🚀 Added mediaData and setMediaData
+  const { messages, isProcessing, isSpeaking, mediaData, setMediaData } = useChat();
   const { interruptStream, sendCommand } = useSocket(); 
   const [inputText, setInputText] = useState('');
   const chatEndRef = useRef(null);
@@ -187,6 +232,23 @@ const ChatInterface = () => {
 
   return (
     <ChatWrapper>
+      
+      {/* 🚀 NEW: Render the floating player if mediaData exists! */}
+      {mediaData && (
+        <FloatingPlayerContainer>
+          <ClosePlayerButton onClick={() => setMediaData(null)}>X</ClosePlayerButton>
+          <iframe 
+            width="100%" 
+            height="100%" 
+            src={`https://www.youtube.com/embed/${mediaData.videoId}?autoplay=1`} 
+            title="ARC-AI Media Player" 
+            frameBorder="0" 
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+            allowFullScreen
+          ></iframe>
+        </FloatingPlayerContainer>
+      )}
+
       <MessageContainer>
         {messages.map((msg, index) => (
           <MessageBubble key={index} $role={msg.sender === 'ai' ? 'assistant' : 'user'}>

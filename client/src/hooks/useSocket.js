@@ -5,7 +5,9 @@ import { useTextToSpeech } from './useTextToSpeech';
 
 export const useSocket = () => {
   const { socket, isConnected } = useContext(SocketContext) || {}; 
-  const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef } = useChat();
+  
+  // 🚀 Make sure setMediaData is extracted from useChat!
+  const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef, setMediaData } = useChat();
   const { processStreamChunk, stop } = useTextToSpeech();
 
   useEffect(() => {
@@ -51,9 +53,15 @@ export const useSocket = () => {
             console.error('Failed to copy:', err);
         }
       }
-      // 🚀 UPGRADE: Inject the theme into the document root!
       else if (action.type === 'CHANGE_THEME') {
         document.documentElement.setAttribute('data-theme', action.theme);
+      }
+      else if (action.type === 'PLAY_MEDIA') {
+        setMediaData({ videoId: action.videoId, title: action.title });
+      }
+      // 🚀 NEW: Catch the Stop Media action!
+      else if (action.type === 'STOP_MEDIA') {
+        setMediaData(null); // This unmounts the YouTube iframe!
       }
     });
 
@@ -67,7 +75,7 @@ export const useSocket = () => {
       socket.off('bot_error');
       socket.off('ai:client:action');
     };
-  }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef]);
+  }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef, setMediaData]);
 
   const sendCommand = (text) => {
     if (socket) {

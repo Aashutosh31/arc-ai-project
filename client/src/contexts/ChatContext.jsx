@@ -7,9 +7,12 @@ export const useChat = () => useContext(ChatContext);
 export const ChatProvider = ({ children }) => {
   const [messages, setMessages] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  
-  // 🚀 FIX: Global states for audio and interruption
+
   const [isSpeaking, setIsSpeaking] = useState(false);
+
+  // 🚀 NEW: State to hold the currently playing YouTube video
+  const [mediaData, setMediaData] = useState(null);
+
   const isInterruptedRef = useRef(false);
 
   const addMessage = (message) => {
@@ -49,9 +52,11 @@ export const ChatProvider = ({ children }) => {
         finishBotStream,
         isProcessing, 
         setIsProcessing,
-        isSpeaking,           // Exported for UI
-        setIsSpeaking,        // Exported for TTS Engine
-        isInterruptedRef      // Exported for Socket Engine
+        isSpeaking,
+        setIsSpeaking,
+        isInterruptedRef,
+        mediaData,
+        setMediaData
     }}>
       {children}
     </ChatContext.Provider>
