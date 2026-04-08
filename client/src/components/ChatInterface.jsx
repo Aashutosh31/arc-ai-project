@@ -20,7 +20,11 @@ const ChatWrapper = styled.div`
   width: 100%;
   height: 100%;
   gap: 12px;
-  position: relative; 
+  position: relative;
+
+  @media (max-width: 480px) {
+    gap: 8px;
+  }
 `;
 
 const MessageContainer = styled.div`
@@ -40,6 +44,14 @@ const MessageContainer = styled.div`
   &::-webkit-scrollbar { width: 8px; }
   &::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
   &::-webkit-scrollbar-thumb { background: var(--primary-hex); border-radius: 4px; }
+
+  @media (max-width: 480px) {
+    padding: 10px 10px 8px;
+    border-radius: 10px;
+    min-height: 200px;
+
+    &::-webkit-scrollbar { width: 4px; }
+  }
 `;
 
 const MessageBubble = styled.div`
@@ -55,6 +67,14 @@ const MessageBubble = styled.div`
   white-space: pre-wrap;
   word-wrap: break-word;
   transition: all 0.5s ease;
+
+  @media (max-width: 480px) {
+    max-width: 92%;
+    padding: 9px 12px;
+    font-size: 14px;
+    margin-bottom: 8px;
+    border-radius: 10px;
+  }
 `;
 
 const BubbleImage = styled.img`
@@ -64,7 +84,6 @@ const BubbleImage = styled.img`
   border: 1px solid rgba(255,255,255,0.2);
 `;
 
-// 🚀 NEW: Styled component for document attachments in the chat log
 const DocumentAttachment = styled.div`
   display: inline-flex;
   align-items: center;
@@ -75,6 +94,11 @@ const DocumentAttachment = styled.div`
   font-size: 14px;
   border: 1px solid rgba(255,255,255,0.3);
   gap: 8px;
+
+  @media (max-width: 480px) {
+    font-size: 12px;
+    padding: 6px 10px;
+  }
 `;
 
 const WaveformBars = styled.div`
@@ -127,18 +151,32 @@ const StopButton = styled.button`
   transition: all 0.2s;
 
   &:hover { background: rgba(255, 0, 0, 0.3); color: #fff; }
+
+  @media (max-width: 480px) {
+    font-size: 12px;
+    padding: 6px 12px;
+    margin-top: 6px;
+  }
 `;
 
 const InputContainer = styled.div`
   display: flex;
   flex-direction: column;
   gap: 10px;
+
+  @media (max-width: 480px) {
+    gap: 6px;
+  }
 `;
 
 const PreviewRow = styled.div`
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+
+  @media (max-width: 480px) {
+    gap: 8px;
+  }
 `;
 
 const ImagePreviewContainer = styled.div`
@@ -151,6 +189,10 @@ const ImagePreview = styled.img`
   max-height: 60px;
   border-radius: 8px;
   border: 2px solid var(--primary-hex);
+
+  @media (max-width: 480px) {
+    max-height: 48px;
+  }
 `;
 
 const RemoveAttachmentButton = styled.button`
@@ -169,6 +211,14 @@ const RemoveAttachmentButton = styled.button`
   align-items: center;
   justify-content: center;
   box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+
+  @media (max-width: 480px) {
+    width: 18px;
+    height: 18px;
+    font-size: 10px;
+    top: -6px;
+    right: -6px;
+  }
 `;
 
 const InputForm = styled.form`
@@ -176,6 +226,10 @@ const InputForm = styled.form`
   gap: 10px;
   width: 100%;
   align-items: center;
+
+  @media (max-width: 480px) {
+    gap: 6px;
+  }
 `;
 
 const UploadLabel = styled.label`
@@ -190,10 +244,16 @@ const UploadLabel = styled.label`
   justify-content: center;
   transition: all 0.3s;
   font-size: 16px;
+  flex-shrink: 0;
 
   &:hover {
     background: rgba(var(--primary-rgb), 0.3);
     box-shadow: 0 0 10px rgba(var(--primary-rgb), 0.4);
+  }
+
+  @media (max-width: 480px) {
+    padding: 8px 10px;
+    font-size: 14px;
   }
 `;
 
@@ -203,6 +263,7 @@ const HiddenInput = styled.input`
 
 const TextInput = styled.input`
   flex: 1;
+  min-width: 0;
   background: var(--chat-bg);
   border: 1px solid rgba(var(--primary-rgb), 0.4);
   color: #fff;
@@ -217,6 +278,12 @@ const TextInput = styled.input`
     box-shadow: 0 0 10px rgba(var(--primary-rgb), 0.2);
   }
   &::placeholder { color: rgba(255, 255, 255, 0.4); }
+
+  @media (max-width: 480px) {
+    padding: 10px 14px;
+    font-size: 14px;
+    border-radius: 20px;
+  }
 `;
 
 const SendButton = styled.button`
@@ -229,6 +296,8 @@ const SendButton = styled.button`
   font-weight: bold;
   cursor: pointer;
   transition: all 0.5s ease;
+  flex-shrink: 0;
+  white-space: nowrap;
 
   &:hover {
     box-shadow: 0 0 15px rgba(var(--primary-rgb), 0.4);
@@ -238,6 +307,13 @@ const SendButton = styled.button`
     background: rgba(var(--primary-rgb), 0.2);
     color: rgba(255, 255, 255, 0.5);
     cursor: not-allowed;
+  }
+
+  @media (max-width: 480px) {
+    padding: 0 16px;
+    height: 40px;
+    font-size: 14px;
+    border-radius: 20px;
   }
 `;
 
@@ -254,6 +330,14 @@ const FloatingPlayerContainer = styled.div`
   z-index: 1000;
   overflow: hidden;
   animation: slideIn 0.3s ease-out forwards;
+
+  @media (max-width: 480px) {
+    width: calc(100% - 30px);
+    height: 180px;
+    top: 10px;
+    right: 15px;
+    left: 15px;
+  }
 `;
 
 const ClosePlayerButton = styled.button`
@@ -282,7 +366,7 @@ const ChatInterface = () => {
   const { interruptStream, sendCommand } = useSocket(); 
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState(null); 
-  const [selectedDocument, setSelectedDocument] = useState(null); // 🚀 NEW: Document State
+  const [selectedDocument, setSelectedDocument] = useState(null);
   const chatEndRef = useRef(null);
 
   const isBusy = isProcessing || isSpeaking;
@@ -320,7 +404,6 @@ const ChatInterface = () => {
     e.target.value = null; 
   };
 
-  // 🚀 NEW: Document Upload Handler
   const handleDocumentUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -354,7 +437,6 @@ const ChatInterface = () => {
     e.preventDefault();
     if ((!inputText.trim() && !selectedImage && !selectedDocument) || isBusy) return;
     
-    // 🚀 Send text, image, AND document payload
     sendCommand(inputText.trim(), selectedImage?.base64, selectedDocument);
     
     setInputText('');
@@ -385,7 +467,6 @@ const ChatInterface = () => {
             
             {msg.image && <><br/><BubbleImage src={msg.image} alt="User upload" /></>}
             
-            {/* 🚀 Render Document name in chat log */}
             {msg.documentName && (
               <><br/><DocumentAttachment>📄 {msg.documentName}</DocumentAttachment></>
             )}
@@ -419,7 +500,6 @@ const ChatInterface = () => {
             </ImagePreviewContainer>
           )}
           
-          {/* 🚀 Document Preview Bubble */}
           {selectedDocument && (
             <ImagePreviewContainer>
               <RemoveAttachmentButton onClick={() => setSelectedDocument(null)}>X</RemoveAttachmentButton>
@@ -435,7 +515,7 @@ const ChatInterface = () => {
             <HiddenInput type="file" accept="image/png, image/jpeg, image/webp" onChange={handleImageUpload} disabled={isBusy} />
           </UploadLabel>
 
-          {/* 🚀 NEW: Document Upload */}
+          {/* Document Upload */}
           <UploadLabel title="Upload Document">
             📄
             <HiddenInput type="file" accept=".txt,.csv,.md,.json,.pdf" onChange={handleDocumentUpload} disabled={isBusy} />
