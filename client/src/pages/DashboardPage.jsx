@@ -102,9 +102,12 @@ const Container = styled.main`
   padding: 16px 12px 24px;
   display: flex;
   gap: 16px;
+  /* Must NOT have overflow: hidden — lets sticky work */
+  align-items: flex-start;
 
   @media (max-width: 1024px) {
     flex-direction: column;
+    align-items: stretch;
   }
 
   @media (min-width: 1440px) {
@@ -146,6 +149,18 @@ const SidePanel = styled.aside`
   display: flex;
   flex-direction: column;
   gap: 14px;
+
+  /* Keep the panel in normal page flow on laptops so it scrolls with the page. */
+  @media (min-width: 1440px) {
+    position: sticky;
+    top: 80px; /* clears the sticky header height */
+    align-self: flex-start;
+    max-height: calc(100vh - 96px);
+    overflow-y: auto;
+    /* hide scrollbar but still scrollable if content overflows */
+    scrollbar-width: none;
+    &::-webkit-scrollbar { display: none; }
+  }
 
   @media (max-width: 1024px) {
     max-width: 100%;
