@@ -71,19 +71,24 @@ export const useSocket = () => {
     };
   }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef, setMediaData]);
 
-  // 🚀 NEW: Accept imageBase64 
-  const sendCommand = (text, imageBase64 = null) => {
+// 🚀 UPGRADE: Accept documentData 
+  const sendCommand = (text, imageBase64 = null, documentData = null) => {
     if (socket) {
       isInterruptedRef.current = false; 
       stop();
       setIsProcessing(true);
       
-      // Pass the image URL to the UI so you can see what you sent
       const displayImage = imageBase64 ? `data:image/jpeg;base64,${imageBase64}` : null;
-      addMessage({ sender: 'user', text, image: displayImage }); 
+      const displayDoc = documentData ? documentData.name : null;
       
-      // Emit the text AND the raw base64 string to the backend
-      socket.emit('ai:stt:final', { command: text, image: imageBase64 }); 
+      addMessage({ sender: 'user', text, image: displayImage, documentName: displayDoc }); 
+      
+      // Emit everything to the backend
+      socket.emit('ai:stt:final', { 
+        command: text, 
+        image: imageBase64,
+        document: documentData
+      }); 
     }
   };
 

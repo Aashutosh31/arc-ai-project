@@ -58,16 +58,16 @@ io.on('connection', (socket) => {
     });
 
     socket.on('ai:stt:final', async (data) => {
-        // 🚀 NEW: Extract 'image' from the incoming payload!
-        const { command, image } = data; 
+        // 🚀 UPGRADE: Extract 'document' from the incoming payload!
+        const { command, image, document } = data; 
         const userId = socket.userId; 
         
         socket.isInterrupted = false; 
 
-        console.log(`🧠 Processing command from user ${userId}: "${command}" ${image ? '[+Image Attached]' : ''}`);
+        console.log(`🧠 Processing command from user ${userId}: "${command}" ${image ? '[+Image]' : ''} ${document ? '[+Document]' : ''}`);
         
-        // 🚀 NEW: Pass the image Base64 string to the Agent Router
-        await AIService.processQuery(userId, command, socket, image);
+        // 🚀 UPGRADE: Pass the document to the Agent Router
+        await AIService.processQuery(userId, command, socket, image, document);
     });
 
     socket.on('disconnect', () => {

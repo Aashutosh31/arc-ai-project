@@ -3,6 +3,7 @@ const AIMemory = require('../models/AIMemory');
 const UserFact = require('../models/UserFact');
 const TaskExecutor = require('./TaskExecutor');
 const toolRegistry = require('../tools/index');
+const pdfExtract = require('pdf-extraction'); // 🚀 The modern, working package!
 
 class AIService {
     constructor() {
@@ -11,7 +12,7 @@ class AIService {
         this.defaultModel = process.env.MISTRAL_MODEL || 'mistral-small-latest'; 
     }
 
-    async processQuery(userId, text, socket = null, imageBase64 = null) {
+    async processQuery(userId, text, socket = null, imageBase64 = null, document = null) {
         try {
             const now = new Date();
             const currentDateString = now.toLocaleString('en-US', { 
@@ -34,13 +35,50 @@ class AIService {
                     userFacts.map(f => `- ${f.fact}`).join("\n");
             }
 
+            let documentContext = "";
+            if (document) {
+                try {
+                    console.log(`[Agent Router] Reading attached document: ${document.name}`);
+                    let parsedText = "";
+
+                    if (document.type === 'application/pdf') {
+                        const buffer = Buffer.from(document.base64, 'base64');
+                        
+                        // 🚀 Clean, simple, and guaranteed to work
+                        const pdfData = await pdfExtract(buffer);
+                        parsedText = pdfData.text;
+                        
+                        if (!parsedText || parsedText.trim() === '') {
+                            throw new Error("EMPTY_SCANNED_PDF");
+                        }
+                    } else {
+                        parsedText = Buffer.from(document.base64, 'base64').toString('utf-8');
+                    }
+
+                    if (parsedText.length > 80000) {
+                        parsedText = parsedText.substring(0, 80000) + "\n... [Document truncated due to length limits]";
+                    }
+
+                    documentContext = `\n\n--- ATTACHED FILE CONTEXT (${document.name}) ---\nThe user has attached a file for you to read. Here is the text extracted from it:\n\n${parsedText}\n-----------------------------------\n`;
+                } catch (err) {
+                    console.error("[Agent Router] Document parse error:", err.message || err);
+                    
+                    if (err.message === "EMPTY_SCANNED_PDF") {
+                        documentContext = `\n\n[System Note: The attached PDF '${document.name}' appears to be an image-based or scanned PDF. No readable text could be extracted. Please inform the user.]`;
+                    } else {
+                        documentContext = `\n\n[System Note: Failed to read attached document '${document.name}' due to a backend parsing error. Please apologize to the user.]`;
+                    }
+                }
+            }
+
             let currentModel = this.defaultModel;
-            let messageContent = text || "Hello";
+            let messageContent = text || (document ? `Please analyze the attached document: ${document.name}` : "Hello");
+            messageContent = `${messageContent}${documentContext}`;
 
             if (imageBase64) {
                 currentModel = 'pixtral-12b-2409'; 
                 messageContent = [
-                    { type: 'text', text: text || "What is in this image?" },
+                    { type: 'text', text: messageContent },
                     { type: 'image_url', imageUrl: `data:image/jpeg;base64,${imageBase64}` }
                 ];
                 console.log("[Agent Router] Image detected! Swapped brain to Pixtral-12B Vision Model.");
@@ -56,7 +94,7 @@ class AIService {
                     1. BE PROACTIVE: Use tools when necessary.
                     2. LONG-TERM MEMORY: Use 'storeUserFact' tool to remember personal facts.
                     3. UI CONTROL: Use 'openWebsite' or 'changeTheme' to control the user's system.
-                    4. VISION: If the user provides an image, thoroughly analyze it.
+                    4. VISION & FILES: Analyze provided images or document text thoroughly and accurately.
                     ${longTermMemoryText}` 
                 },
                 ...history,
@@ -64,8 +102,6 @@ class AIService {
             ];
 
             const tools = toolRegistry.getSchemas();
-            
-            // 🚀 THE FIX: Only pass tools if we are NOT using the Vision model!
             const useTools = tools.length > 0 && !imageBase64;
 
             const response = await this.client.chat.complete({
@@ -119,7 +155,10 @@ class AIService {
             }
 
             if (finalOutputText) {
-                const memoryQuery = imageBase64 ? `[User uploaded an image]: ${text || "What is this?"}` : text;
+                let memoryQuery = text || "Uploaded a file.";
+                if (imageBase64) memoryQuery = `[Attached Image] ${text || ""}`;
+                if (document) memoryQuery = `[Attached Document: ${document.name}] ${text || ""}`;
+                
                 const newMemory = new AIMemory({ userId, query: memoryQuery, response: finalOutputText });
                 await newMemory.save();
             }
@@ -129,16 +168,15 @@ class AIService {
         } catch (error) {
             console.error("[AIService] Error processing query:", error);
             let userFriendlyError = "An internal system error occurred.";
-
-            // 🚀 UPGRADE: Specific rate limit message for Images vs Text
+            
             if (error.statusCode === 429 || (error.message && (error.message.includes('capacity exceeded') || error.message.includes('Rate limit exceeded')))) {
-                userFriendlyError = imageBase64
+                userFriendlyError = imageBase64 
                     ? "Mistral's free tier has strict limits on image analysis. Please wait 1-2 minutes before uploading another photo."
                     : "Mistral API capacity exceeded. Please wait a minute.";
             } else if (error.statusCode === 400) {
-                 userFriendlyError = "There was an issue processing the image format. Please try again.";
+                 userFriendlyError = "There was an issue processing the file format. Please try again.";
             }
-
+            
             if (socket) socket.emit('bot_error', userFriendlyError);
             return "Error";
         }

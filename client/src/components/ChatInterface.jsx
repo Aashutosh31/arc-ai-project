@@ -64,6 +64,19 @@ const BubbleImage = styled.img`
   border: 1px solid rgba(255,255,255,0.2);
 `;
 
+// 🚀 NEW: Styled component for document attachments in the chat log
+const DocumentAttachment = styled.div`
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255,255,255,0.1);
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-top: 8px;
+  font-size: 14px;
+  border: 1px solid rgba(255,255,255,0.3);
+  gap: 8px;
+`;
+
 const WaveformBars = styled.div`
   display: inline-flex;
   align-items: center;
@@ -122,6 +135,12 @@ const InputContainer = styled.div`
   gap: 10px;
 `;
 
+const PreviewRow = styled.div`
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+`;
+
 const ImagePreviewContainer = styled.div`
   position: relative;
   display: inline-block;
@@ -129,12 +148,12 @@ const ImagePreviewContainer = styled.div`
 `;
 
 const ImagePreview = styled.img`
-  max-height: 80px;
+  max-height: 60px;
   border-radius: 8px;
   border: 2px solid var(--primary-hex);
 `;
 
-const RemoveImageButton = styled.button`
+const RemoveAttachmentButton = styled.button`
   position: absolute;
   top: -8px;
   right: -8px;
@@ -163,14 +182,14 @@ const UploadLabel = styled.label`
   background: rgba(var(--primary-rgb), 0.15);
   border: 1px solid rgba(var(--primary-rgb), 0.4);
   color: var(--primary-hex);
-  padding: 12px;
+  padding: 10px 14px;
   border-radius: 50%;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.3s;
-  font-size: 18px;
+  font-size: 16px;
 
   &:hover {
     background: rgba(var(--primary-rgb), 0.3);
@@ -235,11 +254,6 @@ const FloatingPlayerContainer = styled.div`
   z-index: 1000;
   overflow: hidden;
   animation: slideIn 0.3s ease-out forwards;
-
-  @keyframes slideIn {
-    from { opacity: 0; transform: translateY(-20px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
 `;
 
 const ClosePlayerButton = styled.button`
@@ -268,50 +282,35 @@ const ChatInterface = () => {
   const { interruptStream, sendCommand } = useSocket(); 
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState(null); 
+  const [selectedDocument, setSelectedDocument] = useState(null); // 🚀 NEW: Document State
   const chatEndRef = useRef(null);
 
   const isBusy = isProcessing || isSpeaking;
 
-  // 🚀 CRITICAL FIX: Image Compression Algorithm
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        // Create an invisible image object to read dimensions
         const img = new Image();
         img.onload = () => {
-          // Create an invisible canvas
           const canvas = document.createElement('canvas');
           const MAX_WIDTH = 800;
           const MAX_HEIGHT = 800;
           let width = img.width;
           let height = img.height;
 
-          // Scale down the dimensions if it's too big
           if (width > height) {
-            if (width > MAX_WIDTH) {
-              height *= MAX_WIDTH / width;
-              width = MAX_WIDTH;
-            }
+            if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
           } else {
-            if (height > MAX_HEIGHT) {
-              width *= MAX_HEIGHT / height;
-              height = MAX_HEIGHT;
-            }
+            if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
           }
-
-          canvas.width = width;
-          canvas.height = height;
+          canvas.width = width; canvas.height = height;
           const ctx = canvas.getContext('2d');
-          
-          // Draw the shrunken image onto the canvas
           ctx.drawImage(img, 0, 0, width, height);
 
-          // 🚀 Export as JPEG with 70% quality (Massive size reduction!)
           const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
           const base64String = compressedDataUrl.split(',')[1];
-          
           setSelectedImage({ file: URL.createObjectURL(file), base64: base64String });
         };
         img.src = reader.result;
@@ -319,6 +318,20 @@ const ChatInterface = () => {
       reader.readAsDataURL(file);
     }
     e.target.value = null; 
+  };
+
+  // 🚀 NEW: Document Upload Handler
+  const handleDocumentUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result.split(',')[1];
+        setSelectedDocument({ name: file.name, type: file.type, base64: base64String });
+      };
+      reader.readAsDataURL(file);
+    }
+    e.target.value = null;
   };
 
   useEffect(() => {
@@ -339,12 +352,14 @@ const ChatInterface = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if ((!inputText.trim() && !selectedImage) || isBusy) return;
+    if ((!inputText.trim() && !selectedImage && !selectedDocument) || isBusy) return;
     
-    sendCommand(inputText.trim(), selectedImage?.base64);
+    // 🚀 Send text, image, AND document payload
+    sendCommand(inputText.trim(), selectedImage?.base64, selectedDocument);
     
     setInputText('');
     setSelectedImage(null); 
+    setSelectedDocument(null);
   };
 
   return (
@@ -369,6 +384,11 @@ const ChatInterface = () => {
             {msg.text}
             
             {msg.image && <><br/><BubbleImage src={msg.image} alt="User upload" /></>}
+            
+            {/* 🚀 Render Document name in chat log */}
+            {msg.documentName && (
+              <><br/><DocumentAttachment>📄 {msg.documentName}</DocumentAttachment></>
+            )}
 
             {msg.sender === 'ai' && (msg.isStreaming || (isSpeaking && index === messages.length - 1)) && (
               <WaveformBars><div></div><div></div><div></div><div></div><div></div></WaveformBars>
@@ -391,25 +411,42 @@ const ChatInterface = () => {
       </MessageContainer>
 
       <InputContainer>
-        {selectedImage && (
-          <ImagePreviewContainer>
-            <RemoveImageButton onClick={() => setSelectedImage(null)}>X</RemoveImageButton>
-            <ImagePreview src={selectedImage.file} alt="Preview" />
-          </ImagePreviewContainer>
-        )}
+        <PreviewRow>
+          {selectedImage && (
+            <ImagePreviewContainer>
+              <RemoveAttachmentButton onClick={() => setSelectedImage(null)}>X</RemoveAttachmentButton>
+              <ImagePreview src={selectedImage.file} alt="Preview" />
+            </ImagePreviewContainer>
+          )}
+          
+          {/* 🚀 Document Preview Bubble */}
+          {selectedDocument && (
+            <ImagePreviewContainer>
+              <RemoveAttachmentButton onClick={() => setSelectedDocument(null)}>X</RemoveAttachmentButton>
+              <DocumentAttachment style={{ margin: 0 }}>📄 {selectedDocument.name}</DocumentAttachment>
+            </ImagePreviewContainer>
+          )}
+        </PreviewRow>
 
         <InputForm onSubmit={handleSubmit}>
-          <UploadLabel>
+          {/* Image Upload */}
+          <UploadLabel title="Upload Image">
             📷
             <HiddenInput type="file" accept="image/png, image/jpeg, image/webp" onChange={handleImageUpload} disabled={isBusy} />
           </UploadLabel>
 
+          {/* 🚀 NEW: Document Upload */}
+          <UploadLabel title="Upload Document">
+            📄
+            <HiddenInput type="file" accept=".txt,.csv,.md,.json,.pdf" onChange={handleDocumentUpload} disabled={isBusy} />
+          </UploadLabel>
+
           <TextInput 
-            type="text" placeholder="Message or describe an image..." 
+            type="text" placeholder="Message, describe an image, or ask about a file..." 
             value={inputText} onChange={(e) => setInputText(e.target.value)}
             disabled={isBusy} autoComplete="off"
           />
-          <SendButton type="submit" disabled={(!inputText.trim() && !selectedImage) || isBusy}>Send</SendButton>
+          <SendButton type="submit" disabled={(!inputText.trim() && !selectedImage && !selectedDocument) || isBusy}>Send</SendButton>
         </InputForm>
       </InputContainer>
     </ChatWrapper>
