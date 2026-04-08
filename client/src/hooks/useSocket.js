@@ -5,7 +5,7 @@ import { useTextToSpeech } from './useTextToSpeech';
 
 export const useSocket = () => {
   const { socket, isConnected } = useContext(SocketContext) || {}; 
-  const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef } = useChat();
+  const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef, setMediaData } = useChat();
   const { processStreamChunk, stop } = useTextToSpeech();
 
   useEffect(() => {
@@ -31,7 +31,6 @@ export const useSocket = () => {
 
     socket.on('ai:client:action', async (action) => {
       console.log('Received Client Action:', action);
-      
       if (action.type === 'OPEN_URL') {
         window.open(action.url, '_blank');
       } 
@@ -47,13 +46,16 @@ export const useSocket = () => {
                 document.execCommand('copy');
                 textArea.remove();
             }
-        } catch (err) {
-            console.error('Failed to copy:', err);
-        }
+        } catch (err) {}
       }
-      // 🚀 UPGRADE: Inject the theme into the document root!
       else if (action.type === 'CHANGE_THEME') {
         document.documentElement.setAttribute('data-theme', action.theme);
+      }
+      else if (action.type === 'PLAY_MEDIA') {
+        setMediaData({ videoId: action.videoId, title: action.title });
+      }
+      else if (action.type === 'STOP_MEDIA') {
+        setMediaData(null); 
       }
     });
 
@@ -67,15 +69,26 @@ export const useSocket = () => {
       socket.off('bot_error');
       socket.off('ai:client:action');
     };
-  }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef]);
+  }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef, setMediaData]);
 
-  const sendCommand = (text) => {
+// 🚀 UPGRADE: Accept documentData 
+  const sendCommand = (text, imageBase64 = null, documentData = null) => {
     if (socket) {
       isInterruptedRef.current = false; 
       stop();
       setIsProcessing(true);
-      addMessage({ sender: 'user', text }); 
-      socket.emit('ai:stt:final', { command: text }); 
+      
+      const displayImage = imageBase64 ? `data:image/jpeg;base64,${imageBase64}` : null;
+      const displayDoc = documentData ? documentData.name : null;
+      
+      addMessage({ sender: 'user', text, image: displayImage, documentName: displayDoc }); 
+      
+      // Emit everything to the backend
+      socket.emit('ai:stt:final', { 
+        command: text, 
+        image: imageBase64,
+        document: documentData
+      }); 
     }
   };
 

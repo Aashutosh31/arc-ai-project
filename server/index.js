@@ -52,20 +52,22 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
     console.log(`📡 User connected: ${socket.id} (Authenticated ID: ${socket.userId})`);
 
-    // 🚀 NEW: Listener for the Stop Command
     socket.on('ai:stream:stop', () => {
         console.log(`🛑 User ${socket.userId} interrupted the stream.`);
-        socket.isInterrupted = true; // Set a flag on this specific user's socket
+        socket.isInterrupted = true; 
     });
 
     socket.on('ai:stt:final', async (data) => {
-        const { command } = data; 
+        // 🚀 UPGRADE: Extract 'document' from the incoming payload!
+        const { command, image, document } = data; 
         const userId = socket.userId; 
         
-        socket.isInterrupted = false; // Reset the flag for the new command!
+        socket.isInterrupted = false; 
 
-        console.log(`🧠 Processing command from user ${userId}: "${command}"`);
-        await AIService.processQuery(userId, command, socket);
+        console.log(`🧠 Processing command from user ${userId}: "${command}" ${image ? '[+Image]' : ''} ${document ? '[+Document]' : ''}`);
+        
+        // 🚀 UPGRADE: Pass the document to the Agent Router
+        await AIService.processQuery(userId, command, socket, image, document);
     });
 
     socket.on('disconnect', () => {
