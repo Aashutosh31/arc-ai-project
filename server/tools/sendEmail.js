@@ -1,4 +1,9 @@
 const nodemailer = require('nodemailer');
+const dns = require('dns');
+
+// 🚀 THE RENDER MAGIC BULLET: Force Node.js to use IPv4 instead of IPv6!
+// This prevents the silent ETIMEDOUT drops on cloud platforms.
+dns.setDefaultResultOrder('ipv4first');
 
 module.exports = {
     // 1. Mistral Function Calling Schema
@@ -45,17 +50,17 @@ module.exports = {
         }
 
         try {
-           // 🚀 Create the secure SMTP connection
+           // 🚀 The Bulletproof Cloud SMTP Configuration
             const transporter = nodemailer.createTransport({
                 host: 'smtp.gmail.com',
-                port: 465,
-                secure: true, // Use SSL
+                port: 587,         // Use 587 instead of 465 for better cloud routing
+                secure: false,     // Must be false for 587 (it upgrades via STARTTLS)
+                requireTLS: true,  // Force it to upgrade to secure connection
                 auth: {
                     user: user,
                     pass: pass
                 },
                 tls: {
-                    // Do not fail on invalid certs in cloud environments
                     rejectUnauthorized: false 
                 }
             });
@@ -65,13 +70,13 @@ module.exports = {
                 from: `"ARC-AI Assistant" <${user}>`,
                 to: args.recipient,
                 subject: args.subject,
-                text: args.body, // Plain text version
+                text: args.body,
                 html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
                           ${args.body.replace(/\n/g, '<br>')}
                           <br><br>
                           <hr style="border: none; border-top: 1px solid #eee;" />
                           <small style="color: #888;"><i>This message was sent autonomously by ARC-AI on behalf of Aashutosh.</i></small>
-                       </div>` // Beautiful HTML formatted version!
+                       </div>` 
             };
 
             // 🚀 Dispatch it!
