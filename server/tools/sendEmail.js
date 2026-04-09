@@ -1,9 +1,4 @@
-const nodemailer = require('nodemailer');
-const dns = require('dns');
-
-// 🚀 THE RENDER MAGIC BULLET: Force Node.js to use IPv4 instead of IPv6!
-// This prevents the silent ETIMEDOUT drops on cloud platforms.
-dns.setDefaultResultOrder('ipv4first');
+const { Resend } = require('resend');
 
 module.exports = {
     // 1. Mistral Function Calling Schema
@@ -35,53 +30,42 @@ module.exports = {
     
     // 2. Execution Logic
     execute: async (args) => {
-        console.log(`[Tool: sendEmail] Preparing to send email to: ${args.recipient}`);
+        console.log(`[Tool: sendEmail] Preparing to send HTTP email to: ${args.recipient}`);
 
-        const user = process.env.EMAIL_USER;
-        const pass = process.env.EMAIL_PASS;
+        const apiKey = process.env.RESEND_API_KEY;
 
         // Failsafe: Check if the user forgot to set up their .env variables
-        if (!user || !pass) {
-            console.error("[Tool: sendEmail] Missing EMAIL_USER or EMAIL_PASS in .env file.");
+        if (!apiKey) {
+            console.error("[Tool: sendEmail] Missing RESEND_API_KEY in environment variables.");
             return { 
                 success: false, 
-                message: "I cannot send emails right now because the email credentials are not configured in the server's environment variables." 
+                message: "I cannot send emails right now because the Resend API key is not configured." 
             };
         }
 
-        try {
-           // 🚀 The Bulletproof Cloud SMTP Configuration
-            const transporter = nodemailer.createTransport({
-                host: 'smtp.gmail.com',
-                port: 587,         // Use 587 instead of 465 for better cloud routing
-                secure: false,     // Must be false for 587 (it upgrades via STARTTLS)
-                requireTLS: true,  // Force it to upgrade to secure connection
-                auth: {
-                    user: user,
-                    pass: pass
-                },
-                tls: {
-                    rejectUnauthorized: false 
-                }
-            });
+        const resend = new Resend(apiKey);
 
-            // 🚀 Package the email
-            const mailOptions = {
-                from: `"ARC-AI Assistant" <${user}>`,
+        try {
+            // 🚀 Dispatch it via HTTP API (Bypasses SMTP Firewalls!)
+            const data = await resend.emails.send({
+                // Note: On Resend's free tier, you MUST use this exact 'from' address
+                from: 'ARC-AI Assistant <onboarding@resend.dev>', 
                 to: args.recipient,
                 subject: args.subject,
-                text: args.body,
                 html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
                           ${args.body.replace(/\n/g, '<br>')}
                           <br><br>
                           <hr style="border: none; border-top: 1px solid #eee;" />
-                          <small style="color: #888;"><i>This message was sent autonomously by ARC-AI on behalf of Aashutosh.</i></small>
-                       </div>` 
-            };
+                          <small style="color: #888;"><i>This message was sent autonomously by ARC-AI via HTTP API.</i></small>
+                       </div>`
+            });
 
-            // 🚀 Dispatch it!
-            const info = await transporter.sendMail(mailOptions);
-            console.log(`[Tool: sendEmail] Email sent successfully! Message ID: ${info.messageId}`);
+            if (data.error) {
+                console.error("[Tool: sendEmail] API Error:", data.error);
+                throw new Error(data.error.message);
+            }
+
+            console.log(`[Tool: sendEmail] Email sent successfully via HTTP! ID: ${data.data.id}`);
 
             return {
                 success: true,
@@ -92,7 +76,7 @@ module.exports = {
             console.error(`[Tool: sendEmail] Error sending email:`, error);
             return {
                 success: false,
-                error: `I failed to send the email. Please check the backend console for SMTP or authentication errors.`
+                error: `I failed to send the email. API returned an error: ${error.message}`
             };
         }
     }
