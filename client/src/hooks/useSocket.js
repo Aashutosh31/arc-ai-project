@@ -3,6 +3,9 @@ import { SocketContext } from '../contexts/SocketContext';
 import { useChat } from '../contexts/ChatContext';
 import { useTextToSpeech } from './useTextToSpeech';
 
+// 🚀 FIX: Global deduplication timer shared across all tabs and reloads
+let lastReminderTime = 0;
+
 export const useSocket = () => {
   const { socket, isConnected } = useContext(SocketContext) || {}; 
   const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef, setMediaData } = useChat();
@@ -31,6 +34,7 @@ export const useSocket = () => {
 
     socket.on('ai:client:action', async (action) => {
       console.log('Received Client Action:', action);
+      
       if (action.type === 'OPEN_URL') {
         window.open(action.url, '_blank');
       } 
@@ -57,6 +61,23 @@ export const useSocket = () => {
       else if (action.type === 'STOP_MEDIA') {
         setMediaData(null); 
       }
+      // 🚀 THE FIX: Catch Background Reminders Safely
+      else if (action.type === 'TRIGGER_REMINDER') {
+        const now = Date.now();
+        // Ignore duplicate events that fire within the same 2 seconds!
+        if (now - lastReminderTime < 2000) {
+            console.log('Blocked duplicate React listener event.');
+            return; 
+        }
+        lastReminderTime = now;
+
+        stop(); // Silence anything currently playing
+        
+        addMessage({ sender: 'ai', text: `⏰ PROACTIVE REMINDER: ${action.message}` });
+        
+        const spokenMessage = `Excuse me sir, I have a reminder for you: ${action.message}`;
+        processStreamChunk(spokenMessage, true);
+      }
     });
 
     socket.on('bot_error', (errorMsg) => {
@@ -71,7 +92,6 @@ export const useSocket = () => {
     };
   }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef, setMediaData]);
 
-// 🚀 UPGRADE: Accept documentData 
   const sendCommand = (text, imageBase64 = null, documentData = null) => {
     if (socket) {
       isInterruptedRef.current = false; 
@@ -83,7 +103,6 @@ export const useSocket = () => {
       
       addMessage({ sender: 'user', text, image: displayImage, documentName: displayDoc }); 
       
-      // Emit everything to the backend
       socket.emit('ai:stt:final', { 
         command: text, 
         image: imageBase64,
