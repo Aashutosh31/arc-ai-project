@@ -45,12 +45,18 @@ module.exports = {
         }
 
         try {
-            // 🚀 Create the secure SMTP connection
+           // 🚀 Create the secure SMTP connection
             const transporter = nodemailer.createTransport({
-                service: 'gmail', // Defaults to Gmail. Change if using Outlook, Yahoo, etc.
+                host: 'smtp.gmail.com',
+                port: 465,
+                secure: true, // Use SSL
                 auth: {
                     user: user,
                     pass: pass
+                },
+                tls: {
+                    // Do not fail on invalid certs in cloud environments
+                    rejectUnauthorized: false 
                 }
             });
 
