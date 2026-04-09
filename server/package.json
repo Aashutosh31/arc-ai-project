@@ -24,7 +24,6 @@
     "mongoose": "^8.19.1",
     "node-cron": "^4.2.1",
     "pdf-extraction": "^1.0.2",
-    "resend": "^6.10.0",
     "socket.io": "^4.8.1",
     "yt-search": "^2.13.1"
   },
