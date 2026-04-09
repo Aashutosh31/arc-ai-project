@@ -13,6 +13,9 @@ const app = express();
 const server = http.createServer(app); 
 const PORT = process.env.PORT || 5000;
 
+global.connectedSockets = new Map(); // 🚀 NOW HOLDS SETS OF SOCKETS
+global.userCronJobs = new Map(); 
+
 const frontendOrigins = (process.env.FRONTEND_URL || '').split(',').map(origin => origin.trim()).filter(Boolean);
 
 app.use(cors({
@@ -41,7 +44,8 @@ io.use((socket, next) => {
     if (!token) return next(new Error('Authentication error'));
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        socket.userId = decoded.id;
+        const rawId = decoded.id || decoded.userId || decoded._id;
+        socket.userId = String(rawId); 
         console.log(`✅ Socket authenticated for web user: ${socket.userId}`);
         next();
     } catch (err) {
@@ -51,27 +55,36 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
     console.log(`📡 User connected: ${socket.id} (Authenticated ID: ${socket.userId})`);
+    
+    // 🚀 THE FIX: Add the socket to a Set to support multiple tabs/reloads!
+    if (!global.connectedSockets.has(socket.userId)) {
+        global.connectedSockets.set(socket.userId, new Set());
+    }
+    global.connectedSockets.get(socket.userId).add(socket);
 
     socket.on('ai:stream:stop', () => {
-        console.log(`🛑 User ${socket.userId} interrupted the stream.`);
         socket.isInterrupted = true; 
     });
 
     socket.on('ai:stt:final', async (data) => {
-        // 🚀 UPGRADE: Extract 'document' from the incoming payload!
         const { command, image, document } = data; 
         const userId = socket.userId; 
-        
         socket.isInterrupted = false; 
 
-        console.log(`🧠 Processing command from user ${userId}: "${command}" ${image ? '[+Image]' : ''} ${document ? '[+Document]' : ''}`);
-        
-        // 🚀 UPGRADE: Pass the document to the Agent Router
+        console.log(`🧠 Processing command from user ${userId}: "${command}"`);
         await AIService.processQuery(userId, command, socket, image, document);
     });
 
     socket.on('disconnect', () => {
         console.log(`User disconnected: ${socket.id}`);
+        // 🚀 THE FIX: Safely remove ONLY this specific socket, keeping active tabs alive
+        const userSockets = global.connectedSockets.get(socket.userId);
+        if (userSockets) {
+            userSockets.delete(socket);
+            if (userSockets.size === 0) {
+                global.connectedSockets.delete(socket.userId);
+            }
+        }
     });
 });
 
