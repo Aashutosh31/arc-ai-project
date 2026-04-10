@@ -1,152 +1,225 @@
-🤖 ARC-AI: Real-Time Voice-Activated AI Agent
+<div align="center">
 
-ARC-AI is an advanced, real-time, hybrid (Voice + Text) AI assistant built on the MERN stack. More than just a chatbot, ARC-AI is an autonomous Agent equipped with a dynamic Tool Registry, long-term memory, and the ability to execute physical UI actions on the client's machine.
+<h1>🤖 ARC-AI: Autonomous Real-time Conversational Agent</h1>
 
-✨ Core Features
+<p><strong>A MERN-stack Digital Assistant featuring RAG Memory, Live Web Research, Proactive Cron Routines, and Serverless Microservices.</strong></p>
 
-🎙️ Hybrid Interaction (Voice & Text)
+<a href="https://arc-ai-project.vercel.app/" target="_blank">
+  <img width="100%" alt="ARC-AI Demo" src="https://github.com/user-attachments/assets/ffa1f39d-89a1-4b3e-a8f8-740f98a300c1" />
+</a>
 
-Seamlessly switch between clicking the glowing microphone to speak naturally using the Web Speech API, or typing silently using the sleek terminal-style chat interface.
+<p><strong>🔗 Click the image to try the Live Application</strong></p>
 
-⚡ Real-Time Streaming & Audio Sync
+<p>
+  <a href="https://arc-ai-project.vercel.app/"><img src="https://img.shields.io/badge/Live-Demo-brightgreen?style=for-the-badge" /></a>
+  <a href="https://github.com/Aashutosh31/arc-ai-project"><img src="https://img.shields.io/badge/Source-Code-blue?style=for-the-badge" /></a>
+</p>
 
-ARC-AI does not wait for the entire response to generate. It pipes tokens directly from the Mistral API through WebSockets to the frontend. A custom Sentence Buffer collects these tokens and feeds them to the browser's Text-to-Speech (TTS) engine, allowing ARC-AI to start speaking instantly while it continues to "think."
+</div>
 
-🛑 "Jarvis-Style" Interruption
+---
 
-Don't want to listen to a 5-paragraph response? Simply click "Stop Speaking" or press the Spacebar. This triggers a full-stack interruption protocol:
+## 🚀 Overview
 
-Silences the browser's TTS engine instantly.
+ARC-AI (Autonomous Real-time Conversational AI) is a full-stack, voice-activated digital assistant that moves beyond traditional reactive chatbots into a **proactive, autonomous agent**.
 
-Halts the frontend UI typing animation.
+It can:
 
-Sends a Socket kill-signal to the Node.js backend to break the LLM generation loop, saving API tokens.
+* 🌐 Fetch real-time data from the internet
+* ⏰ Schedule and execute background tasks
+* 🧠 Remember user data using vector embeddings (RAG)
+* 🎯 Dynamically control the frontend UI
+* 📩 Communicate externally via serverless webhooks
 
-🧠 Agentic Tool Registry
+---
 
-ARC-AI is aware of its limitations and uses Mistral Function Calling to route queries to backend plugins. Out of the box, it includes:
+## 🎥 Main Showcase Demo
 
-Live News Fetcher: Grabs real-time BBC top headlines via RSS.
+▶️ https://www.youtube.com/watch?v=jt7q8v5KsrU
 
-Web Search: Queries the Wikipedia API for factual, real-world data.
+---
 
-Time Awareness: Injects real-time system clocks into the AI's context window.
+## 🧠 Architectural Deep Dive
 
-💻 Client Action Pattern (System Control)
+ARC-AI uses a **low-latency pipeline** combining REST APIs and WebSockets.
 
-ARC-AI can physically control aspects of the user's UI. By utilizing a secure "Client Action" Socket bridge, the Node.js backend can command the React frontend to perform tasks like window.open(). Tell ARC-AI to "Open YouTube", and watch a new tab magically appear.
+### Request Lifecycle
 
-💾 Persistent Long-Term & Short-Term Memory
+1. **Input** – Voice (Web Speech API) or Text
+2. **WebSocket Emission** – Frontend sends `ai:stt:final`
+3. **Agent Routing** – Context + memory collected
+4. **Tool Evaluation** – LLM decides required tools
+5. **Execution** – Backend executes tools autonomously
+6. **Streaming** – Token-by-token response via sockets
+7. **UI Actuation** – Direct frontend control
 
-Powered by MongoDB, ARC-AI remembers the last 5 conversational turns (Short-term) and maintains a separate collection for permanent user facts (Long-term), allowing for highly personalized interactions.
+---
 
-🏗️ Architecture Deep Dive
+## 🛠️ Core Features
 
-The application is split into a React Frontend and a Node/Express Backend, connected via standard HTTP REST (for Auth) and Socket.IO (for real-time Agentic execution).
+### 🧠 1. Infinite Memory (RAG)
 
-The Agent Router (AIService.js)
+* Vector embeddings via Mistral
+* Pinecone for semantic search
+* Long-term personalized memory
 
-When a user submits a prompt, the Agent Router:
+🎥 Demo:
+https://www.instagram.com/aashutosh_vaishnav.31/reel/DW83J1HESyQ/
 
-Compiles context (Date, Short-term memory, Long-term facts).
+---
 
-Sends the prompt and available schemas to Mistral.
+### 🌐 2. Live Web Research
 
-If Mistral requests a tool (e.g., webSearch), the Router pauses, executes the local Node.js tool, and feeds the data back to the LLM.
+* Real-time scraping using Cheerio
+* API-based search, weather, news
 
-Streams the final synthesized response back to the client word-by-word.
+🎥 Demo:
+https://www.instagram.com/aashutosh_vaishnav.31/reel/DW31J3bEbu9/
 
-Clean TTS Engine (useTextToSpeech.js)
+---
 
-LLMs generate Markdown (e.g., **bold**, ### Headers) and Emojis (😊). If fed directly to a TTS engine, it sounds robotic (e.g., "Asterisk asterisk bold asterisk asterisk smiling face").
-Our custom hook uses advanced Regex to strip Markdown, convert URLs to the phrase "a link", and remove emojis right before speech synthesis, ensuring the UI remains visually rich while the audio remains human-natural.
+### ⏰ 3. Proactive Routine Engine
 
-🚀 Installation & Setup
+* Natural language → cron jobs
+* Background execution system
 
-Prerequisites
+🎥 Demo:
+https://www.instagram.com/aashutosh_vaishnav.31/reel/DW7DQ8lE-Wr/
 
-Node.js (v16+)
+---
 
-MongoDB Atlas Cluster (or local instance)
+### 📩 4. External Communication
 
-Mistral AI API Key
+* Autonomous email sending
+* Serverless webhook integration
 
-Backend Setup
+---
 
-Navigate to the server directory.
+### 🖥️ 5. UI Actuation
 
-Run npm install.
+* Change theme
+* Open websites
+* Play media
+* Copy to clipboard
 
-Create a .env file:
+🎥 Demo:
+https://www.instagram.com/aashutosh_vaishnav.31/reel/DWzcz9YE797/
 
+---
+
+## 💡 Advanced Engineering Highlights
+
+### 🔹 Multi-Tab WebSocket Broadcasting
+
+* Handles multiple tabs per user
+* Prevents duplicate events using timestamp locks
+
+### 🔹 Serverless Email Bypass
+
+* Google Apps Script webhook
+* Bypasses SMTP restrictions
+* 100% reliable production delivery
+
+---
+
+## 💻 Tech Stack
+
+| Category | Technologies                                 |
+| -------- | -------------------------------------------- |
+| Frontend | React 18, Vite, Tailwind CSS, Web Speech API |
+| Backend  | Node.js, Express.js, Socket.IO, node-cron    |
+| Database | MongoDB Atlas, Pinecone                      |
+| AI/ML    | Mistral AI, Pixtral                          |
+| Infra    | Google Apps Script                           |
+
+---
+
+## ⚙️ Local Setup
+
+### Prerequisites
+
+* Node.js (v18+)
+* MongoDB Atlas
+* Mistral API Key
+* Pinecone API Key
+
+---
+
+### 1. Clone Repo
+
+```bash
+git clone https://github.com/Aashutosh31/arc-ai-project.git
+cd arc-ai-project
+```
+
+### 2. Backend
+
+```bash
+cd server
+npm install
+```
+
+Create `.env`:
+
+```env
 PORT=5000
 MONGO_URI=your_mongodb_connection_string
-JWT_SECRET=your_super_secret_jwt_key
-MISTRAL_API_KEY=your_mistral_key
-MISTRAL_MODEL=mistral-tiny
+JWT_SECRET=your_secret
+MISTRAL_API_KEY=your_key
+PINECONE_API_KEY=your_key
+EMAIL_WEBHOOK=your_webhook
 FRONTEND_URL=http://localhost:5173
+```
 
+Run:
 
-Start the server: npm run dev
+```bash
+npm run dev
+```
 
-Frontend Setup
+---
 
-Navigate to the client directory.
+### 3. Frontend
 
-Run npm install.
+```bash
+cd ../client
+npm install
+npm run dev
+```
 
-Create a .env file:
+---
 
-VITE_API_URL=http://localhost:5000
+## ⚠️ Attribution Required
 
+This project is open-source under the MIT License.
 
-Start the Vite dev server: npm run dev
+You are free to use, modify, and distribute this code. However:
 
-🛠️ How to Build a Plugin
+* You MUST provide proper credit to the original author
+* You MUST include a link to this repository
+* You MUST NOT claim this project as your own work
 
-ARC-AI is designed to be infinitely extensible. To give ARC-AI a new superpower, you don't need to touch the core routing logic. Just create a new file in server/tools/.
+---
 
-Example: server/tools/openWebsite.js
+## 📝 License
 
-module.exports = {
-    // 1. Define the Schema for the LLM
-    schema: {
-        type: "function",
-        function: {
-            name: "openWebsite",
-            description: "Open a specific website in the user's browser.",
-            parameters: {
-                type: "object",
-                properties: {
-                    url: { type: "string" },
-                    siteName: { type: "string" }
-                },
-                required: ["url", "siteName"]
-            }
-        }
-    },
-    
-    // 2. Define the Execution Logic
-    execute: async (args, context) => {
-        return {
-            success: true,
-            message: `Opening ${args.siteName}.`,
-            // Optional: Trigger a physical UI action on the frontend!
-            clientAction: {
-                type: 'OPEN_URL',
-                url: args.url
-            }
-        };
-    }
-};
+This project is licensed under the MIT License.
 
+---
 
-The tools/index.js file automatically scans the directory, registers the schema with Mistral, and handles the execution dynamically.
+## 👨‍💻 Author & Original Creator
 
-🤝 Contributing
+**Aashutosh Bairagi**
 
-Contributions, issues, and feature requests are welcome! Feel free to check the issues page.
+* Built ARC-AI from scratch (architecture, backend, agent system, RAG pipeline, UI actuation)
+* First published with live demo and deployment
 
-📝 License
+🔗 GitHub: https://github.com/Aashutosh31
+🔗 LinkedIn: https://www.linkedin.com/in/aashutosh-bairagi-559aa530b/
+🐦 Twitter/X: https://x.com/Aashutosh_dev31
 
-This project is open-source and available under the MIT License.
+> If you are viewing this project elsewhere, verify the original source here.
+
+---
+
+⭐ If you found this project interesting, consider starring the repo!
