@@ -12,6 +12,7 @@
   "license": "ISC",
   "dependencies": {
     "@mistralai/mistralai": "^1.15.1",
+    "@pinecone-database/pinecone": "^7.1.0",
     "axios": "^1.12.2",
     "bcryptjs": "^3.0.2",
     "cheerio": "^1.2.0",
