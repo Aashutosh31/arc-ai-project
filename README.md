@@ -1,152 +1,197 @@
-🤖 ARC-AI: Real-Time Voice-Activated AI Agent
+<img width="1904" height="1015" alt="image" src="https://github.com/user-attachments/assets/ffa1f39d-89a1-4b3e-a8f8-740f98a300c1" />
 
-ARC-AI is an advanced, real-time, hybrid (Voice + Text) AI assistant built on the MERN stack. More than just a chatbot, ARC-AI is an autonomous Agent equipped with a dynamic Tool Registry, long-term memory, and the ability to execute physical UI actions on the client's machine.
 
-✨ Core Features
+🚀 Overview
 
-🎙️ Hybrid Interaction (Voice & Text)
+ARC-AI (Autonomous Real-time Conversational AI) is a full-stack, voice-activated digital assistant. It transitions the standard "reactive" chatbot paradigm into a proactive, autonomous agent.
 
-Seamlessly switch between clicking the glowing microphone to speak naturally using the Web Speech API, or typing silently using the sleek terminal-style chat interface.
+Instead of just answering questions, ARC-AI can fetch live data from the internet, schedule its own background tasks, dynamically control the user's frontend UI, permanently memorize facts using a Vector Database, and communicate with the outside world via custom serverless webhooks.
 
-⚡ Real-Time Streaming & Audio Sync
+🎥 Main Showcase Demo : https://www.youtube.com/watch?v=jt7q8v5KsrU
 
-ARC-AI does not wait for the entire response to generate. It pipes tokens directly from the Mistral API through WebSockets to the frontend. A custom Sentence Buffer collects these tokens and feeds them to the browser's Text-to-Speech (TTS) engine, allowing ARC-AI to start speaking instantly while it continues to "think."
+🧠 Architectural Deep Dive
 
-🛑 "Jarvis-Style" Interruption
+ARC-AI operates via a highly optimized, low-latency pipeline combining REST APIs for authentication and persistent WebSocket connections for real-time AI streaming.
 
-Don't want to listen to a 5-paragraph response? Simply click "Stop Speaking" or press the Spacebar. This triggers a full-stack interruption protocol:
+The Request Lifecycle
 
-Silences the browser's TTS engine instantly.
+Input: The user issues a command via Voice (Web Speech API) or Text (with optional Image/PDF attachments).
 
-Halts the frontend UI typing animation.
+WebSocket Emission: The React frontend (useSocket.js) emits an ai:stt:final payload to the Express backend.
 
-Sends a Socket kill-signal to the Node.js backend to break the LLM generation loop, saving API tokens.
+Agent Routing (AIService.js): The core AI engine collects context (current time, recent chat history from MongoDB, permanent user facts).
 
-🧠 Agentic Tool Registry
+Tool Evaluation: The query is routed to Mistral AI along with a dynamic registry of system tools.
 
-ARC-AI is aware of its limitations and uses Mistral Function Calling to route queries to backend plugins. Out of the box, it includes:
+Execution (TaskExecutor.js): If the AI decides a tool is needed (e.g., searching the web or checking the database), the Node.js backend executes the JavaScript function autonomously.
 
-Live News Fetcher: Grabs real-time BBC top headlines via RSS.
+Token Streaming: The final output is streamed back to the client token-by-token via Sockets (ai:tts:response:chunk), allowing the frontend UI to type it out and the TTS engine to speak sentences progressively before the full response is even finished.
 
-Web Search: Queries the Wikipedia API for factual, real-world data.
+UI Actuation: The backend can emit ai:client:action payloads, physically controlling the React frontend to open tabs, change CSS themes, play media, or copy data to the clipboard.
 
-Time Awareness: Injects real-time system clocks into the AI's context window.
+🛠️ The Tool Registry & Demos
 
-💻 Client Action Pattern (System Control)
+ARC-AI is equipped with an extensive, dynamic tool registry. The LLM intelligently decides when and how to use these tools based on the user's intent.
 
-ARC-AI can physically control aspects of the user's UI. By utilizing a secure "Client Action" Socket bridge, the Node.js backend can command the React frontend to perform tasks like window.open(). Tell ARC-AI to "Open YouTube", and watch a new tab magically appear.
+1. The Infinite Brain (RAG & Vector Embeddings)
 
-💾 Persistent Long-Term & Short-Term Memory
+ARC-AI features a multi-tiered memory system. Alongside short-term MongoDB conversational memory, it uses Retrieval-Augmented Generation (RAG) for limitless long-term recall.
 
-Powered by MongoDB, ARC-AI remembers the last 5 conversational turns (Short-term) and maintains a separate collection for permanent user facts (Long-term), allowing for highly personalized interactions.
+memorize: Converts raw text into 1,024-dimensional semantic vectors using mistral-embed and upserts them to a Pinecone Serverless Database, tagged with strict userId filters for absolute privacy.
 
-🏗️ Architecture Deep Dive
+recallMemory: Performs semantic cosine-similarity searches to instantly retrieve historical facts from the database and inject them into the AI's current context window.
 
-The application is split into a React Frontend and a Node/Express Backend, connected via standard HTTP REST (for Auth) and Socket.IO (for real-time Agentic execution).
+🎥 Watch Demo: https://www.instagram.com/aashutosh_vaishnav.31/reel/DW83J1HESyQ/
 
-The Agent Router (AIService.js)
+2. Live Web Researcher
 
-When a user submits a prompt, the Agent Router:
+ARC-AI is not limited by pre-trained cut-off dates. It physically navigates the live internet.
 
-Compiles context (Date, Short-term memory, Long-term facts).
+scrapeWebsite: Uses cheerio to fetch live URLs, strip away HTML/CSS/JS bloat, and feed pure, token-optimized text into the AI's context window for summarization and analysis.
 
-Sends the prompt and available schemas to Mistral.
+webSearch / getTopNews / getWeather: Interacts with REST APIs to pull real-time global data.
 
-If Mistral requests a tool (e.g., webSearch), the Router pauses, executes the local Node.js tool, and feeds the data back to the LLM.
+🎥 Watch Demo: https://www.instagram.com/aashutosh_vaishnav.31/reel/DW31J3bEbu9/
 
-Streams the final synthesized response back to the client word-by-word.
+3. Proactive Routine Engine
 
-Clean TTS Engine (useTextToSpeech.js)
+ARC-AI manages time and schedules background tasks autonomously using node-cron.
 
-LLMs generate Markdown (e.g., **bold**, ### Headers) and Emojis (😊). If fed directly to a TTS engine, it sounds robotic (e.g., "Asterisk asterisk bold asterisk asterisk smiling face").
-Our custom hook uses advanced Regex to strip Markdown, convert URLs to the phrase "a link", and remove emojis right before speech synthesis, ensuring the UI remains visually rich while the audio remains human-natural.
+setReminder: Converts natural language into valid cron expressions and schedules background jobs in the Node server's global memory map.
 
-🚀 Installation & Setup
+stopReminder: A "Kill Switch" that iterates through the global.userCronJobs map to safely destroy active routines.
+
+🎥 Watch Demo: https://www.instagram.com/aashutosh_vaishnav.31/reel/DW7DQ8lE-Wr/
+
+4. External Communication
+
+sendEmail: Autonomously drafts formatted HTML emails and dispatches them to external recipients via a secure Serverless Webhook.
+
+🎥 Watch Demo: https://www.instagram.com/aashutosh_vaishnav.31/reel/DW7DQ8lE-Wr/
+
+5. UI Actuation & OS Control
+
+changeTheme / playMedia / copyToClipboard / openWebsite: Tools that bypass standard text generation to physically actuate the React DOM.
+
+🎥 Watch Demo: https://www.instagram.com/aashutosh_vaishnav.31/reel/DWzcz9YE797/
+
+💡 Advanced Engineering Highlights
+
+1. Multi-Tab WebSocket Broadcasting & React Deduplication
+
+The Problem: Traditional WebSockets track one connection per user. If a background Cron job triggers a reminder while a user has 4 tabs open (or refreshes React), the payload drops or hits a "ghost tab".
+The Solution: * Overhauled the backend socket.io architecture to map users to a Set() of active connections (global.connectedSockets.set(userId, new Set())).
+
+When a background task fires, it iterates through the Set and blasts the payload to all active browser tabs simultaneously.
+
+Engineered a global timestamp lock in the React useSocket hook to debounce simultaneous incoming socket events, guaranteeing the UI only renders the notification once, preventing duplicate speech and rendering errors.
+
+2. Google Cloud Serverless Webhook Bypass
+
+The Problem: Modern cloud providers (like Render Free Tier) enforce strict outbound firewalls on standard SMTP ports (465/587) to prevent spam, and third-party APIs (Resend) sandbox domains, breaking standard Node.js email functionality in production.
+The Solution: * Engineered a custom Serverless Microservice using Google Cloud Apps Script.
+
+Re-routed the Node.js sendEmail tool to use native fetch, tunneling the payload via standard HTTP POST (Port 443) directly to Google's infrastructure.
+
+This entirely bypasses the hosting provider's firewall and the API sandbox restrictions, resulting in a 100% reliable, zero-cost production email pipeline.
+
+💻 Tech Stack
+
+Category
+
+Technologies
+
+Frontend
+
+React 18, Vite, Tailwind CSS, Web Speech API (STT/TTS)
+
+Backend
+
+Node.js, Express.js, Socket.IO, node-cron, Cheerio
+
+Database
+
+MongoDB Atlas (Mongoose), Pinecone (Vector DB)
+
+AI / ML
+
+Mistral AI (LLM & Embeddings), Pixtral (Vision)
+
+Infrastructure
+
+Google Cloud Apps Script (Serverless Webhooks)
+
+⚙️ Local Setup & Installation
+
+Want to run ARC-AI on your own machine? Follow these steps.
 
 Prerequisites
 
-Node.js (v16+)
+Node.js (v18+ recommended)
 
-MongoDB Atlas Cluster (or local instance)
+MongoDB Atlas Cluster URI
 
 Mistral AI API Key
 
-Backend Setup
+Pinecone API Key (1024 Dimensions, Cosine Metric)
 
-Navigate to the server directory.
+1. Clone the Repository
 
-Run npm install.
+git clone https://github.com/Aashutosh31/arc-ai-project.git
+cd arc-ai-project
 
-Create a .env file:
+
+2. Backend Setup
+
+cd server
+npm install
+
+
+Create a .env file in the server directory (DO NOT COMMIT THIS FILE):
 
 PORT=5000
 MONGO_URI=your_mongodb_connection_string
 JWT_SECRET=your_super_secret_jwt_key
-MISTRAL_API_KEY=your_mistral_key
-MISTRAL_MODEL=mistral-tiny
+MISTRAL_API_KEY=your_mistral_api_key
+PINECONE_API_KEY=your_pinecone_api_key
+EMAIL_WEBHOOK=your_google_apps_url
 FRONTEND_URL=http://localhost:5173
 
 
-Start the server: npm run dev
+Start the server:
 
-Frontend Setup
+npm run dev
 
-Navigate to the client directory.
 
-Run npm install.
+3. Frontend Setup
 
-Create a .env file:
+cd ../client
+npm install
+
+
+Create a .env file in the client directory:
 
 VITE_API_URL=http://localhost:5000
+VITE_SOCKET_URL=http://localhost:5000
 
 
-Start the Vite dev server: npm run dev
+Start the Vite development server:
 
-🛠️ How to Build a Plugin
-
-ARC-AI is designed to be infinitely extensible. To give ARC-AI a new superpower, you don't need to touch the core routing logic. Just create a new file in server/tools/.
-
-Example: server/tools/openWebsite.js
-
-module.exports = {
-    // 1. Define the Schema for the LLM
-    schema: {
-        type: "function",
-        function: {
-            name: "openWebsite",
-            description: "Open a specific website in the user's browser.",
-            parameters: {
-                type: "object",
-                properties: {
-                    url: { type: "string" },
-                    siteName: { type: "string" }
-                },
-                required: ["url", "siteName"]
-            }
-        }
-    },
-    
-    // 2. Define the Execution Logic
-    execute: async (args, context) => {
-        return {
-            success: true,
-            message: `Opening ${args.siteName}.`,
-            // Optional: Trigger a physical UI action on the frontend!
-            clientAction: {
-                type: 'OPEN_URL',
-                url: args.url
-            }
-        };
-    }
-};
+npm run dev
 
 
-The tools/index.js file automatically scans the directory, registers the schema with Mistral, and handles the execution dynamically.
+Security Warning: Never commit your .env files to GitHub. Ensure .env is included in both your client/.gitignore and server/.gitignore files. If you fork this project, regenerate any keys that may have been accidentally exposed.
 
-🤝 Contributing
+## 👨‍💻 Author & Original Creator
 
-Contributions, issues, and feature requests are welcome! Feel free to check the issues page.
+**Aashutosh Bairagi**
 
-📝 License
+* Built ARC-AI from scratch (architecture, backend, agent system, RAG pipeline, and UI actuation)
+* First published with live demo and deployment
 
-This project is open-source and available under the MIT License.
+🔗 GitHub: https://github.com/Aashutosh31
+🔗 LinkedIn: https://www.linkedin.com/in/aashutosh-bairagi-559aa530b/
+🐦 Twitter/X: https://x.com/Aashutosh_dev31
+
+> If you are viewing a copy of this project elsewhere, please verify the original source here.
+If you found this project interesting, please consider dropping a ⭐ on the repository!
