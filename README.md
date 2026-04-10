@@ -1,165 +1,152 @@
-🤖 ARC-AI: The Real-Time Voice Assistant (MERN Stack)
+🤖 ARC-AI: Real-Time Voice-Activated AI Agent
 
-Developed by:  Aashutosh
+ARC-AI is an advanced, real-time, hybrid (Voice + Text) AI assistant built on the MERN stack. More than just a chatbot, ARC-AI is an autonomous Agent equipped with a dynamic Tool Registry, long-term memory, and the ability to execute physical UI actions on the client's machine.
 
-ARC-AI is a high-performance, portfolio-grade web application built using the MERN stack. It simulates a futuristic, intelligent voice assistant (like Iron Man's Jarvis), showcasing expertise in real-time communication, custom AI orchestration, and modern full-stack architecture.
+✨ Core Features
 
-🚀 Live Demo and Status
+🎙️ Hybrid Interaction (Voice & Text)
 
-Component
+Seamlessly switch between clicking the glowing microphone to speak naturally using the Web Speech API, or typing silently using the sleek terminal-style chat interface.
 
-Status
+⚡ Real-Time Streaming & Audio Sync
 
-URL
+ARC-AI does not wait for the entire response to generate. It pipes tokens directly from the Mistral API through WebSockets to the frontend. A custom Sentence Buffer collects these tokens and feeds them to the browser's Text-to-Speech (TTS) engine, allowing ARC-AI to start speaking instantly while it continues to "think."
 
-Frontend (React)
+🛑 "Jarvis-Style" Interruption
 
-Deployed Frontend 
+Don't want to listen to a 5-paragraph response? Simply click "Stop Speaking" or press the Spacebar. This triggers a full-stack interruption protocol:
 
-[https://arc-ai-project.vercel.app/]
+Silences the browser's TTS engine instantly.
 
-Backend (Node/Express)
+Halts the frontend UI typing animation.
 
-Deployed Backend
+Sends a Socket kill-signal to the Node.js backend to break the LLM generation loop, saving API tokens.
 
-https://arc-ai-project.onrender.com
+🧠 Agentic Tool Registry
 
-AI Model
+ARC-AI is aware of its limitations and uses Mistral Function Calling to route queries to backend plugins. Out of the box, it includes:
 
-Functional
+Live News Fetcher: Grabs real-time BBC top headlines via RSS.
 
-Mistral AI (Free Tier)
+Web Search: Queries the Wikipedia API for factual, real-world data.
 
-Database
+Time Awareness: Injects real-time system clocks into the AI's context window.
 
-Functional
+💻 Client Action Pattern (System Control)
 
-MongoDB Atlas (Free Tier)
+ARC-AI can physically control aspects of the user's UI. By utilizing a secure "Client Action" Socket bridge, the Node.js backend can command the React frontend to perform tasks like window.open(). Tell ARC-AI to "Open YouTube", and watch a new tab magically appear.
 
+💾 Persistent Long-Term & Short-Term Memory
 
-✨ Key Features
+Powered by MongoDB, ARC-AI remembers the last 5 conversational turns (Short-term) and maintains a separate collection for permanent user facts (Long-term), allowing for highly personalized interactions.
 
-Real-Time Voice I/O: Uses the native Web Speech API for instant Speech-to-Text (STT) transcription and Text-to-Speech (TTS) voice output.
+🏗️ Architecture Deep Dive
 
-Zero-Latency Communication: Leverages Socket.IO to ensure immediate, bi-directional, and low-latency message delivery between the React client and the Node.js server.
+The application is split into a React Frontend and a Node/Express Backend, connected via standard HTTP REST (for Auth) and Socket.IO (for real-time Agentic execution).
 
-Custom AI Orchestration: The Node/Express server acts as a middleware layer, processing user commands, fetching contextual memory, and communicating with the external LLM to retrieve a structured JSON intent.
+The Agent Router (AIService.js)
 
-Contextual Memory: Integrates MongoDB Atlas to store user-specific conversation history and preferences, enabling context-aware follow-up responses.
+When a user submits a prompt, the Agent Router:
 
-Persona Lock: Overrides the LLM's base knowledge to assert the developer's identity. (Ask: "Who created you?")
+Compiles context (Date, Short-term memory, Long-term facts).
 
-Action Execution Simulation: Includes a robust system to process tasks (schedule_reminder, get_weather) by mocking external API calls in a dedicated service layer (TaskExecutor.js).
+Sends the prompt and available schemas to Mistral.
 
-🧠 Architecture Overview
+If Mistral requests a tool (e.g., webSearch), the Router pauses, executes the local Node.js tool, and feeds the data back to the LLM.
 
-ARC-AI follows a decoupled MERN architecture augmented by a service layer for external intelligence.
+Streams the final synthesized response back to the client word-by-word.
 
-Frontend (React): Handles UI, Authentication flow, and the Voice I/O pipeline. Uses React Context for global state management (Auth, Socket, Chat History).
+Clean TTS Engine (useTextToSpeech.js)
 
-Backend (Node/Express): Manages user sessions (JWT), routes API calls, and hosts the Socket.IO server. Its main function is to funnel user commands to the AI Service and execute the resulting actions.
+LLMs generate Markdown (e.g., **bold**, ### Headers) and Emojis (😊). If fed directly to a TTS engine, it sounds robotic (e.g., "Asterisk asterisk bold asterisk asterisk smiling face").
+Our custom hook uses advanced Regex to strip Markdown, convert URLs to the phrase "a link", and remove emojis right before speech synthesis, ensuring the UI remains visually rich while the audio remains human-natural.
 
-AI Service (AIService.js): The core intelligence module. It crafts a custom system prompt (including persona lock and history), sends the request via Axios to the Mistral API, and parses the structured JSON output.
-
-Database (MongoDB Atlas): Persists user data, memory history (AIMemory), and pending tasks (Task).
-
-⚙️ Technology Stack
-
-Area
-
-Technology
-
-Reason for Selection
-
-Frontend
-
-React, Styled Components, React Router
-
-Modern UI/UX and efficient SPA routing.
-
-Backend
-
-Node.js, Express, Socket.IO, JWT
-
-Non-blocking, event-driven I/O essential for real-time performance.
-
-Database
-
-MongoDB Atlas, Mongoose
-
-Flexible NoSQL schema ideal for storing unstructured chat history and contextual memory.
-
-AI/NLP
-
-Mistral AI (via Axios)
-
-Chosen for its performance, structured JSON output capability, and availability of a generous free tier, ensuring the project is cost-effective.
-
-Hosting
-
-Vercel (Frontend), Render (Backend/Socket.IO)
-
-Vercel provides excellent hosting for SPAs (with vercel.json routing fix). Render supports persistent connections needed for Socket.IO.
-
-🛠️ Setup and Installation
-
-This project uses a monorepo structure with independent client and server folders.
+🚀 Installation & Setup
 
 Prerequisites
 
-Node.js (v18+)
+Node.js (v16+)
 
-MongoDB Atlas Account
+MongoDB Atlas Cluster (or local instance)
 
-Mistral AI Account (or other LLM service with an API key)
+Mistral AI API Key
 
-1. Backend Setup (/server)
+Backend Setup
 
-Navigate to the server directory and install dependencies:
+Navigate to the server directory.
 
-npm install
+Run npm install.
 
+Create a .env file:
 
-Create a .env file in the server root and populate it with your credentials:
-
-MONGO_URI=your_mongodb_atlas_connection_string
-JWT_SECRET=YOUR_SECURE_SECRET_KEY
-MISTRAL_API_KEY=YOUR_MISTRAL_API_KEY
-MISTRAL_MODEL=mistral-tiny 
 PORT=5000
+MONGO_URI=your_mongodb_connection_string
+JWT_SECRET=your_super_secret_jwt_key
+MISTRAL_API_KEY=your_mistral_key
+MISTRAL_MODEL=mistral-tiny
+FRONTEND_URL=http://localhost:5173
 
 
-Run the server:
+Start the server: npm run dev
 
-npm run dev
+Frontend Setup
 
+Navigate to the client directory.
 
-2. Frontend Setup (/client)
+Run npm install.
 
-Navigate to the client directory and install dependencies:
+Create a .env file:
 
-npm install
-
-
-Create a .env file in the client root (using your deployed backend URL):
-
-Run the client locally:
-
-npm run dev
+VITE_API_URL=http://localhost:5000
 
 
-⚠️ Challenges and Solutions (Portfolio Focus)
+Start the Vite dev server: npm run dev
 
-Silent Network Hang (Challenge): Node.js failed to connect to external HTTPS APIs locally due to firewall/SSL interception, causing silent timeouts.
+🛠️ How to Build a Plugin
 
-Solution: Solved by deploying the Node.js backend to an unrestricted cloud environment (Render), proving the application logic was sound, while the local environment was the bottleneck.
+ARC-AI is designed to be infinitely extensible. To give ARC-AI a new superpower, you don't need to touch the core routing logic. Just create a new file in server/tools/.
 
-SPA Routing on Deployment (Challenge): Refreshing the browser on deep links (e.g., /dashboard) resulted in a 404 error.
+Example: server/tools/openWebsite.js
 
-Solution: Implemented the vercel.json file with a universal rewrite rule ("source": "/(.*)", "destination": "/index.html") to redirect all non-file paths to the React entry point.
+module.exports = {
+    // 1. Define the Schema for the LLM
+    schema: {
+        type: "function",
+        function: {
+            name: "openWebsite",
+            description: "Open a specific website in the user's browser.",
+            parameters: {
+                type: "object",
+                properties: {
+                    url: { type: "string" },
+                    siteName: { type: "string" }
+                },
+                required: ["url", "siteName"]
+            }
+        }
+    },
+    
+    // 2. Define the Execution Logic
+    execute: async (args, context) => {
+        return {
+            success: true,
+            message: `Opening ${args.siteName}.`,
+            // Optional: Trigger a physical UI action on the frontend!
+            clientAction: {
+                type: 'OPEN_URL',
+                url: args.url
+            }
+        };
+    }
+};
 
-Token Management (Challenge): Managing secure, persistent authentication across the REST API, the Socket.IO connection, and the Mongoose middleware.
 
-Solution: Used JWT for REST authorization and implemented a custom io.use middleware check to protect the WebSocket channel.
+The tools/index.js file automatically scans the directory, registers the schema with Mistral, and handles the execution dynamically.
 
-Created with dedication by Aashutosh.
+🤝 Contributing
+
+Contributions, issues, and feature requests are welcome! Feel free to check the issues page.
+
+📝 License
+
+This project is open-source and available under the MIT License.
