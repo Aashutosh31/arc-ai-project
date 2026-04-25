@@ -4,6 +4,12 @@ import { SocketProvider } from './components/SocketProvider';
 import { ChatProvider } from './contexts/ChatContext';
 import AuthPage from './pages/AuthPage';
 import DashboardPage from './pages/DashboardPage';
+import Features from './pages/Features';
+import RAGMemory from './pages/RAGMemory';
+import WebResearch from './pages/WebResearch';
+import Automation from './pages/Automation';
+import Architecture from './pages/Architecture';
+import About from './pages/About';
 import styled, { createGlobalStyle } from 'styled-components';
 
 // 🚀 UPGRADE: We define Global CSS Variables for our Themes!
@@ -80,6 +86,13 @@ const App = () => {
           <GlobalStyle />
           <GlobalContainer>
             <Routes>
+              <Route path="/" element={<Navigate to="/features" replace />} />
+              <Route path="/features" element={<Features />} />
+              <Route path="/features/rag-memory" element={<RAGMemory />} />
+              <Route path="/features/web-research" element={<WebResearch />} />
+              <Route path="/features/automation" element={<Automation />} />
+              <Route path="/architecture" element={<Architecture />} />
+              <Route path="/about" element={<About />} />
               <Route path="/login" element={<AuthPage isRegister={false} />} />
               <Route path="/register" element={<AuthPage isRegister={true} />} />
               <Route path="/dashboard" element={
@@ -87,7 +100,6 @@ const App = () => {
                     <DashboardPage />
                   </ProtectedRoute>
               } />
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </GlobalContainer>
         </ChatProvider>
