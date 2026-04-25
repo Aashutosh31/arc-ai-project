@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://arc-ai-project.vercel.app/sitemap.xml
