@@ -1,4 +1,16 @@
 {
+  "redirects": [
+    {
+      "source": "/public/sitemap.xml",
+      "destination": "/sitemap.xml",
+      "permanent": true
+    },
+    {
+      "source": "/public/robots.txt",
+      "destination": "/robots.txt",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/((?!sitemap.xml|robots.txt).*)",
