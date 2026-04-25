@@ -1,15 +1,7 @@
 {
   "rewrites": [
     {
-      "source": "/sitemap.xml",
-      "destination": "/sitemap.xml"
-    },
-    {
-      "source": "/robots.txt",
-      "destination": "/robots.txt"
-    },
-    {
-      "source": "/(.*)",
+      "source": "/((?!sitemap.xml|robots.txt).*)",
       "destination": "/index.html"
     }
   ],
@@ -20,10 +12,6 @@
         {
           "key": "Content-Type",
           "value": "application/xml"
-        },
-        {
-          "key": "Cache-Control",
-          "value": "no-cache, no-store, must-revalidate"
         }
       ]
     }
