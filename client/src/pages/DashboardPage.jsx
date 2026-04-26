@@ -2,7 +2,7 @@
 import React from 'react';
 import styled from 'styled-components';
 import { useSocket } from '../hooks/useSocket';
-import VoiceButton from '../components/VoiceButton';
+import AdvancedVoiceButton from '../components/AdvancedVoiceButton.jsx';
 import ChatInterface from '../components/ChatInterface.jsx';
 
 const Page = styled.div`
@@ -325,7 +325,7 @@ const DashboardPage = () => {
                 Click the button below to activate voice input and talk to ARC-AI
                 like a real assistant.
               </Description>
-              <VoiceButton />
+              <AdvancedVoiceButton />
               <Hint>Tip: Use a clear, steady voice for best accuracy.</Hint>
             </VoiceWrapper>
           </Card>
