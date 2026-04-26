@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useCallback, useRef } from 'react';
 import styled, { css, keyframes } from 'styled-components';
 import { useSocket } from '../hooks/useSocket';
 import { useAdvancedVoice } from '../hooks/useAdvancedVoice';
 import { useChat } from '../contexts/ChatContext';
+import LiveVisionCamera from './LiveVisionCamera';
 
 const pulse = keyframes`
   0% { transform: scale(1); opacity: 0.45; }
@@ -148,12 +149,20 @@ const Transcript = styled.p`
 
 const AdvancedVoiceButton = () => {
   const { sendCommand, interruptStream } = useSocket();
-  const { isProcessing, isSpeaking, agentStatus } = useChat();
+  const { isProcessing, isSpeaking, agentStatus, setLiveVisionCapture } = useChat();
+  const captureFrameRef = useRef(() => null);
+
+  const handleCaptureReady = useCallback((captureFn) => {
+    const safeCapture = typeof captureFn === 'function' ? captureFn : () => null;
+    captureFrameRef.current = safeCapture;
+    setLiveVisionCapture(safeCapture);
+  }, [setLiveVisionCapture]);
 
   // 1. Hook up the VAD Engine to our Socket controls!
   const handleFinalCommand = (transcript) => {
     if (transcript.trim()) {
-      sendCommand(transcript);
+      const currentFrame = captureFrameRef.current?.() || null;
+      sendCommand(transcript, currentFrame);
     }
   };
 
@@ -218,6 +227,8 @@ const AdvancedVoiceButton = () => {
           {liveTranscript || (isVoiceModeActive && "...")}
         </Transcript>
       </StatusArea>
+
+      <LiveVisionCamera onCaptureReady={handleCaptureReady} />
     </Wrapper>
   );
 };

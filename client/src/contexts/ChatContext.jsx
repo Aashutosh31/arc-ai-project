@@ -13,6 +13,7 @@ export const ChatProvider = ({ children }) => {
 
   // 🚀 NEW: State to hold the currently playing YouTube video
   const [mediaData, setMediaData] = useState(null);
+  const liveVisionCaptureRef = useRef(() => null);
 
   const isInterruptedRef = useRef(false);
 
@@ -45,6 +46,18 @@ export const ChatProvider = ({ children }) => {
     setIsProcessing(false);
   };
 
+  const setLiveVisionCapture = (captureFn) => {
+    liveVisionCaptureRef.current = typeof captureFn === 'function' ? captureFn : () => null;
+  };
+
+  const getLiveVisionFrame = () => {
+    try {
+      return liveVisionCaptureRef.current?.() || null;
+    } catch {
+      return null;
+    }
+  };
+
   return (
     <ChatContext.Provider value={{ 
         messages, 
@@ -59,7 +72,9 @@ export const ChatProvider = ({ children }) => {
         setAgentStatus,
         isInterruptedRef,
         mediaData,
-        setMediaData
+        setMediaData,
+        setLiveVisionCapture,
+        getLiveVisionFrame
     }}>
       {children}
     </ChatContext.Provider>

@@ -362,7 +362,7 @@ const ClosePlayerButton = styled.button`
 `;
 
 const ChatInterface = () => {
-  const { messages, isProcessing, isSpeaking, mediaData, setMediaData } = useChat();
+  const { messages, isProcessing, isSpeaking, mediaData, setMediaData, getLiveVisionFrame } = useChat();
   const { interruptStream, sendCommand } = useSocket(); 
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState(null); 
@@ -436,8 +436,11 @@ const ChatInterface = () => {
   const handleSubmit = (e) => {
     e.preventDefault();
     if ((!inputText.trim() && !selectedImage && !selectedDocument) || isBusy) return;
+
+    const uploadedImage = selectedImage?.base64 || null;
+    const liveVisionFrame = uploadedImage ? null : getLiveVisionFrame();
     
-    sendCommand(inputText.trim(), selectedImage?.base64, selectedDocument);
+    sendCommand(inputText.trim(), uploadedImage || liveVisionFrame, selectedDocument);
     
     setInputText('');
     setSelectedImage(null); 
