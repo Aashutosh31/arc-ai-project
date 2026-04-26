@@ -190,7 +190,7 @@ const Card = styled.div`
   gap: 10px;
   position: relative;
   overflow: hidden;
-  flex: 1;
+  flex: 0 0 auto;
 
   &::before {
     content: '';
