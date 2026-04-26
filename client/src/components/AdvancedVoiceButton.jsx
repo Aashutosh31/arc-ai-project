@@ -148,7 +148,7 @@ const Transcript = styled.p`
 
 const AdvancedVoiceButton = () => {
   const { sendCommand, interruptStream } = useSocket();
-  const { isProcessing, isSpeaking } = useChat();
+  const { isProcessing, isSpeaking, agentStatus } = useChat();
 
   // 1. Hook up the VAD Engine to our Socket controls!
   const handleFinalCommand = (transcript) => {
@@ -178,7 +178,7 @@ const AdvancedVoiceButton = () => {
       statusText = "ARC-AI is speaking...";
     } else if (isProcessing) {
       orbState = 'processing';
-      statusText = "Processing...";
+      statusText = agentStatus || "Processing...";
     } else {
       orbState = 'listening';
       statusText = "Listening... (Just start talking)";

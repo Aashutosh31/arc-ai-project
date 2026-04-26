@@ -167,7 +167,7 @@ class AIService {
                     const args = typeof toolCall.function.arguments === 'string' 
                         ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
 
-                    const toolResult = await TaskExecutor.executeTool(functionName, args, userId);
+                    const toolResult = await TaskExecutor.executeTool(functionName, args, userId, socket);
 
                     if (toolResult.clientAction && socket) {
                         socket.emit('ai:client:action', toolResult.clientAction);
@@ -212,7 +212,12 @@ class AIService {
             return finalOutputText;
 
         } catch (error) {
-            const isAbortError = error?.name === 'AbortError' || String(error?.message || '').toLowerCase().includes('aborted');
+            const errorText = String(error?.message || error || '').toLowerCase();
+            const isAbortError =
+                error?.name === 'AbortError' ||
+                errorText.includes('aborted') ||
+                errorText.includes('user_interrupted') ||
+                errorText.includes('interrupted');
             if (isAbortError) {
                 console.log(`[AIService] Request aborted for user ${userId}.`);
                 if (socket) {

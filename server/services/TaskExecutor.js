@@ -5,7 +5,7 @@ const toolRegistry = require('../tools/index');
  * and the Modular Tool Registry. 
  */
 class TaskExecutor {
-    async executeTool(toolName, args, userId) {
+    async executeTool(toolName, args, userId, socket = null) {
         console.log(`[TaskExecutor] Routing execution to tool: ${toolName}`, args);
         
         try {
@@ -20,7 +20,7 @@ class TaskExecutor {
             const context = { userId };
             
             // Execute the tool's modular logic
-            const result = await tool.execute(args, context);
+            const result = await tool.execute(args, context, socket);
             
             console.log(`[TaskExecutor] Tool ${toolName} execution complete.`);
             return result;
