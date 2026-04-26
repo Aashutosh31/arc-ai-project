@@ -10,9 +10,46 @@ class AIService {
         const apiKey = process.env.MISTRAL_API_KEY;
         this.client = new Mistral({ apiKey: apiKey });
         this.defaultModel = process.env.MISTRAL_MODEL || 'mistral-small-latest'; 
+        this.activeRequests = new Map();
+    }
+
+    getRequestKey(socket, userId) {
+        if (socket && socket.id) return `socket:${socket.id}`;
+        return `user:${userId}`;
+    }
+
+    beginRequest(socket, userId) {
+        const key = this.getRequestKey(socket, userId);
+
+        const prev = this.activeRequests.get(key);
+        if (prev && !prev.controller.signal.aborted) {
+            prev.controller.abort('superseded');
+        }
+
+        const controller = new AbortController();
+        this.activeRequests.set(key, { controller });
+        return { key, controller };
+    }
+
+    endRequest(key, controller) {
+        const current = this.activeRequests.get(key);
+        if (current && current.controller === controller) {
+            this.activeRequests.delete(key);
+        }
+    }
+
+    abortForSocket(socketId) {
+        if (!socketId) return;
+        const key = `socket:${socketId}`;
+        const current = this.activeRequests.get(key);
+        if (current && !current.controller.signal.aborted) {
+            current.controller.abort('user_interrupted');
+            this.activeRequests.delete(key);
+        }
     }
 
     async processQuery(userId, text, socket = null, imageBase64 = null, document = null) {
+        const { key, controller } = this.beginRequest(socket, userId);
         try {
             const now = new Date();
             const currentDateString = now.toLocaleString('en-US', { 
@@ -109,6 +146,8 @@ class AIService {
                 messages: messages,
                 tools: useTools ? tools : undefined,
                 toolChoice: useTools ? "auto" : "none",
+            }, {
+                signal: controller.signal,
             });
 
             const message = response.choices[0].message;
@@ -120,6 +159,10 @@ class AIService {
                 messages.push(message);
 
                 for (const toolCall of toolCalls) {
+                    if (socket && socket.isInterrupted) {
+                        break;
+                    }
+
                     const functionName = toolCall.function.name;
                     const args = typeof toolCall.function.arguments === 'string' 
                         ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
@@ -138,12 +181,15 @@ class AIService {
                     });
                 }
                 
-                finalOutputText = await this.streamMistralResponse(messages, socket, currentModel);
+                finalOutputText = await this.streamMistralResponse(messages, socket, currentModel, controller.signal);
             } else {
                 finalOutputText = message.content;
                 if (socket) {
                     const words = finalOutputText.split(' ');
                     for (const word of words) {
+                        if (socket.isInterrupted) {
+                            break;
+                        }
                         socket.emit('ai:tts:response:chunk', { chunk: word + ' ', displayText: word + ' ', isFinal: false });
                         await new Promise(r => setTimeout(r, 20)); 
                     }
@@ -154,7 +200,7 @@ class AIService {
                 socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
             }
 
-            if (finalOutputText) {
+            if (finalOutputText && !(socket && socket.isInterrupted)) {
                 let memoryQuery = text || "Uploaded a file.";
                 if (imageBase64) memoryQuery = `[Attached Image] ${text || ""}`;
                 if (document) memoryQuery = `[Attached Document: ${document.name}] ${text || ""}`;
@@ -166,6 +212,15 @@ class AIService {
             return finalOutputText;
 
         } catch (error) {
+            const isAbortError = error?.name === 'AbortError' || String(error?.message || '').toLowerCase().includes('aborted');
+            if (isAbortError) {
+                console.log(`[AIService] Request aborted for user ${userId}.`);
+                if (socket) {
+                    socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
+                }
+                return "Interrupted";
+            }
+
             console.error("[AIService] Error processing query:", error);
             let userFriendlyError = "An internal system error occurred.";
             
@@ -179,14 +234,18 @@ class AIService {
             
             if (socket) socket.emit('bot_error', userFriendlyError);
             return "Error";
+        } finally {
+            this.endRequest(key, controller);
         }
     }
 
-    async streamMistralResponse(messages, socket, modelToUse) {
+    async streamMistralResponse(messages, socket, modelToUse, signal) {
         let accumulatedText = "";
         const stream = await this.client.chat.stream({
             model: modelToUse,
             messages: messages
+        }, {
+            signal,
         });
 
         for await (const chunk of stream) {

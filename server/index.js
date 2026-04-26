@@ -64,6 +64,7 @@ io.on('connection', (socket) => {
 
     socket.on('ai:stream:stop', () => {
         socket.isInterrupted = true; 
+        AIService.abortForSocket(socket.id);
     });
 
     socket.on('ai:stt:final', async (data) => {
@@ -71,12 +72,16 @@ io.on('connection', (socket) => {
         const userId = socket.userId; 
         socket.isInterrupted = false; 
 
+        // Preempt any prior in-flight generation for this socket.
+        AIService.abortForSocket(socket.id);
+
         console.log(`🧠 Processing command from user ${userId}: "${command}"`);
         await AIService.processQuery(userId, command, socket, image, document);
     });
 
     socket.on('disconnect', () => {
         console.log(`User disconnected: ${socket.id}`);
+        AIService.abortForSocket(socket.id);
         // 🚀 THE FIX: Safely remove ONLY this specific socket, keeping active tabs alive
         const userSockets = global.connectedSockets.get(socket.userId);
         if (userSockets) {
