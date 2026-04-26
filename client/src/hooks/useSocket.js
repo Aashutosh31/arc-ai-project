@@ -8,7 +8,7 @@ let lastReminderTime = 0;
 
 export const useSocket = () => {
   const { socket, isConnected } = useContext(SocketContext) || {}; 
-  const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef, setMediaData } = useChat();
+  const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef, setMediaData, setAgentStatus } = useChat();
   const { processStreamChunk, stop } = useTextToSpeech();
 
   useEffect(() => {
@@ -16,7 +16,8 @@ export const useSocket = () => {
 
     socket.off('ai:tts:response:chunk');
     socket.off('bot_error');
-    socket.off('ai:client:action'); 
+    socket.off('ai:client:action');
+    socket.off('ai:agent:status');
 
     socket.on('ai:tts:response:chunk', (data) => {
       if (isInterruptedRef.current) return; 
@@ -28,8 +29,13 @@ export const useSocket = () => {
         processStreamChunk(displayText || chunk, false);
       } else {
         finishBotStream();
+        setAgentStatus(null);
         processStreamChunk('', true);
       }
+    });
+
+    socket.on('ai:agent:status', (data) => {
+      setAgentStatus(data?.status || null);
     });
 
     socket.on('ai:client:action', async (action) => {
@@ -81,6 +87,7 @@ export const useSocket = () => {
     });
 
     socket.on('bot_error', (errorMsg) => {
+      setAgentStatus(null);
       finishBotStream();
       addMessage({ sender: 'ai', text: `[Error]: ${errorMsg}` });
     });
@@ -89,12 +96,14 @@ export const useSocket = () => {
       socket.off('ai:tts:response:chunk');
       socket.off('bot_error');
       socket.off('ai:client:action');
+      socket.off('ai:agent:status');
     };
-  }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef, setMediaData]);
+  }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef, setMediaData, setAgentStatus]);
 
   const sendCommand = (text, imageBase64 = null, documentData = null) => {
     if (socket) {
       isInterruptedRef.current = false; 
+      setAgentStatus(null);
       stop();
       setIsProcessing(true);
       
@@ -114,6 +123,7 @@ export const useSocket = () => {
   const interruptStream = () => {
     if (socket) {
       isInterruptedRef.current = true; 
+      setAgentStatus(null);
       socket.emit('ai:stream:stop');   
       stop();                          
       finishBotStream();               

@@ -9,6 +9,7 @@ export const ChatProvider = ({ children }) => {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [agentStatus, setAgentStatus] = useState(null);
 
   // 🚀 NEW: State to hold the currently playing YouTube video
   const [mediaData, setMediaData] = useState(null);
@@ -54,6 +55,8 @@ export const ChatProvider = ({ children }) => {
         setIsProcessing,
         isSpeaking,
         setIsSpeaking,
+        agentStatus,
+        setAgentStatus,
         isInterruptedRef,
         mediaData,
         setMediaData
