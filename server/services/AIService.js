@@ -132,6 +132,7 @@ class AIService {
                     2. LONG-TERM MEMORY: Use 'storeUserFact' tool to remember personal facts.
                     3. UI CONTROL: Use 'openWebsite' or 'changeTheme' to control the user's system.
                     4. VISION & FILES: Analyze provided images or document text thoroughly and accurately.
+                    5. COMPUTATION: Use 'executeCode' for exact math, logic, iteration, parsing, or verification instead of guessing.
                     ${longTermMemoryText}` 
                 },
                 ...history,
