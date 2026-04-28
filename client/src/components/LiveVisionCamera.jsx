@@ -104,6 +104,70 @@ const LiveVisionCamera = ({ onCaptureReady }) => {
   const [selectedDeviceId, setSelectedDeviceId] = useState(null);
   const [preferredFacing, setPreferredFacing] = useState(null); // 'user' | 'environment' | null
 
+  const buildConstraintCandidates = useCallback(() => {
+    const candidates = [];
+
+    if (selectedDeviceId) {
+      candidates.push({
+        video: {
+          deviceId: { exact: selectedDeviceId },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+    }
+
+    if (preferredFacing) {
+      candidates.push({
+        video: {
+          facingMode: { ideal: preferredFacing },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+
+      candidates.push({
+        video: {
+          facingMode: preferredFacing,
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+    }
+
+    candidates.push({
+      video: {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+      audio: false,
+    });
+
+    return candidates;
+  }, [preferredFacing, selectedDeviceId]);
+
+  const startStream = useCallback(async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('Webcam API unavailable');
+    }
+
+    const candidates = buildConstraintCandidates();
+    let lastError = null;
+
+    for (const constraints of candidates) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    throw lastError || new Error('Unable to start camera');
+  }, [buildConstraintCandidates]);
+
   const captureFrame = useCallback(() => {
     if (!isEnabled) return null;
 
@@ -152,8 +216,8 @@ const LiveVisionCamera = ({ onCaptureReady }) => {
         const videoInputs = list.filter((d) => d.kind === 'videoinput');
         devicesRef.current = videoInputs;
         setDevices(videoInputs);
-        // if no selectedDeviceId, try to pick a sensible default
-        if (!selectedDeviceId && videoInputs.length) {
+        // only auto-pick a device when the user has not explicitly chosen a front/back preference
+        if (!selectedDeviceId && !preferredFacing && videoInputs.length) {
           setSelectedDeviceId((prev) => prev || videoInputs[0].deviceId);
         }
       } catch (err) {
@@ -168,12 +232,7 @@ const LiveVisionCamera = ({ onCaptureReady }) => {
       }
 
       try {
-        // Build constraints. Prefer explicit deviceId when provided, otherwise use facingMode if set.
-        const videoConstraints = selectedDeviceId
-          ? { deviceId: { exact: selectedDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-          : { facingMode: preferredFacing || 'user', width: { ideal: 1280 }, height: { ideal: 720 } };
-
-        const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+        const stream = await startStream();
 
         // After successful getUserMedia, refresh device labels (some browsers only populate labels after permission)
         await enumerate();
@@ -224,11 +283,7 @@ const LiveVisionCamera = ({ onCaptureReady }) => {
     // start new stream with new constraints
     const startNow = async () => {
       try {
-        const videoConstraints = selectedDeviceId
-          ? { deviceId: { exact: selectedDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-          : { facingMode: preferredFacing || 'user', width: { ideal: 1280 }, height: { ideal: 720 } };
-
-        const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+        const stream = await startStream();
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
