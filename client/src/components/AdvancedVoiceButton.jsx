@@ -27,7 +27,7 @@ const Wrapper = styled.div`
 
 const Heading = styled.h4`
   margin: 0;
-  font-size: 30px;
+  font-size: clamp(18px, 4.2vw, 24px);
   font-weight: 700;
   letter-spacing: 0.02em;
   color: #f2f4ff;
@@ -36,16 +36,16 @@ const Heading = styled.h4`
 const Subtitle = styled.p`
   margin: 0;
   text-align: center;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.45;
   color: #d7daea;
-  max-width: 280px;
+  max-width: 340px;
 `;
 
 const OrbShell = styled.div`
   position: relative;
-  width: 128px;
-  height: 128px;
+  width: clamp(88px, 20vw, 128px);
+  height: clamp(88px, 20vw, 128px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -96,8 +96,8 @@ const Glow = styled.div`
 const Button = styled.button`
   position: relative;
   z-index: 1;
-  width: 84px;
-  height: 84px;
+  width: clamp(64px, 16vw, 84px);
+  height: clamp(64px, 16vw, 84px);
   border-radius: 999px;
   border: none;
   outline: none;
@@ -125,7 +125,7 @@ const StopIcon = styled.div`
 
 const StatusArea = styled.div`
   text-align: center;
-  min-height: 56px;
+  min-height: 48px;
 `;
 
 const StatusText = styled.p`
@@ -141,7 +141,8 @@ const Transcript = styled.p`
   font-size: 12px;
   font-style: italic;
   color: #65d9ff;
-  width: 220px;
+  width: 260px;
+  max-width: 90%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -228,7 +229,9 @@ const AdvancedVoiceButton = () => {
         </Transcript>
       </StatusArea>
 
-      <LiveVisionCamera onCaptureReady={handleCaptureReady} />
+      <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+        <LiveVisionCamera onCaptureReady={handleCaptureReady} />
+      </div>
     </Wrapper>
   );
 };
