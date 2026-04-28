@@ -27,6 +27,7 @@
     "node-cron": "^4.2.1",
     "pdf-extraction": "^1.0.2",
     "socket.io": "^4.8.1",
+    "vm2": "^3.10.5",
     "yt-search": "^2.13.1"
   },
   "devDependencies": {
