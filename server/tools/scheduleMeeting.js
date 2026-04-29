@@ -112,21 +112,30 @@ module.exports = {
             });
 
             const created = response.data || {};
+            const createdTitle = created.summary || event.summary;
+            const createdStart = created.start?.dateTime || created.start?.date || event.start.dateTime;
+            const createdEnd = created.end?.dateTime || created.end?.date || event.end.dateTime;
+            const createdEventId = created.id || '';
 
             return {
                 success: true,
+                title: createdTitle,
+                start: createdStart,
+                end: createdEnd,
+                eventId: createdEventId,
                 calendarId,
                 event: {
-                    id: created.id || '',
-                    summary: created.summary || event.summary,
+                    id: createdEventId,
+                    summary: createdTitle,
                     htmlLink: created.htmlLink || '',
                     status: created.status || 'confirmed',
-                    start: created.start?.dateTime || created.start?.date || event.start.dateTime,
-                    end: created.end?.dateTime || created.end?.date || event.end.dateTime
+                    start: createdStart,
+                    end: createdEnd
                 },
                 message: `Meeting "${event.summary}" scheduled successfully.`
             };
         } catch (error) {
+            console.error('[scheduleMeeting] Failed to schedule meeting:', error?.stack || error);
             return {
                 success: false,
                 error: error.message || 'Failed to schedule Google Calendar meeting.'

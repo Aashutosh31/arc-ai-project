@@ -17,7 +17,8 @@ const getCreditsRemaining = async (actorId) => {
     const record = await getActorRecord(actorId);
     if (!record) return null;
 
-    return Number(record.creditsRemaining || 0);
+    const fallback = isGuestActorId(actorId) ? 12 : 1000;
+    return Number(record.creditsRemaining ?? fallback);
 };
 
 const consumeCredits = async (actorId, amount = 1, reason = 'usage') => {
@@ -28,7 +29,8 @@ const consumeCredits = async (actorId, amount = 1, reason = 'usage') => {
       return { success: false, error: 'Account not found for credit check.' };
     }
 
-    const current = Number(record.creditsRemaining || 0);
+    const fallback = isGuestActorId(actorId) ? 12 : 1000;
+    const current = Number(record.creditsRemaining ?? fallback);
     if (current < normalizedAmount) {
         return {
             success: false,
