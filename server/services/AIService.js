@@ -4,6 +4,7 @@ const UserFact = require('../models/UserFact');
 const TaskExecutor = require('./TaskExecutor');
 const toolRegistry = require('../tools/index');
 const pdfExtract = require('pdf-extraction'); // 🚀 The modern, working package!
+const { consumeCredits, isGuestActorId } = require('./creditService');
 
 class AIService {
     constructor() {
@@ -49,6 +50,22 @@ class AIService {
     }
 
     async processQuery(userId, text, socket = null, imageBase64 = null, document = null) {
+        const creditCharge = await consumeCredits(userId, 1, 'ai request');
+        if (!creditCharge.success) {
+            if (socket) {
+                socket.emit('bot_error', creditCharge.error);
+                socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
+            }
+            return creditCharge.error;
+        }
+
+        if (socket) {
+            socket.emit('ai:credits:update', {
+                creditsRemaining: creditCharge.creditsRemaining,
+                reason: 'ai request'
+            });
+        }
+
         const { key, controller } = this.beginRequest(socket, userId);
         try {
             const now = new Date();
@@ -57,15 +74,16 @@ class AIService {
                 day: 'numeric', hour: '2-digit', minute: '2-digit'
             });
 
-            const recentMemories = await AIMemory.find({ userId }).sort({ timestamp: -1 }).limit(15);
-            const history = recentMemories.reverse()
-                .filter(mem => mem.query && mem.response)
-                .map(mem => [
-                    { role: 'user', content: String(mem.query) },
-                    { role: 'assistant', content: String(mem.response) }
-                ]).flat();
+            const isGuest = isGuestActorId(userId);
+            const history = isGuest ? [] : await AIMemory.find({ userId }).sort({ timestamp: -1 }).limit(15)
+                .then((recentMemories) => recentMemories.reverse()
+                    .filter(mem => mem.query && mem.response)
+                    .map(mem => [
+                        { role: 'user', content: String(mem.query) },
+                        { role: 'assistant', content: String(mem.response) }
+                    ]).flat());
 
-            const userFacts = await UserFact.find({ userId });
+            const userFacts = isGuest ? [] : await UserFact.find({ userId });
             let longTermMemoryText = "";
             if (userFacts.length > 0) {
                 longTermMemoryText = "\n\nCRITICAL CONTEXT - You permanently know these facts about the user:\n" + 
@@ -133,6 +151,7 @@ class AIService {
                     3. UI CONTROL: Use 'openWebsite' or 'changeTheme' to control the user's system.
                     4. VISION & FILES: Analyze provided images or document text thoroughly and accurately.
                     5. COMPUTATION: Use 'executeCode' for exact math, logic, iteration, parsing, or verification instead of guessing.
+                    6. CALENDAR: Use 'checkCalendar' to inspect availability and 'scheduleMeeting' to create or update meetings when the user asks to manage Google Calendar.
                     ${longTermMemoryText}` 
                 },
                 ...history,
@@ -201,7 +220,7 @@ class AIService {
                 socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
             }
 
-            if (finalOutputText && !(socket && socket.isInterrupted)) {
+            if (finalOutputText && !(socket && socket.isInterrupted) && !isGuest) {
                 let memoryQuery = text || "Uploaded a file.";
                 if (imageBase64) memoryQuery = `[Attached Image] ${text || ""}`;
                 if (document) memoryQuery = `[Attached Document: ${document.name}] ${text || ""}`;

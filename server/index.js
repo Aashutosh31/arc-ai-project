@@ -7,6 +7,7 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 
 const authRoutes = require('./routes/auth.js');
+const googleAuthRoutes = require('./routes/googleAuth.js');
 const AIService = require('./services/AIService.js'); 
 
 const app = express();
@@ -46,6 +47,7 @@ io.use((socket, next) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const rawId = decoded.id || decoded.userId || decoded._id;
         socket.userId = String(rawId); 
+        socket.authType = decoded.role || 'user';
         console.log(`✅ Socket authenticated for web user: ${socket.userId}`);
         next();
     } catch (err) {
@@ -95,5 +97,6 @@ io.on('connection', (socket) => {
 
 app.get('/', (req, res) => res.status(200).send('ARC-AI Server Running. Status: Operational.'));
 app.use('/api/auth', authRoutes);
+app.use('/api/google', googleAuthRoutes);
 
 server.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));

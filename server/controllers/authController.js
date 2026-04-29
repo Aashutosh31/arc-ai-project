@@ -1,21 +1,54 @@
 // server/controllers/authController.js
 const User = require('../models/User');
-const AIMemory = require('../models/AIMemory'); // Used to create initial memory
+const GuestSession = require('../models/GuestSession');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const { buildGoogleAppAuthUrl } = require('../services/googleCalendarService');
 
 // Helper to generate JWT token
-const generateToken = (id) => {
-    return jwt.sign({ id }, process.env.JWT_SECRET, {
+const generateToken = (id, extraClaims = {}) => {
+    return jwt.sign({ id, ...extraClaims }, process.env.JWT_SECRET, {
         expiresIn: '30d', // Token validity
     });
+};
+
+const isStrongPassword = (password) => {
+    if (typeof password !== 'string') return false;
+    const hasLength = password.length >= 8;
+    const hasLower = /[a-z]/.test(password);
+    const hasUpper = /[A-Z]/.test(password);
+    const hasDigit = /\d/.test(password);
+    const hasSymbol = /[^a-zA-Z0-9]/.test(password);
+    return hasLength && hasLower && hasUpper && hasDigit && hasSymbol;
+};
+
+const createGuestSession = async () => {
+    const sessionId = `guest_${crypto.randomUUID()}`;
+    const guestSession = await GuestSession.create({ sessionId, displayName: 'Guest', creditsRemaining: 12 });
+    const token = generateToken(sessionId, { role: 'guest' });
+
+    return {
+        _id: guestSession.sessionId,
+        username: guestSession.displayName,
+        email: null,
+        token,
+        authType: 'guest',
+        authProvider: 'guest',
+        googleLinked: false,
+        creditsRemaining: guestSession.creditsRemaining
+    };
 };
 
 // @desc    Register new user
 // @route   POST /api/auth/register
 const getMe = async (req, res) => {
     // req.user is set by the protect middleware
-    res.status(200).json(req.user);
+    const payload = req.user?.toObject ? req.user.toObject() : req.user;
+    res.status(200).json({
+        ...payload,
+        authType: req.authType || 'user'
+    });
 };
 
 const registerUser = async (req, res) => {
@@ -26,6 +59,12 @@ const registerUser = async (req, res) => {
     }
 
     try {
+        if (!isStrongPassword(password)) {
+            return res.status(400).json({
+                message: 'Password must be at least 8 characters and include upper, lower, number, and symbol characters.'
+            });
+        }
+
         // Check if user exists
         const userExists = await User.findOne({ email });
         if (userExists) {
@@ -41,17 +80,20 @@ const registerUser = async (req, res) => {
             username,
             email,
             password: hashedPassword,
+            authProvider: 'local',
+            creditsRemaining: 100
         });
 
         if (user) {
-            // *** CRITICAL STEP: Create the initial AI Memory for the user ***
-            await AIMemory.create({ userId: user._id });
-
             res.status(201).json({
                 _id: user.id,
                 username: user.username,
                 email: user.email,
-                token: generateToken(user._id),
+                token: generateToken(user._id, { role: 'user' }),
+                authType: 'user',
+                authProvider: user.authProvider || 'local',
+                googleLinked: Boolean(user.googleIdentity?.googleId),
+                creditsRemaining: user.creditsRemaining,
                 message: 'Registration successful. ARC-AI memory initialized.'
             });
         } else {
@@ -73,11 +115,22 @@ const loginUser = async (req, res) => {
         const user = await User.findOne({ email });
 
         if (user && (await bcrypt.compare(password, user.password))) {
+            user.lastLoginAt = new Date();
+            await user.save();
+
             res.json({
                 _id: user.id,
                 username: user.username,
                 email: user.email,
-                token: generateToken(user._id),
+                token: generateToken(user._id, { role: 'user' }),
+                authType: 'user',
+                authProvider: user.authProvider || 'local',
+                googleLinked: Boolean(user.googleIdentity?.googleId),
+                creditsRemaining: user.creditsRemaining,
+            });
+        } else if (user && user.authProvider === 'google') {
+            return res.status(400).json({
+                message: 'This account uses Google sign-in. Please continue with Google.'
             });
         } else {
             res.status(400).json({ message: 'Invalid credentials' });
@@ -88,8 +141,41 @@ const loginUser = async (req, res) => {
     }
 };
 
+const guestUser = async (req, res) => {
+    try {
+        const guest = await createGuestSession();
+        res.status(201).json(guest);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Failed to create guest session' });
+    }
+};
+
+const getGoogleAuthUrl = async (req, res) => {
+    try {
+        const url = buildGoogleAppAuthUrl({ mode: 'login' });
+        res.json({ success: true, url });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: error.message || 'Unable to start Google sign-in' });
+    }
+};
+
+const getGoogleLinkUrl = async (req, res) => {
+    try {
+        const url = buildGoogleAppAuthUrl({ mode: 'link', userId: req.user._id });
+        res.json({ success: true, url });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: error.message || 'Unable to start Google account linking' });
+    }
+};
+
 module.exports = {
     registerUser,
     loginUser,
-     getMe 
+    getMe,
+    guestUser,
+    getGoogleAuthUrl,
+    getGoogleLinkUrl
 };
