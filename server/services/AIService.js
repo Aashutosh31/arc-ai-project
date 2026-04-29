@@ -6,6 +6,84 @@ const toolRegistry = require('../tools/index');
 const pdfExtract = require('pdf-extraction'); // 🚀 The modern, working package!
 const { consumeCredits, isGuestActorId } = require('./creditService');
 
+const SCHEDULE_KEYWORDS = [
+    'schedule',
+    'book',
+    'create meeting',
+    'set meeting',
+    'add event',
+    'arrange call',
+    'put on my calendar'
+];
+
+const READ_KEYWORDS = [
+    'what meetings',
+    'upcoming events',
+    "what's on my calendar",
+    'whats on my calendar',
+    'am i free',
+    'availability',
+    'show events'
+];
+
+const hasAnyPhrase = (text, phrases) => phrases.some((phrase) => text.includes(phrase));
+
+const hasDateTimeSignal = (text) => {
+    const dateWords = [
+        'today', 'tomorrow', 'tonight', 'this morning', 'this afternoon', 'this evening',
+        'next week', 'next month', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday',
+        'saturday', 'sunday', 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug',
+        'sep', 'sept', 'oct', 'nov', 'dec'
+    ];
+
+    const hasDateWord = dateWords.some((word) => text.includes(word));
+    const hasTimePattern = /\b\d{1,2}(:\d{2})?\s?(am|pm)\b|\bat\s+\d{1,2}(:\d{2})?\b/i.test(text);
+    const hasRelativePattern = /\bin\s+\d+\s+(minute|minutes|hour|hours|day|days|week|weeks)\b/i.test(text);
+
+    return hasDateWord || hasTimePattern || hasRelativePattern;
+};
+
+const hasTitleSignal = (text) => {
+    return /\babout\b|\bfor\b|\bwith\b|"[^"]+"|'[^']+'/i.test(text);
+};
+
+const classifyCalendarIntent = (rawText) => {
+    const text = String(rawText || '').toLowerCase();
+    if (!text.trim()) return { type: 'none', shouldForceSchedule: false };
+
+    const scheduleIntent = hasAnyPhrase(text, SCHEDULE_KEYWORDS);
+    const readIntent = hasAnyPhrase(text, READ_KEYWORDS);
+    const dateTimeSignal = hasDateTimeSignal(text);
+    const titleSignal = hasTitleSignal(text);
+    const shouldForceSchedule = scheduleIntent && (dateTimeSignal || titleSignal);
+
+    if (shouldForceSchedule) {
+        return {
+            type: 'schedule',
+            shouldForceSchedule: true,
+            reason: 'schedule keyword + date/time/title signal'
+        };
+    }
+
+    if (scheduleIntent) {
+        return {
+            type: 'schedule',
+            shouldForceSchedule: true,
+            reason: 'schedule keyword detected'
+        };
+    }
+
+    if (readIntent) {
+        return {
+            type: 'read',
+            shouldForceSchedule: false,
+            reason: 'calendar read keyword detected'
+        };
+    }
+
+    return { type: 'none', shouldForceSchedule: false };
+};
+
 class AIService {
     constructor() {
         const apiKey = process.env.MISTRAL_API_KEY;
@@ -47,6 +125,22 @@ class AIService {
             current.controller.abort('user_interrupted');
             this.activeRequests.delete(key);
         }
+    }
+
+    mapCalendarToolName(originalToolName, calendarIntent) {
+        if (!calendarIntent || calendarIntent.type === 'none') {
+            return originalToolName;
+        }
+
+        if (calendarIntent.type === 'schedule') {
+            return 'scheduleMeeting';
+        }
+
+        if (calendarIntent.type === 'read') {
+            return 'checkCalendar';
+        }
+
+        return originalToolName;
     }
 
     async processQuery(userId, text, socket = null, imageBase64 = null, document = null) {
@@ -173,6 +267,13 @@ class AIService {
             const message = response.choices[0].message;
             let finalOutputText = "";
             const toolCalls = message.toolCalls || message.tool_calls;
+            const calendarIntent = classifyCalendarIntent(text);
+
+            if (calendarIntent.type !== 'none') {
+                console.log(
+                    `[Planner] Calendar intent classified as "${calendarIntent.type}" (${calendarIntent.reason || 'rule match'}).`
+                );
+            }
 
             if (toolCalls && toolCalls.length > 0) {
                 console.log(`[Agent Router] AI requested ${toolCalls.length} tool(s). Executing...`);
@@ -183,7 +284,15 @@ class AIService {
                         break;
                     }
 
-                    const functionName = toolCall.function.name;
+                    const functionName = this.mapCalendarToolName(toolCall.function.name, calendarIntent);
+                    if (functionName !== toolCall.function.name) {
+                        console.log(
+                            `[Planner] Tool override applied: ${toolCall.function.name} -> ${functionName}`
+                        );
+                    } else {
+                        console.log(`[Planner] Selected tool: ${functionName}`);
+                    }
+
                     const args = typeof toolCall.function.arguments === 'string' 
                         ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
 
@@ -199,6 +308,35 @@ class AIService {
                         content: JSON.stringify(toolResult),
                         toolCallId: toolCall.id
                     });
+
+                    if (functionName === 'scheduleMeeting' && toolResult?.success) {
+                        console.log('[Planner] scheduleMeeting succeeded; running optional checkCalendar confirmation.');
+                        const createdStart = toolResult?.event?.start;
+                        const createdEnd = toolResult?.event?.end;
+                        let confirmationArgs = { maxResults: 5 };
+
+                        if (createdStart && createdEnd) {
+                            const start = new Date(createdStart);
+                            const end = new Date(createdEnd);
+                            if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+                                const timeMin = new Date(start.getTime() - (60 * 60 * 1000));
+                                const timeMax = new Date(end.getTime() + (60 * 60 * 1000));
+                                confirmationArgs = {
+                                    timeMin: timeMin.toISOString(),
+                                    timeMax: timeMax.toISOString(),
+                                    maxResults: 10
+                                };
+                            }
+                        }
+
+                        const confirmationResult = await TaskExecutor.executeTool('checkCalendar', confirmationArgs, userId, socket);
+                        messages.push({
+                            role: 'tool',
+                            name: 'checkCalendar',
+                            content: JSON.stringify(confirmationResult),
+                            toolCallId: `${toolCall.id}-confirmation`
+                        });
+                    }
                 }
                 
                 finalOutputText = await this.streamMistralResponse(messages, socket, currentModel, controller.signal);
