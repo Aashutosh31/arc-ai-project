@@ -1,9 +1,10 @@
 // client/src/pages/DashboardPage.jsx
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { useSocket } from '../hooks/useSocket';
 import AdvancedVoiceButton from '../components/AdvancedVoiceButton.jsx';
 import ChatInterface from '../components/ChatInterface.jsx';
+import TestUserAccessModal from '../components/TestUserAccessModal';
 
 const Page = styled.div`
   min-height: 100vh;
@@ -229,6 +230,114 @@ const CardSubtitle = styled.p`
   z-index: 1;
 `;
 
+const CardStatus = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: ${({ $connected }) => ($connected ? '#4dffb0' : '#ff7070')};
+  border: 1px solid ${({ $connected }) => ($connected ? 'rgba(38,255,138,0.9)' : 'rgba(255,80,80,0.9)')};
+  background: ${({ $connected }) => ($connected ? 'rgba(0,255,120,0.08)' : 'rgba(255,40,40,0.08)')};
+`;
+
+const CardButton = styled.button`
+  border: 1px solid rgba(0, 255, 255, 0.35);
+  background: linear-gradient(135deg, rgba(0, 255, 255, 0.18), rgba(138, 43, 226, 0.12));
+  color: #d9fbff;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 16px rgba(0, 255, 255, 0.18);
+    opacity: 0.95;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+    transform: none;
+  }
+`;
+
+const CardText = styled.p`
+  margin: 0;
+  font-size: 12px;
+  color: #c9cee6;
+  line-height: 1.45;
+`;
+
+const CardStack = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+  z-index: 1;
+`;
+
+const SessionPill = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: ${({ $guest }) => ($guest ? '#ffcf70' : '#4dffb0')};
+  border: 1px solid ${({ $guest }) => ($guest ? 'rgba(255, 207, 112, 0.9)' : 'rgba(38,255,138,0.9)')};
+  background: ${({ $guest }) => ($guest ? 'rgba(255, 207, 112, 0.08)' : 'rgba(0,255,120,0.08)')};
+`;
+
+const CreditLine = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #c9cee6;
+`;
+
+const CreditValue = styled.strong`
+  color: #7df7ff;
+`;
+
+const CardActionButton = styled.button`
+  border: 1px solid rgba(0, 255, 255, 0.35);
+  background: linear-gradient(135deg, rgba(0, 255, 255, 0.18), rgba(138, 43, 226, 0.12));
+  color: #d9fbff;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 16px rgba(0, 255, 255, 0.18);
+    opacity: 0.95;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+    transform: none;
+  }
+`;
+
 const VoiceWrapper = styled.div`
   display: flex;
   flex-direction: column;
@@ -292,7 +401,163 @@ const ListItem = styled.li`
 `;
 
 const DashboardPage = () => {
-  const { isConnected } = useSocket();
+  const { isConnected, authInfo, setAuthInfo } = useSocket();
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleMessage, setGoogleMessage] = useState('');
+  const [showTestUserModal, setShowTestUserModal] = useState(false);
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+  const apiOrigin = (() => {
+    try {
+      return new URL(apiUrl).origin;
+    } catch {
+      return 'http://localhost:5000';
+    }
+  })();
+
+  const persistAuthPayload = (payload) => {
+    const user = payload?.user || payload;
+    const token = payload?.token || user?.token;
+
+    if (!token || !user?._id) return;
+
+    const nextAuthInfo = {
+      ...(authInfo || {}),
+      ready: true,
+      token,
+      userId: user._id,
+      authType: user.authType || 'user',
+      authProvider: user.authProvider || 'google',
+      username: user.username || 'User',
+      creditsRemaining: Number(user.creditsRemaining ?? authInfo?.creditsRemaining ?? 0),
+      googleLinked: Boolean(user.googleLinked)
+    };
+
+    localStorage.setItem('token', token);
+    localStorage.setItem('userId', user._id);
+    localStorage.setItem('authType', nextAuthInfo.authType);
+    localStorage.setItem('authProvider', nextAuthInfo.authProvider);
+    localStorage.setItem('username', nextAuthInfo.username);
+    localStorage.setItem('creditsRemaining', String(nextAuthInfo.creditsRemaining));
+    localStorage.setItem('googleLinked', String(nextAuthInfo.googleLinked));
+
+    if (setAuthInfo) {
+      setAuthInfo(nextAuthInfo);
+    }
+  };
+
+  useEffect(() => {
+    const handleGoogleMessage = (event) => {
+      if (event.origin !== apiOrigin) return;
+      if (event.data?.type !== 'arc-ai-google-auth-success') return;
+
+      persistAuthPayload(event.data.payload);
+      setGoogleMessage('Google account linked successfully.');
+      setGoogleConnected(true);
+    };
+
+    window.addEventListener('message', handleGoogleMessage);
+    return () => window.removeEventListener('message', handleGoogleMessage);
+  }, [apiOrigin]);
+
+  useEffect(() => {
+    const loadGoogleStatus = async () => {
+      const token = authInfo?.token || localStorage.getItem('token');
+      if (!authInfo?.ready || !token || authInfo?.authType === 'guest') {
+        setGoogleConnected(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${apiUrl}/api/google/status`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (!response.ok) return;
+
+        const data = await response.json();
+        setGoogleConnected(Boolean(data.connected));
+      } catch {
+        // ignore status load failures
+      }
+    };
+
+    loadGoogleStatus();
+  }, [authInfo?.ready, authInfo?.token, authInfo?.authType, googleConnected]);
+
+  const handleGoogleConnect = async () => {
+    const token = authInfo?.token || localStorage.getItem('token');
+    if (!token) {
+      setGoogleMessage('Please log in first.');
+      return;
+    }
+
+    if (authInfo?.authType === 'guest') {
+      setGoogleMessage('Sign in with a real account to connect Google Calendar.');
+      return;
+    }
+
+    setShowTestUserModal(true);
+  };
+
+  const handleProceedAsTestUser = async () => {
+    setShowTestUserModal(false);
+    const token = authInfo?.token || localStorage.getItem('token');
+    try {
+      setGoogleLoading(true);
+      setGoogleMessage('');
+      const response = await fetch(`${apiUrl}/api/google/auth-url`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.url) {
+        throw new Error(data.message || 'Failed to start Google connection.');
+      }
+
+      window.open(data.url, '_blank', 'noopener,noreferrer,width=520,height=700');
+      setGoogleMessage('Google consent window opened. Finish login there.');
+    } catch (error) {
+      setGoogleMessage(error.message || 'Unable to start Google connection.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleGoogleLink = async () => {
+    const token = authInfo?.token || localStorage.getItem('token');
+    if (!token) {
+      setGoogleMessage('Please sign in first.');
+      return;
+    }
+
+    if (authInfo?.authType === 'guest') {
+      setGoogleMessage('Guest mode cannot link Google. Please sign in first.');
+      return;
+    }
+
+    try {
+      setGoogleLoading(true);
+      setGoogleMessage('');
+      const response = await fetch(`${apiUrl}/api/auth/google/link-url`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.url) {
+        throw new Error(data.message || 'Failed to start Google link flow.');
+      }
+
+      const popup = window.open(data.url, 'arc-ai-google-link', 'width=520,height=720');
+      if (!popup) {
+        throw new Error('Popup blocked by the browser. Please allow popups and try again.');
+      }
+    } catch (error) {
+      setGoogleMessage(error.message || 'Unable to start Google link flow.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
 
   return (
     <Page>
@@ -331,6 +596,61 @@ const DashboardPage = () => {
           </Card>
 
           <Card>
+            <CardTitle>Account</CardTitle>
+            <CardSubtitle>Session and credits</CardSubtitle>
+            <CardStack>
+              <SessionPill $guest={authInfo?.authType === 'guest'}>
+                {authInfo?.authType === 'guest' ? 'Guest Session' : 'Signed In'}
+              </SessionPill>
+              <CreditLine>
+                <span>Credits remaining</span>
+                <CreditValue>{authInfo?.creditsRemaining ?? '—'}</CreditValue>
+              </CreditLine>
+              {authInfo?.authType === 'guest' ? (
+                <CardText>
+                  Guest mode is limited. Sign up or sign in to unlock more credits and Google Calendar.
+                </CardText>
+              ) : (
+                <CardText>
+                <CreditLine>
+                  <span>Google link</span>
+                  <CreditValue>{authInfo?.googleLinked ? 'Linked' : 'Not linked'}</CreditValue>
+                </CreditLine>
+                {authInfo?.authType !== 'guest' ? (
+                  <CardActionButton type="button" onClick={handleGoogleLink} disabled={googleLoading}>
+                    {authInfo?.googleLinked ? 'Reconnect Google Account' : 'Link Google Account'}
+                  </CardActionButton>
+                ) : null}
+                  Your signed-in account can use the full ARC-AI feature set with higher credit limits.
+                </CardText>
+              )}
+            </CardStack>
+          </Card>
+
+          <Card>
+            <CardTitle>Google Calendar</CardTitle>
+            <CardSubtitle>Executive scheduling</CardSubtitle>
+            <CardStack>
+              <CardStatus $connected={googleConnected}>
+                {googleConnected ? 'Connected' : 'Not connected'}
+              </CardStatus>
+              <CardText>
+                Connect ARC-AI to Google Calendar so it can read availability and schedule meetings.
+              </CardText>
+              <CardButton type="button" onClick={handleGoogleConnect} disabled={googleLoading}>
+                {authInfo?.authType === 'guest'
+                  ? 'Sign in to connect'
+                  : googleLoading
+                    ? 'Opening...'
+                    : googleConnected
+                      ? 'Reconnect Calendar'
+                      : 'Connect Google Calendar'}
+              </CardButton>
+              {googleMessage ? <CardText>{googleMessage}</CardText> : null}
+            </CardStack>
+          </Card>
+
+          <Card>
             <CardTitle>Features</CardTitle>
             <CardSubtitle>What you get out of the box</CardSubtitle>
             <List>
@@ -338,10 +658,17 @@ const DashboardPage = () => {
               <ListItem>Built-in voice recognition for hands-free usage</ListItem>
               <ListItem>Real-time chat with low-latency updates</ListItem>
               <ListItem>Secure socket connection status indicator</ListItem>
+              <ListItem>Google Calendar scheduling with OAuth</ListItem>
             </List>
           </Card>
         </SidePanel>
       </Container>
+      
+      <TestUserAccessModal
+        isOpen={showTestUserModal}
+        onClose={() => setShowTestUserModal(false)}
+        onProceed={handleProceedAsTestUser}
+      />
     </Page>
   );
 };

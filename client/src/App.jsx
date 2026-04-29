@@ -70,14 +70,6 @@ const GlobalContainer = styled.div`
   flex-direction: column;
 `;
 
-const ProtectedRoute = ({ children }) => {
-  const token = localStorage.getItem('token');
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
-  return children;
-};
-
 const App = () => {
   return (
     <Router>
@@ -95,11 +87,7 @@ const App = () => {
               <Route path="/about" element={<About />} />
               <Route path="/login" element={<AuthPage isRegister={false} />} />
               <Route path="/register" element={<AuthPage isRegister={true} />} />
-              <Route path="/dashboard" element={
-                  <ProtectedRoute>
-                    <DashboardPage />
-                  </ProtectedRoute>
-              } />
+              <Route path="/dashboard" element={<DashboardPage />} />
             </Routes>
           </GlobalContainer>
         </ChatProvider>

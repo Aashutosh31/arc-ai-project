@@ -7,7 +7,7 @@ import { useTextToSpeech } from './useTextToSpeech';
 let lastReminderTime = 0;
 
 export const useSocket = () => {
-  const { socket, isConnected } = useContext(SocketContext) || {}; 
+  const { socket, isConnected, authInfo, setAuthInfo } = useContext(SocketContext) || {}; 
   const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef, setMediaData, setAgentStatus } = useChat();
   const { processStreamChunk, stop } = useTextToSpeech();
 
@@ -18,6 +18,7 @@ export const useSocket = () => {
     socket.off('bot_error');
     socket.off('ai:client:action');
     socket.off('ai:agent:status');
+    socket.off('ai:credits:update');
 
     socket.on('ai:tts:response:chunk', (data) => {
       if (isInterruptedRef.current) return; 
@@ -36,6 +37,17 @@ export const useSocket = () => {
 
     socket.on('ai:agent:status', (data) => {
       setAgentStatus(data?.status || null);
+    });
+
+    socket.on('ai:credits:update', (data) => {
+      const creditsRemaining = Number(data?.creditsRemaining ?? 0);
+      if (setAuthInfo) {
+        setAuthInfo((prev) => ({
+          ...(prev || {}),
+          creditsRemaining
+        }));
+      }
+      localStorage.setItem('creditsRemaining', String(creditsRemaining));
     });
 
     socket.on('ai:client:action', async (action) => {
@@ -97,8 +109,9 @@ export const useSocket = () => {
       socket.off('bot_error');
       socket.off('ai:client:action');
       socket.off('ai:agent:status');
+      socket.off('ai:credits:update');
     };
-  }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef, setMediaData, setAgentStatus]);
+  }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef, setMediaData, setAgentStatus, setAuthInfo]);
 
   const sendCommand = (text, imageBase64 = null, documentData = null) => {
     if (socket) {
@@ -130,5 +143,5 @@ export const useSocket = () => {
     }
   };
 
-  return { sendCommand, interruptStream, socket, isConnected };
+  return { sendCommand, interruptStream, socket, isConnected, authInfo, setAuthInfo };
 };

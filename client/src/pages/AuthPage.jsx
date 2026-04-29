@@ -1,6 +1,6 @@
 // client/src/pages/AuthPage.jsx
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import styled, { keyframes } from 'styled-components';
@@ -439,6 +439,60 @@ const Button = styled.button`
   }
 `;
 
+const ButtonGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+`;
+
+const SecondaryButton = styled.button`
+  padding: 14px 18px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dffbff;
+  border: 1px solid rgba(0, 255, 255, 0.22);
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  min-height: 50px;
+  transition: all 0.25s ease;
+
+  &:hover:not(:disabled) {
+    background: rgba(0, 255, 255, 0.1);
+    box-shadow: 0 0 18px rgba(0, 255, 255, 0.16);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+`;
+
+const GoogleButton = styled.button`
+  padding: 14px 18px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(0, 255, 255, 0.08));
+  color: #e5fbff;
+  border: 1px solid rgba(125, 247, 255, 0.3);
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  min-height: 50px;
+  transition: all 0.25s ease;
+
+  &:hover:not(:disabled) {
+    background: rgba(0, 255, 255, 0.12);
+    box-shadow: 0 0 18px rgba(0, 255, 255, 0.18);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+`;
+
 const Spinner = styled.div`
   width: 20px;
   height: 20px;
@@ -519,7 +573,14 @@ const AuthPage = ({ isRegister }) => {
   const [passwordStrength, setPasswordStrength] = useState(0);
   
   const navigate = useNavigate();
-  const API_URL = import.meta.env.VITE_API_URL;
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+  const API_ORIGIN = (() => {
+    try {
+      return new URL(API_URL).origin;
+    } catch {
+      return 'http://localhost:5000';
+    }
+  })();
 
   // Calculate password strength
   const calculatePasswordStrength = (pass) => {
@@ -557,10 +618,17 @@ const AuthPage = ({ isRegister }) => {
 
     try {
       const res = await axios.post(`${API_URL}/api/auth/${endpoint}`, data);
-      const { token, _id } = res.data;
+      const { token, _id, authType, authProvider, googleLinked, creditsRemaining, username: returnedUsername } = res.data;
       
       localStorage.setItem('token', token);
       localStorage.setItem('userId', _id);
+      localStorage.setItem('authType', authType || 'user');
+      localStorage.setItem('authProvider', authProvider || 'local');
+      localStorage.setItem('googleLinked', String(Boolean(googleLinked)));
+      localStorage.setItem('creditsRemaining', String(creditsRemaining ?? 0));
+      if (returnedUsername) {
+        localStorage.setItem('username', returnedUsername);
+      }
       
       if (rememberMe) {
         localStorage.setItem('rememberMe', 'true');
@@ -571,6 +639,85 @@ const AuthPage = ({ isRegister }) => {
     } catch (err) {
       setError(err.response?.data?.message || 'Authentication failed. Please try again.');
     } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGuestAccess = async () => {
+    setError('');
+    setLoading(true);
+
+    try {
+      const res = await axios.post(`${API_URL}/api/auth/guest`);
+      const { token, _id, authType, creditsRemaining, username } = res.data;
+
+      localStorage.setItem('token', token);
+      localStorage.setItem('userId', _id);
+      localStorage.setItem('authType', authType || 'guest');
+      localStorage.setItem('authProvider', 'guest');
+      localStorage.setItem('googleLinked', 'false');
+      localStorage.setItem('creditsRemaining', String(creditsRemaining || 0));
+      localStorage.setItem('username', username || 'Guest');
+
+      navigate('/dashboard');
+      window.location.reload();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Unable to start guest session.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const persistAuthSession = (authPayload) => {
+    const responsePayload = authPayload?.payload || authPayload;
+    const user = responsePayload?.user || responsePayload;
+    const token = responsePayload?.token || user?.token;
+
+    if (!token || !user?._id) return;
+
+    localStorage.setItem('token', token);
+    localStorage.setItem('userId', user._id);
+    localStorage.setItem('authType', user.authType || 'user');
+    localStorage.setItem('authProvider', user.authProvider || 'google');
+    localStorage.setItem('googleLinked', String(Boolean(user.googleLinked)));
+    localStorage.setItem('creditsRemaining', String(user.creditsRemaining ?? 0));
+    localStorage.setItem('username', user.username || 'User');
+  };
+
+  useEffect(() => {
+    const handleGoogleMessage = (event) => {
+      if (event.origin !== API_ORIGIN) return;
+      if (event.data?.type !== 'arc-ai-google-auth-success') return;
+
+      persistAuthSession(event.data.payload);
+      navigate('/dashboard');
+      window.location.reload();
+    };
+
+    window.addEventListener('message', handleGoogleMessage);
+    return () => window.removeEventListener('message', handleGoogleMessage);
+  }, [API_ORIGIN, navigate]);
+
+  const handleGoogleAuth = async () => {
+    setError('');
+    setLoading(true);
+
+    try {
+      const res = await axios.get(`${API_URL}/api/auth/google/url`);
+      const { url } = res.data;
+
+      if (!url) {
+        throw new Error('Google auth URL missing.');
+      }
+
+      const popup = window.open(url, 'arc-ai-google-auth', 'width=520,height=720');
+      if (!popup) {
+        throw new Error('Popup blocked by the browser. Please allow popups and try again.');
+      }
+
+      setLoading(false);
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Unable to start Google sign-in.');
       setLoading(false);
     }
   };
@@ -690,16 +837,26 @@ const AuthPage = ({ isRegister }) => {
             </CheckboxWrapper>
           )}
           
-          <Button type="submit" disabled={loading}>
-            {loading ? (
-              <>
-                <Spinner />
-                Processing...
-              </>
-            ) : (
-              isRegister ? 'Initialize System' : 'Activate Interface'
-            )}
-          </Button>
+          <ButtonGroup>
+            <Button type="submit" disabled={loading}>
+              {loading ? (
+                <>
+                  <Spinner />
+                  Processing...
+                </>
+              ) : (
+                isRegister ? 'Initialize System' : 'Activate Interface'
+              )}
+            </Button>
+
+            <GoogleButton type="button" onClick={handleGoogleAuth} disabled={loading}>
+              {isRegister ? 'Sign up with Google' : 'Continue with Google'}
+            </GoogleButton>
+
+            <SecondaryButton type="button" onClick={handleGuestAccess} disabled={loading}>
+              Continue as Guest
+            </SecondaryButton>
+          </ButtonGroup>
         </Form>
         
         <ToggleText>
