@@ -157,7 +157,7 @@ const createGoogleUser = async (profile) => {
         email,
         password: hashedPassword,
         authProvider: 'google',
-        creditsRemaining: 100,
+        creditsRemaining: 1000,
         googleIdentity: {
             googleId: String(profile.id || ''),
             email,

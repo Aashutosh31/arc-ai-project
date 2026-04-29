@@ -9,8 +9,10 @@ const { consumeCredits, isGuestActorId } = require('./creditService');
 const SCHEDULE_KEYWORDS = [
     'schedule',
     'book',
+    'create a meeting',
     'create meeting',
     'set meeting',
+    'set a meeting',
     'add event',
     'arrange call',
     'put on my calendar'
@@ -84,6 +86,73 @@ const classifyCalendarIntent = (rawText) => {
     return { type: 'none', shouldForceSchedule: false };
 };
 
+const parseDurationMinutes = (text) => {
+    const match = String(text || '').match(/\bfor\s+(\d+)\s*(minute|minutes|hour|hours)\b/i);
+    if (!match) return 30;
+    const value = Number(match[1]);
+    const unit = String(match[2] || '').toLowerCase();
+    if (Number.isNaN(value) || value <= 0) return 30;
+    return unit.startsWith('hour') ? value * 60 : value;
+};
+
+const parseMeetingTitle = (text) => {
+    const raw = String(text || '');
+    const calledMatch = raw.match(/\b(?:called|titled)\s+(.+?)(?:\s+for\s+\d+\s*(?:minute|minutes|hour|hours)\b|$)/i);
+    if (calledMatch && calledMatch[1]) return calledMatch[1].trim();
+
+    const aboutMatch = raw.match(/\b(?:meeting|call|event)\s+(?:about|for)\s+(.+?)(?:\s+at\b|\s+tomorrow\b|\s+today\b|\s+on\b|\s+for\s+\d+\s*(?:minute|minutes|hour|hours)\b|$)/i);
+    if (aboutMatch && aboutMatch[1]) return aboutMatch[1].trim();
+
+    return 'Meeting';
+};
+
+const parseStartDate = (text) => {
+    const raw = String(text || '').toLowerCase();
+    const now = new Date();
+    const start = new Date(now);
+
+    if (raw.includes('tomorrow')) {
+        start.setDate(start.getDate() + 1);
+        return start;
+    }
+
+    const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const targetWeekday = weekdays.find((day) => raw.includes(day));
+    if (targetWeekday) {
+        const today = start.getDay();
+        const target = weekdays.indexOf(targetWeekday);
+        let diff = target - today;
+        if (diff <= 0) diff += 7;
+        start.setDate(start.getDate() + diff);
+    }
+
+    return start;
+};
+
+const parseTimeOnDate = (text, baseDate) => {
+    const raw = String(text || '');
+    const date = new Date(baseDate);
+    const match = raw.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i) || raw.match(/\b(\d{1,2})(?::(\d{2}))\s*(am|pm)\b/i);
+
+    if (match) {
+        let hours = Number(match[1]);
+        const minutes = Number(match[2] || 0);
+        const meridian = String(match[3] || '').toLowerCase();
+
+        if (meridian === 'pm' && hours < 12) hours += 12;
+        if (meridian === 'am' && hours === 12) hours = 0;
+
+        if (!Number.isNaN(hours) && !Number.isNaN(minutes)) {
+            date.setHours(hours, minutes, 0, 0);
+            return date;
+        }
+    }
+
+    // Default to next full hour when no explicit time is given.
+    date.setHours(date.getHours() + 1, 0, 0, 0);
+    return date;
+};
+
 class AIService {
     constructor() {
         const apiKey = process.env.MISTRAL_API_KEY;
@@ -143,6 +212,86 @@ class AIService {
         return originalToolName;
     }
 
+    async emitAssistantText(socket, text) {
+        if (!socket) return;
+        const safeText = String(text || '').trim();
+        if (!safeText) {
+            socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
+            return;
+        }
+
+        console.log(`[Socket] Emitting assistant response: ${safeText}`);
+        const words = safeText.split(' ');
+        for (const word of words) {
+            if (socket.isInterrupted) break;
+            socket.emit('ai:tts:response:chunk', { chunk: `${word} `, displayText: `${word} `, isFinal: false });
+            await new Promise((r) => setTimeout(r, 20));
+        }
+        socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
+    }
+
+    async executeSchedulingPipeline(userId, rawText, socket) {
+        const userCommand = String(rawText || '').trim();
+        console.log(`[Planner] Incoming user command: ${userCommand}`);
+
+        const startDate = parseStartDate(userCommand);
+        const start = parseTimeOnDate(userCommand, startDate);
+        const durationMinutes = parseDurationMinutes(userCommand);
+        const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+        const summary = parseMeetingTitle(userCommand);
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+        const checkArgs = {
+            timeMin: new Date(start.getTime() - 15 * 60 * 1000).toISOString(),
+            timeMax: new Date(end.getTime() + 15 * 60 * 1000).toISOString(),
+            maxResults: 20
+        };
+        const scheduleArgs = {
+            summary,
+            startDateTime: start.toISOString(),
+            endDateTime: end.toISOString(),
+            timeZone
+        };
+
+        const plannedTools = ['checkCalendar', 'scheduleMeeting'];
+        console.log(`[Planner] Chosen tools (in order): ${plannedTools.join(' -> ')}`);
+
+        console.log('[Planner] Before tool execution:', { tool: 'checkCalendar', args: checkArgs });
+        const checkResult = await TaskExecutor.executeTool('checkCalendar', checkArgs, userId, socket);
+        console.log('[Planner] After tool execution payload:', { tool: 'checkCalendar', payload: checkResult });
+
+        let hasConflict = false;
+        if (checkResult?.success && Array.isArray(checkResult.events)) {
+            const overlaps = checkResult.events.filter((event) => {
+                const eventStart = new Date(event.start);
+                const eventEnd = new Date(event.end);
+                if (Number.isNaN(eventStart.getTime()) || Number.isNaN(eventEnd.getTime())) return false;
+                return eventStart < end && eventEnd > start;
+            });
+            hasConflict = overlaps.length > 0;
+        }
+
+        if (hasConflict) {
+            return `I found a conflict around ${start.toLocaleString()}. I did not create the meeting. Please share another time.`;
+        }
+
+        let scheduleResult;
+        try {
+            console.log('[Planner] Before tool execution:', { tool: 'scheduleMeeting', args: scheduleArgs });
+            scheduleResult = await TaskExecutor.executeTool('scheduleMeeting', scheduleArgs, userId, socket);
+            console.log('[Planner] After tool execution payload:', { tool: 'scheduleMeeting', payload: scheduleResult });
+        } catch (error) {
+            console.error('[Planner] scheduleMeeting pipeline error:', error?.stack || error);
+            return 'Meeting request processed but confirmation pending.';
+        }
+
+        if (!scheduleResult?.success) {
+            return scheduleResult?.error || 'Unable to schedule the meeting right now.';
+        }
+
+        return `Meeting "${scheduleResult.title}" created for ${scheduleResult.start} to ${scheduleResult.end}. Event ID: ${scheduleResult.eventId}.`;
+    }
+
     async processQuery(userId, text, socket = null, imageBase64 = null, document = null) {
         const creditCharge = await consumeCredits(userId, 1, 'ai request');
         if (!creditCharge.success) {
@@ -162,11 +311,44 @@ class AIService {
 
         const { key, controller } = this.beginRequest(socket, userId);
         try {
+            console.log(`[Planner] Incoming user command: ${String(text || '').trim()}`);
             const now = new Date();
             const currentDateString = now.toLocaleString('en-US', { 
                 weekday: 'long', year: 'numeric', month: 'long', 
                 day: 'numeric', hour: '2-digit', minute: '2-digit'
             });
+
+            const calendarIntent = classifyCalendarIntent(text);
+
+            if (calendarIntent.type !== 'none') {
+                console.log(
+                    `[Planner] Calendar intent classified as "${calendarIntent.type}" (${calendarIntent.reason || 'rule match'}).`
+                );
+            }
+
+            if (calendarIntent.type === 'schedule' && !imageBase64 && !document) {
+                const scheduleResponse = await Promise.race([
+                    this.executeSchedulingPipeline(userId, text, socket),
+                    new Promise((resolve) => {
+                        setTimeout(() => resolve('Meeting request processed but confirmation pending.'), 5000);
+                    })
+                ]);
+
+                if (socket && !socket.isInterrupted) {
+                    await this.emitAssistantText(socket, scheduleResponse);
+                }
+
+                if (!isGuestActorId(userId)) {
+                    const newMemory = new AIMemory({
+                        userId,
+                        query: text || 'Schedule meeting request',
+                        response: scheduleResponse
+                    });
+                    await newMemory.save();
+                }
+
+                return scheduleResponse;
+            }
 
             const isGuest = isGuestActorId(userId);
             const history = isGuest ? [] : await AIMemory.find({ userId }).sort({ timestamp: -1 }).limit(15)
@@ -267,17 +449,12 @@ class AIService {
             const message = response.choices[0].message;
             let finalOutputText = "";
             const toolCalls = message.toolCalls || message.tool_calls;
-            const calendarIntent = classifyCalendarIntent(text);
-
-            if (calendarIntent.type !== 'none') {
-                console.log(
-                    `[Planner] Calendar intent classified as "${calendarIntent.type}" (${calendarIntent.reason || 'rule match'}).`
-                );
-            }
 
             if (toolCalls && toolCalls.length > 0) {
                 console.log(`[Agent Router] AI requested ${toolCalls.length} tool(s). Executing...`);
                 messages.push(message);
+                const plannedTools = toolCalls.map((toolCall) => this.mapCalendarToolName(toolCall.function.name, calendarIntent));
+                console.log(`[Planner] Chosen tools (in order): ${plannedTools.join(' -> ')}`);
 
                 for (const toolCall of toolCalls) {
                     if (socket && socket.isInterrupted) {
@@ -296,7 +473,10 @@ class AIService {
                     const args = typeof toolCall.function.arguments === 'string' 
                         ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
 
+                    console.log('[Planner] Before tool execution:', { tool: functionName, args });
+
                     const toolResult = await TaskExecutor.executeTool(functionName, args, userId, socket);
+                    console.log('[Planner] After tool execution payload:', { tool: functionName, payload: toolResult });
 
                     if (toolResult.clientAction && socket) {
                         socket.emit('ai:client:action', toolResult.clientAction);
@@ -343,6 +523,7 @@ class AIService {
             } else {
                 finalOutputText = message.content;
                 if (socket) {
+                    console.log(`[Socket] Emitting assistant response: ${finalOutputText}`);
                     const words = finalOutputText.split(' ');
                     for (const word of words) {
                         if (socket.isInterrupted) {
@@ -354,7 +535,12 @@ class AIService {
                 }
             }
 
+            if (!finalOutputText || !String(finalOutputText).trim()) {
+                finalOutputText = 'Meeting request processed but confirmation pending.';
+            }
+
             if (socket) {
+                console.log(`[Socket] Emitting assistant response: ${finalOutputText}`);
                 socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
             }
 

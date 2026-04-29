@@ -81,7 +81,7 @@ const registerUser = async (req, res) => {
             email,
             password: hashedPassword,
             authProvider: 'local',
-            creditsRemaining: 100
+            creditsRemaining: 1000
         });
 
         if (user) {

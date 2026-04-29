@@ -22,7 +22,7 @@ const TOOL_CREDIT_COSTS = {
  */
 class TaskExecutor {
     async executeTool(toolName, args, userId, socket = null) {
-        console.log(`[TaskExecutor] Routing execution to tool: ${toolName}`, args);
+        console.log(`[TaskExecutor] Before tool execution: ${toolName}`, args || {});
         
         try {
             const tool = toolRegistry.getTool(toolName);
@@ -50,8 +50,8 @@ class TaskExecutor {
             
             // Execute the tool's modular logic
             const result = await tool.execute(args, context, socket);
-            
-            console.log(`[TaskExecutor] Tool ${toolName} execution complete.`);
+
+            console.log(`[TaskExecutor] After tool execution: ${toolName}`, result);
             return result;
             
         } catch (error) {
