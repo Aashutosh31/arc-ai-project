@@ -65,7 +65,7 @@ ARC-AI uses a **low-latency pipeline** combining REST APIs and WebSockets.
 * Routes visual context to the Pixtral vision model for dynamic understanding
 
 🎥 Demo:
-https://www.instagram.com/reel/DX84FejNgzwo/?utm_source=ig_web_copy_link&igsh=NTc4MTIwNjQ2YQ==
+https://www.instagram.com/aashutosh_vaishnav.31/reel/DX84FejNgwo/
 
 ---
 
