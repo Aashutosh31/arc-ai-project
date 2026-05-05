@@ -57,6 +57,18 @@ ARC-AI uses a **low-latency pipeline** combining REST APIs and WebSockets.
 
 ## 🛠️ Core Features
 
+### 🎥 1. GPT-4o Live Vision
+
+* Real-time webcam video feed for live vision input
+* Captures the current camera frame when the user speaks
+* Pipes the frame directly into the existing `ai:stt:final` socket payload
+* Routes visual context to the Pixtral vision model for dynamic understanding
+
+🎥 Demo:
+https://www.instagram.com/reel/DX84FejNgzwo/?utm_source=ig_web_copy_link&igsh=NTc4MTIwNjQ2YQ==
+
+---
+
 ### 🧠 1. Infinite Memory (RAG)
 
 * Vector embeddings via Mistral
