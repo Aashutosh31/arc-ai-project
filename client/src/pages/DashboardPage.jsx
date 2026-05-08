@@ -6,6 +6,7 @@ import AdvancedVoiceButton from '../components/AdvancedVoiceButton.jsx';
 import ChatInterface from '../components/ChatInterface.jsx';
 import TestUserAccessModal from '../components/TestUserAccessModal';
 import WhatsAppModal from '../components/WhatsAppModal.jsx';
+import WhatsAppConnectModal from '../components/WhatsAppConnectModal.jsx';
 
 const Page = styled.div`
   min-height: 100vh;
@@ -408,6 +409,8 @@ const DashboardPage = () => {
   const [googleMessage, setGoogleMessage] = useState('');
   const [showTestUserModal, setShowTestUserModal] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [showWhatsAppConnect, setShowWhatsAppConnect] = useState(false);
+  const [whatsappConnected, setWhatsappConnected] = useState(false);
   const showWhatsAppDebug = import.meta.env.DEV && localStorage.getItem('arc_whatsapp_debug') === 'true';
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
   const apiOrigin = (() => {
@@ -450,6 +453,15 @@ const DashboardPage = () => {
   };
 
   useEffect(() => {
+    if (!socket) return;
+    const onReady = () => setWhatsappConnected(true);
+    const onDisconnected = () => setWhatsappConnected(false);
+    socket.on('whatsapp:ready', onReady);
+    socket.on('whatsapp:disconnected', onDisconnected);
+    return () => { socket.off('whatsapp:ready', onReady); socket.off('whatsapp:disconnected', onDisconnected); };
+  }, [socket]);
+
+    useEffect(() => {
     const handleGoogleMessage = (event) => {
       if (event.origin !== apiOrigin) return;
       if (event.data?.type !== 'arc-ai-google-auth-success') return;
@@ -461,7 +473,7 @@ const DashboardPage = () => {
 
     window.addEventListener('message', handleGoogleMessage);
     return () => window.removeEventListener('message', handleGoogleMessage);
-  }, [apiOrigin]);
+    }, [apiOrigin]);
 
   useEffect(() => {
     const loadGoogleStatus = async () => {
@@ -673,6 +685,30 @@ const DashboardPage = () => {
             </Card>
           ) : null}
 
+          {/* Product-facing WhatsApp connect */}
+          {authInfo?.authType !== 'guest' ? (
+            <Card>
+              <CardTitle>WhatsApp</CardTitle>
+              <CardSubtitle>Connect ARC to your WhatsApp</CardSubtitle>
+              <CardStack>
+                <CardStatus $connected={whatsappConnected}>{whatsappConnected ? 'Connected' : 'Not connected'}</CardStatus>
+                <CardText>
+                  Connect once to use ARC to send messages on your behalf. Sessions persist until you unlink.
+                </CardText>
+                <CardButton type="button" onClick={() => {
+                  if (!authInfo?.ready) {
+                    alert('Please sign in first to connect WhatsApp.');
+                    return;
+                  }
+                  setShowWhatsAppConnect(true);
+                  try { if (socket && socket.connected) socket.emit('whatsapp:connect'); } catch (e) {}
+                }}>
+                  {whatsappConnected ? 'Reconnect WhatsApp' : 'Connect WhatsApp'}
+                </CardButton>
+              </CardStack>
+            </Card>
+          ) : null}
+
           <Card>
             <CardTitle>Features</CardTitle>
             <CardSubtitle>What you get out of the box</CardSubtitle>
@@ -693,6 +729,7 @@ const DashboardPage = () => {
         onProceed={handleProceedAsTestUser}
       />
       <WhatsAppModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
+      <WhatsAppConnectModal isOpen={showWhatsAppConnect} onClose={() => setShowWhatsAppConnect(false)} onConnected={() => setShowWhatsAppConnect(false)} />
     </Page>
   );
 };
