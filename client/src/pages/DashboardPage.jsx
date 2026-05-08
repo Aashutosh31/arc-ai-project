@@ -5,6 +5,7 @@ import { useSocket } from '../hooks/useSocket';
 import AdvancedVoiceButton from '../components/AdvancedVoiceButton.jsx';
 import ChatInterface from '../components/ChatInterface.jsx';
 import TestUserAccessModal from '../components/TestUserAccessModal';
+import WhatsAppModal from '../components/WhatsAppModal.jsx';
 
 const Page = styled.div`
   min-height: 100vh;
@@ -401,11 +402,13 @@ const ListItem = styled.li`
 `;
 
 const DashboardPage = () => {
-  const { isConnected, authInfo, setAuthInfo } = useSocket();
+  const { isConnected, authInfo, setAuthInfo, socket } = useSocket();
   const [googleConnected, setGoogleConnected] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [googleMessage, setGoogleMessage] = useState('');
   const [showTestUserModal, setShowTestUserModal] = useState(false);
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const showWhatsAppDebug = import.meta.env.DEV && localStorage.getItem('arc_whatsapp_debug') === 'true';
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
   const apiOrigin = (() => {
     try {
@@ -650,6 +653,26 @@ const DashboardPage = () => {
             </CardStack>
           </Card>
 
+          {showWhatsAppDebug ? (
+            <Card>
+              <CardTitle>WhatsApp Debug</CardTitle>
+              <CardSubtitle>Hidden developer utility</CardSubtitle>
+              <CardStack>
+                <CardText>
+                  Temporary QR/session testing UI for local development only.
+                </CardText>
+                <CardButton type="button" onClick={() => {
+                  setShowWhatsAppModal(true);
+                  try {
+                    if (socket && socket.connected) socket.emit('whatsapp:connect');
+                  } catch (e) { console.warn('socket emit failed', e); }
+                }}>
+                  Connect WhatsApp
+                </CardButton>
+              </CardStack>
+            </Card>
+          ) : null}
+
           <Card>
             <CardTitle>Features</CardTitle>
             <CardSubtitle>What you get out of the box</CardSubtitle>
@@ -669,6 +692,7 @@ const DashboardPage = () => {
         onClose={() => setShowTestUserModal(false)}
         onProceed={handleProceedAsTestUser}
       />
+      <WhatsAppModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
     </Page>
   );
 };

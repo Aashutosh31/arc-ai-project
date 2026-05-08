@@ -40,6 +40,17 @@ const io = new Server(server, {
     cors: { origin: frontendOrigins.length > 0 ? frontendOrigins : '*', methods: ['GET', 'POST'] }
 });
 
+// Initialize WhatsApp provider sockets (if present)
+try {
+    const whatsappProvider = require('./providers/whatsapp');
+    if (whatsappProvider && typeof whatsappProvider.init === 'function') {
+        whatsappProvider.init(io);
+        console.log('[WhatsApp] provider initialized');
+    }
+} catch (err) {
+    console.log('[WhatsApp] provider not available or failed to init:', err?.message || err);
+}
+
 io.use((socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) return next(new Error('Authentication error'));
