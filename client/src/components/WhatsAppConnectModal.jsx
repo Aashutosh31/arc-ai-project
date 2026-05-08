@@ -14,6 +14,7 @@ const Close = styled.button`background:transparent;border:none;color:#9fb6ff;cur
 const QRBox = styled.div`background:#021024;border-radius:8px;padding:12px;min-height:180px;display:flex;align-items:center;justify-content:center;`;
 const Row = styled.div`display:flex;gap:8px;align-items:center;margin-top:12px;`;
 const Info = styled.p`margin:0;color:#cfe8ff;font-size:13px;`;
+const Input = styled.input`flex:1;padding:8px 10px;border-radius:8px;border:1px solid rgba(120,120,160,0.35);background:#071025;color:#e6eefc;`;
 const Button = styled.button`padding:8px 12px;border-radius:8px;background:linear-gradient(90deg,#19a7ff,#7ce3ff);border:none;color:#05202b;font-weight:700;cursor:pointer;`;
 
 export default function WhatsAppConnectModal({ isOpen, onClose, onConnected }) {
