@@ -27,7 +27,9 @@ app.use(cors({
 
 app.use(express.json());
 
-mongoose.connect(process.env.MONGO_URI)
+const mongoUri = process.env.MONGO_URI || process.env.DATABASE_URL;
+
+mongoose.connect(mongoUri)
     .then(async () => {
         console.log('🟢 MongoDB Atlas connected successfully.');
         try {

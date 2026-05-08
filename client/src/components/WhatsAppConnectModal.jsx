@@ -25,16 +25,28 @@ export default function WhatsAppConnectModal({ isOpen, onClose, onConnected }) {
   const [status, setStatus] = useState('idle');
   const [mode, setMode] = useState('qr');
 
+  const resetToQrMode = () => {
+    setMode('qr');
+    setPairingCode(null);
+    setStatus('idle');
+  };
+
   useEffect(() => {
     if (!socket) return;
-    const onQr = (d) => { setQr(d.qrcode || null); setStatus('qr'); };
+    const onQr = (d) => { setQr(d.qrcode || null); setStatus('qr'); setMode('qr'); };
     const onAuth = () => { setStatus('authenticated'); };
     const onReady = () => { setStatus('ready'); setTimeout(()=>{ onClose && onClose(); onConnected && onConnected(); }, 800); };
-    const onDisconnected = () => { setStatus('disconnected'); };
+    const onDisconnected = () => { setStatus('disconnected'); resetToQrMode(); };
     const onPairingCode = (d) => {
       setPairingCode(d?.code || null);
       setStatus('pairing_code');
       setMode('pairing');
+    };
+    const onPairingCancelled = () => {
+      resetToQrMode();
+    };
+    const onPairingFailed = () => {
+      setStatus('pairing_failed');
     };
 
     socket.on('whatsapp:qr', onQr);
@@ -42,6 +54,8 @@ export default function WhatsAppConnectModal({ isOpen, onClose, onConnected }) {
     socket.on('whatsapp:ready', onReady);
     socket.on('whatsapp:disconnected', onDisconnected);
     socket.on('whatsapp:pairing_code', onPairingCode);
+    socket.on('whatsapp:pairing_cancelled', onPairingCancelled);
+    socket.on('whatsapp:pairing_failed', onPairingFailed);
 
     return () => {
       socket.off('whatsapp:qr', onQr);
@@ -49,8 +63,18 @@ export default function WhatsAppConnectModal({ isOpen, onClose, onConnected }) {
       socket.off('whatsapp:ready', onReady);
       socket.off('whatsapp:disconnected', onDisconnected);
       socket.off('whatsapp:pairing_code', onPairingCode);
+      socket.off('whatsapp:pairing_cancelled', onPairingCancelled);
+      socket.off('whatsapp:pairing_failed', onPairingFailed);
     };
   }, [socket, onClose, onConnected]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      resetToQrMode();
+      setQr(null);
+      setPhoneNumber('');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -63,8 +87,23 @@ export default function WhatsAppConnectModal({ isOpen, onClose, onConnected }) {
     setMode('pairing');
     setStatus('requesting_pairing_code');
     setPairingCode(null);
+    setQr(null);
     socket.emit('whatsapp:pair_with_phone', { phoneNumber: phoneNumber.trim() }, (err) => {
-      if (err) setStatus('pairing_failed');
+      if (err) {
+        setStatus('pairing_failed');
+      }
+    });
+  };
+
+  const handleUseQr = () => {
+    setMode('qr');
+    setPairingCode(null);
+    setStatus('requesting_qr');
+    if (!socket) return;
+    socket.emit('whatsapp:cancel_pairing', {}, (err) => {
+      if (err) {
+        setStatus('qr_failed');
+      }
     });
   };
 
@@ -101,7 +140,7 @@ export default function WhatsAppConnectModal({ isOpen, onClose, onConnected }) {
 
         <Row>
           <Input
-            placeholder="Phone number in international format, e.g. 15551234567"
+            placeholder="Your WhatsApp number in international format, e.g. 15551234567"
             value={phoneNumber}
             onChange={(e) => setPhoneNumber(e.target.value)}
           />
@@ -110,6 +149,7 @@ export default function WhatsAppConnectModal({ isOpen, onClose, onConnected }) {
         <Row>
           <Button onClick={handleScanHelp}>How to scan</Button>
           <Button onClick={handleRequestPairingCode}>Use phone number</Button>
+          <Button onClick={handleUseQr}>Use QR instead</Button>
         </Row>
       </Modal>
     </Overlay>

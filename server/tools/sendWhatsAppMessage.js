@@ -10,17 +10,16 @@ module.exports = {
                 type: 'object',
                 properties: {
                     recipientName: { type: 'string', description: 'Recipient contact name or alias to resolve internally' },
-                    message: { type: 'string', description: 'Message text to send' },
-                    userId: { type: 'string', description: 'The ARC user ID owning the WhatsApp session' }
+                    message: { type: 'string', description: 'Message text to send' }
                 },
-                required: ['recipientName', 'message', 'userId']
+                required: ['recipientName', 'message']
             }
         }
     },
 
     execute: async (args, context) => {
         try {
-            const userId = args?.userId || context.userId || (context?.user && context.user.id);
+            const userId = context.userId || (context?.user && context.user.id);
             if (!userId) throw new Error('Missing user context for WhatsApp send');
 
             const { recipientName, message } = args || {};
