@@ -150,7 +150,11 @@ export default function WhatsAppModal({ isOpen, onClose }) {
     socket.on('whatsapp:contacts_synced', onContactsSynced);
     socket.on('whatsapp:contacts_sync_failed', onContactsSyncFailed);
 
-    socket.emit('whatsapp:sync_contacts');
+    const requestSync = () => {
+      socket.emit('whatsapp:sync_contacts');
+    };
+
+    socket.on('whatsapp:ready', requestSync);
 
     return () => {
       socket.off('whatsapp:qr', onQr);
@@ -161,6 +165,7 @@ export default function WhatsAppModal({ isOpen, onClose }) {
       socket.off('whatsapp:message_failed', onFailed);
       socket.off('whatsapp:contacts_synced', onContactsSynced);
       socket.off('whatsapp:contacts_sync_failed', onContactsSyncFailed);
+      socket.off('whatsapp:ready', requestSync);
     };
   }, [socket, onClose]);
 

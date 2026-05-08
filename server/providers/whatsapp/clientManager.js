@@ -26,7 +26,10 @@ const TRANSIENT_ERROR_PATTERNS = [
     /target closed/i,
     /session closed/i,
     /Frame was detached/i,
-    /Protocol error/i
+    /Protocol error/i,
+    /Cannot read properties of null/i,
+    /Cannot read properties of undefined/i,
+    /page binding/i
 ];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -81,6 +84,13 @@ const emitToSockets = (record, event, payload) => {
             socket.emit(event, payload);
         }
     }
+};
+
+const isClientValid = (client) => {
+    if (!client) return false;
+    if (typeof client.getState !== 'function') return false;
+    if (client.page === null) return false;
+    return true;
 };
 
 const detachSocket = (userId, socket) => {
@@ -180,11 +190,19 @@ const attachClientEvents = (userId, client) => {
         console.log(`[WhatsApp] client ready for user ${userId}`);
         emitToSockets(record, 'whatsapp:ready', { userId });
 
-        syncContacts(userId, client).catch((error) => {
-            console.error('[WhatsApp] contact sync failed on ready:', error?.message || error);
-            const nextRecord = getRecord(userId);
-            emitToSockets(nextRecord, 'whatsapp:contacts_sync_failed', { error: String(error) });
-        });
+        // Defer contact sync slightly to let the client fully stabilize
+        setTimeout(() => {
+            const activeClient = getClient(userId);
+            if (!activeClient) {
+                console.warn(`[WhatsApp] client disappeared before contact sync for user ${userId}`);
+                return;
+            }
+            syncContacts(userId, activeClient).catch((error) => {
+                console.error('[WhatsApp] contact sync failed on ready:', error?.message || error);
+                const nextRecord = getRecord(userId);
+                emitToSockets(nextRecord, 'whatsapp:contacts_sync_failed', { error: String(error) });
+            });
+        }, 250);
     });
 
     client.on('auth_failure', (message) => {
@@ -276,6 +294,26 @@ const initClientForUser = async (userId, socket) => {
             record.lastInitError = error;
             console.error('[WhatsApp] failed to initialize client for', key, error?.message || error);
 
+            // Clean up stale session directory and kill stale process if browser lock is the issue
+            if (String(error?.message || '').includes('browser is already running')) {
+                const sessionPath = path.join(SESSIONS_DIR, `session-${key}`);
+                try {
+                    if (fs.existsSync(sessionPath)) {
+                        console.warn(`[WhatsApp] cleaning stale session dir for ${key}`);
+                        fs.rmSync(sessionPath, { recursive: true, force: true });
+                    }
+                } catch (cleanupErr) {
+                    console.warn(`[WhatsApp] failed to clean session dir:`, cleanupErr?.message);
+                }
+                // Also try to kill any stale node processes
+                try {
+                    const { execSync } = require('child_process');
+                    execSync('pkill -f "whatsapp.*session-' + key + '" || true', { stdio: 'ignore' });
+                } catch (procErr) {
+                    // Ignore errors from pkill
+                }
+            }
+
             if (isTransientWhatsAppError(error) && record.sockets.size > 0) {
                 scheduleRecovery(key, 'initialize_error');
             }
@@ -290,11 +328,19 @@ const getClient = (userId) => {
     return getRecord(userId)?.client || null;
 };
 
+const isWhatsAppConnected = (userId) => {
+    const record = getRecord(userId);
+    return Boolean(record?.ready && record?.client);
+};
+
 const waitForConnectedState = async (userId, client, timeoutMs = 20000) => {
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
         try {
+            if (!isClientValid(client)) {
+                throw new Error('WhatsApp client page is no longer available');
+            }
             const state = typeof client.getState === 'function' ? await client.getState() : 'CONNECTED';
             if (String(state || '').toUpperCase().includes('CONNECTED')) return true;
         } catch (error) {
@@ -339,7 +385,18 @@ const sendMessage = async (userId, recipientName, text, options = {}) => {
         await record.initPromise.catch(() => null);
     }
 
-    const resolution = resolveRecipient(userId, recipientName);
+    let resolution = resolveRecipient(userId, recipientName);
+    if (resolution.status === 'not_found') {
+        try {
+            await syncContactsFromClient(userId, client);
+            resolution = resolveRecipient(userId, recipientName);
+        } catch (error) {
+            if (!isTransientWhatsAppError(error)) {
+                console.warn('[WhatsApp] contact refresh before send failed:', error?.message || error);
+            }
+        }
+    }
+
     if (resolution.status === 'not_found') {
         return {
             success: false,
@@ -441,15 +498,34 @@ const requestPairingCode = async (userId, phoneNumber) => {
     return { success: true, phoneNumber: rawPhoneNumber, code };
 };
 
+const cancelPairingCode = async (userId) => {
+    const record = getRecord(userId);
+    if (!record?.client) throw new Error('WhatsApp client not initialized for user');
+
+    const client = getClient(userId);
+    if (!client) throw new Error('WhatsApp client not available to cancel pairing');
+
+    if (typeof client.cancelPairingCode !== 'function') {
+        throw new Error('Pairing code cancellation is not supported by this WhatsApp client');
+    }
+
+    await client.cancelPairingCode();
+    const nextRecord = getRecord(userId);
+    emitToSockets(nextRecord, 'whatsapp:state', { state: 'qr_mode' });
+    return { success: true };
+};
+
 module.exports = {
     initClientForUser,
     getClient,
     sendMessage,
     requestPairingCode,
+    cancelPairingCode,
     syncContacts,
     resolveRecipient,
     detachSocket,
     bindSocket,
+    isWhatsAppConnected,
     recoverClient,
     isTransientWhatsAppError
 };

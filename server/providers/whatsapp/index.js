@@ -9,6 +9,13 @@ const init = (io) => {
             clientManager.detachSocket(socket.userId, socket);
         });
 
+        if (socket.userId && clientManager.isWhatsAppConnected(socket.userId)) {
+            clientManager.bindSocket(socket.userId, socket);
+            socket.emit('whatsapp:state', { state: 'connected' });
+            socket.emit('whatsapp:ready', { userId: socket.userId, restored: true });
+            socket.emit('whatsapp:connect_ack', { success: true, restored: true });
+        }
+
         socket.on('whatsapp:connect', async (payload) => {
             try {
                 const userId = socket.userId;
@@ -16,6 +23,10 @@ const init = (io) => {
                 clientManager.bindSocket(userId, socket);
                 socket.emit('whatsapp:state', { state: 'connecting' });
                 socket.emit('whatsapp:connect_ack', { success: true });
+                if (clientManager.isWhatsAppConnected(userId)) {
+                    socket.emit('whatsapp:state', { state: 'connected' });
+                    socket.emit('whatsapp:ready', { userId, restored: true });
+                }
             } catch (err) {
                 console.error('[WhatsApp] connect failed', err?.message || err);
                 socket.emit('whatsapp:connect_ack', { success: false, error: String(err) });
@@ -36,6 +47,19 @@ const init = (io) => {
             } catch (err) {
                 console.error('[WhatsApp] pair_with_phone failed', err?.message || err);
                 socket.emit('whatsapp:pairing_failed', { success: false, error: String(err) });
+                if (typeof cb === 'function') cb(String(err));
+            }
+        });
+
+        socket.on('whatsapp:cancel_pairing', async (payload, cb) => {
+            try {
+                const userId = socket.userId;
+                await clientManager.cancelPairingCode(userId);
+                socket.emit('whatsapp:pairing_cancelled', { success: true });
+                if (typeof cb === 'function') cb(null, { success: true });
+            } catch (err) {
+                console.error('[WhatsApp] cancel_pairing failed', err?.message || err);
+                socket.emit('whatsapp:pairing_cancelled', { success: false, error: String(err) });
                 if (typeof cb === 'function') cb(String(err));
             }
         });
