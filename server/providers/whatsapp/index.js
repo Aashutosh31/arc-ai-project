@@ -22,6 +22,24 @@ const init = (io) => {
             }
         });
 
+        socket.on('whatsapp:pair_with_phone', async (payload, cb) => {
+            try {
+                const userId = socket.userId;
+                const { phoneNumber } = payload || {};
+                if (!phoneNumber) throw new Error('Missing phoneNumber');
+
+                await clientManager.initClientForUser(userId, socket);
+                clientManager.bindSocket(userId, socket);
+                const result = await clientManager.requestPairingCode(userId, phoneNumber);
+
+                if (typeof cb === 'function') cb(null, result);
+            } catch (err) {
+                console.error('[WhatsApp] pair_with_phone failed', err?.message || err);
+                socket.emit('whatsapp:pairing_failed', { success: false, error: String(err) });
+                if (typeof cb === 'function') cb(String(err));
+            }
+        });
+
         socket.on('whatsapp:sync_contacts', async (payload, cb) => {
             try {
                 const userId = socket.userId;

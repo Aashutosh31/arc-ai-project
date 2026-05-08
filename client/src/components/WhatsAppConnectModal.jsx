@@ -19,7 +19,10 @@ const Button = styled.button`padding:8px 12px;border-radius:8px;background:linea
 export default function WhatsAppConnectModal({ isOpen, onClose, onConnected }) {
   const { socket } = useSocket();
   const [qr, setQr] = useState(null);
+  const [pairingCode, setPairingCode] = useState(null);
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [status, setStatus] = useState('idle');
+  const [mode, setMode] = useState('qr');
 
   useEffect(() => {
     if (!socket) return;
@@ -27,17 +30,24 @@ export default function WhatsAppConnectModal({ isOpen, onClose, onConnected }) {
     const onAuth = () => { setStatus('authenticated'); };
     const onReady = () => { setStatus('ready'); setTimeout(()=>{ onClose && onClose(); onConnected && onConnected(); }, 800); };
     const onDisconnected = () => { setStatus('disconnected'); };
+    const onPairingCode = (d) => {
+      setPairingCode(d?.code || null);
+      setStatus('pairing_code');
+      setMode('pairing');
+    };
 
     socket.on('whatsapp:qr', onQr);
     socket.on('whatsapp:authenticated', onAuth);
     socket.on('whatsapp:ready', onReady);
     socket.on('whatsapp:disconnected', onDisconnected);
+    socket.on('whatsapp:pairing_code', onPairingCode);
 
     return () => {
       socket.off('whatsapp:qr', onQr);
       socket.off('whatsapp:authenticated', onAuth);
       socket.off('whatsapp:ready', onReady);
       socket.off('whatsapp:disconnected', onDisconnected);
+      socket.off('whatsapp:pairing_code', onPairingCode);
     };
   }, [socket, onClose, onConnected]);
 
@@ -45,6 +55,16 @@ export default function WhatsAppConnectModal({ isOpen, onClose, onConnected }) {
 
   const handleScanHelp = () => {
     window.open('https://faq.whatsapp.com/general/28030021', '_blank');
+  };
+
+  const handleRequestPairingCode = () => {
+    if (!socket || !phoneNumber.trim()) return;
+    setMode('pairing');
+    setStatus('requesting_pairing_code');
+    setPairingCode(null);
+    socket.emit('whatsapp:pair_with_phone', { phoneNumber: phoneNumber.trim() }, (err) => {
+      if (err) setStatus('pairing_failed');
+    });
   };
 
   return (
@@ -56,19 +76,39 @@ export default function WhatsAppConnectModal({ isOpen, onClose, onConnected }) {
         </Header>
 
         <QRBox>
-          {qr ? <img src={qr} alt="WhatsApp QR" style={{maxWidth:'100%',maxHeight:160}} /> : <div style={{color:'#93b7ff'}}>Waiting for QR...</div>}
+          {mode === 'pairing' ? (
+            pairingCode ? (
+              <div style={{textAlign:'center'}}>
+                <div style={{fontSize:12,color:'#93b7ff',marginBottom:6}}>Pairing code</div>
+                <div style={{fontSize:28,fontWeight:800,letterSpacing:'0.16em',color:'#7ce3ff'}}>{pairingCode}</div>
+              </div>
+            ) : (
+              <div style={{color:'#93b7ff'}}>Waiting for pairing code...</div>
+            )
+          ) : qr ? <img src={qr} alt="WhatsApp QR" style={{maxWidth:'100%',maxHeight:160}} /> : <div style={{color:'#93b7ff'}}>Waiting for QR...</div>}
         </QRBox>
 
         <Row>
           <Info>
             Status: <strong style={{color: status === 'ready' ? '#7df7ff' : '#ffdca3'}}>{status}</strong>
             <br />
-            Scan the QR once from WhatsApp → Linked devices → Link a device. ARC will remember your session.
+            {mode === 'pairing'
+              ? 'Enter the pairing code in WhatsApp → Linked devices → Link with phone number. ARC will remember your session.'
+              : 'Scan the QR once from WhatsApp → Linked devices → Link a device. ARC will remember your session.'}
           </Info>
         </Row>
 
         <Row>
+          <Input
+            placeholder="Phone number in international format, e.g. 15551234567"
+            value={phoneNumber}
+            onChange={(e) => setPhoneNumber(e.target.value)}
+          />
+        </Row>
+
+        <Row>
           <Button onClick={handleScanHelp}>How to scan</Button>
+          <Button onClick={handleRequestPairingCode}>Use phone number</Button>
         </Row>
       </Modal>
     </Overlay>

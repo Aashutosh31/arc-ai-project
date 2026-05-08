@@ -428,6 +428,7 @@ class AIService {
                     4. VISION & FILES: Analyze provided images or document text thoroughly and accurately.
                     5. COMPUTATION: Use 'executeCode' for exact math, logic, iteration, parsing, or verification instead of guessing.
                     6. CALENDAR: Use 'checkCalendar' to inspect availability and 'scheduleMeeting' to create or update meetings when the user asks to manage Google Calendar.
+                    7. WHATSAPP: If the user asks to send a WhatsApp message, use 'sendWhatsAppMessage' instead of replying with a draft or saying you cannot send it. Ask a follow-up only if the recipient is ambiguous or the WhatsApp session is not connected.
                     ${longTermMemoryText}` 
                 },
                 ...history,
