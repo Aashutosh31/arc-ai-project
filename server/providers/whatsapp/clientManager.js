@@ -414,10 +414,38 @@ const sendMessage = async (userId, recipientName, text, options = {}) => {
     }
 };
 
+const requestPairingCode = async (userId, phoneNumber) => {
+    const record = getRecord(userId);
+    if (!record?.client) throw new Error('WhatsApp client not initialized for user');
+    if (record?.initPromise) {
+        await record.initPromise.catch(() => null);
+    }
+
+    const client = getClient(userId);
+    if (!client) throw new Error('WhatsApp client not available for pairing');
+
+    const rawPhoneNumber = String(phoneNumber || '').replace(/\D/g, '');
+    if (!rawPhoneNumber) {
+        throw new Error('phoneNumber required for pairing code request');
+    }
+
+    const state = typeof client.getState === 'function' ? await client.getState().catch(() => null) : null;
+    if (String(state || '').toUpperCase().includes('CONNECTED')) {
+        throw new Error('WhatsApp is already connected for this user. Disconnect first to pair a new device.');
+    }
+
+    const code = await client.requestPairingCode(rawPhoneNumber, true);
+    const nextRecord = getRecord(userId);
+    emitToSockets(nextRecord, 'whatsapp:state', { state: 'pairing_code_requested', phoneNumber: rawPhoneNumber });
+    emitToSockets(nextRecord, 'whatsapp:pairing_code', { phoneNumber: rawPhoneNumber, code });
+    return { success: true, phoneNumber: rawPhoneNumber, code };
+};
+
 module.exports = {
     initClientForUser,
     getClient,
     sendMessage,
+    requestPairingCode,
     syncContacts,
     resolveRecipient,
     detachSocket,
