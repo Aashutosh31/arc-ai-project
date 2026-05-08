@@ -1,0 +1,11 @@
+node_modules
+npm-debug.log
+.env
+.whatsapp-sessions
+dist
+client/node_modules
+client/dist
+.git
+logs
+coverage
+tmp

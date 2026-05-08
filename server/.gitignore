@@ -9,3 +9,4 @@ yarn-debug.log*
 yarn-error.log*
 # OS generated files
 .vscode
+.whatsapp-sessions

@@ -1,0 +1,31 @@
+# Root .gitignore — ignore sensitive files and build artifacts
+# Environment
+.env
+.env.*
+
+# WhatsApp sessions
+.whatsapp-sessions/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS & editors
+.DS_Store
+.vscode/
+.idea/
+
+# Build
+dist/
+client/dist/
+
+# Keys, certs
+*.pem
+*.key
+*.crt
+*.p12
+
+#Railway_Docker_Notes
+RAILWAY_DOCKER_NOTES.md
