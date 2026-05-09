@@ -119,6 +119,17 @@ https://www.instagram.com/aashutosh_vaishnav.31/reel/DWzcz9YE797/
 
 ---
 
+### 💬 6. WhatsApp Automation
+
+* Send messages to contacts via WhatsApp
+* Autonomous message creation and delivery
+* Integration with agent workflow
+
+🎥 Demo:
+https://www.instagram.com/aashutosh_vaishnav.31/reel/DYH4hoYR1gC/
+
+---
+
 ## 💡 Advanced Engineering Highlights
 
 ### 🔹 Multi-Tab WebSocket Broadcasting
