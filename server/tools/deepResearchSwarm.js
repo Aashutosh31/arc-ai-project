@@ -1,6 +1,7 @@
-const { Mistral } = require('@mistralai/mistralai');
 const webSearchTool = require('./webSearch');
 const scrapeWebsiteTool = require('./scrapeWebsite');
+const LLMRouter = require('../lib/llm/LLMRouter');
+const StreamingRuntime = require('../lib/llm/StreamingRuntime');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -20,8 +21,30 @@ module.exports = {
         }
     },
     
-    execute: async (args, passedUserId, socket) => {
+    execute: async (args, context = {}, socket) => {
         console.log(`[Swarm Orchestrator] Spinning up multi-agent swarm for: ${args.topic}`);
+        const llmRouter = new LLMRouter();
+        const streamingRuntime = new StreamingRuntime();
+        const upstreamSignal = context?.signal || null;
+        const userId = context?.userId || context?.id || context?._id || null;
+        const localAbortController = new AbortController();
+
+        let signalCleanup = null;
+        if (upstreamSignal) {
+            const onAbort = () => localAbortController.abort('upstream_aborted');
+            if (upstreamSignal.aborted) {
+                localAbortController.abort('upstream_aborted');
+            } else {
+                upstreamSignal.addEventListener('abort', onAbort, { once: true });
+                signalCleanup = () => upstreamSignal.removeEventListener('abort', onAbort);
+            }
+        }
+
+        const interruptionWatcher = setInterval(() => {
+            if (socket && socket.isInterrupted && !localAbortController.signal.aborted) {
+                localAbortController.abort('socket_interrupted');
+            }
+        }, 150);
 
         const emitUpdate = (text) => {
             if (socket) {
@@ -32,6 +55,10 @@ module.exports = {
         };
 
         try {
+            if (localAbortController.signal.aborted) {
+                throw new Error('Swarm execution interrupted before start.');
+            }
+
             emitUpdate(`Assigning topic: "${args.topic}" to the Swarm...`);
             await delay(1000);
 
@@ -60,47 +87,26 @@ module.exports = {
 
             emitUpdate(`Synthesizing research into final report...`);
 
-            const mistral = new Mistral({ apiKey: process.env.MISTRAL_API_KEY });
-            
-            let writerResponse = "";
-            let retries = 3;
-            
-            while (retries > 0) {
-                try {
-                    // 🚀 Clear the status indicator right before the real stream begins!
-                    if (socket) socket.emit('ai:agent:status', { status: null });
+            if (socket) socket.emit('ai:agent:status', { status: null });
 
-                    const stream = await mistral.chat.stream({
-                        model: process.env.MISTRAL_MODEL || 'mistral-small-latest',
-                        messages: [
-                            { role: "system", content: "You are an expert Writer Agent. Turn raw scraped data into a beautifully formatted, highly detailed Markdown report. Use headers, bullet points, and bold text." },
-                            { role: "user", content: `Write a comprehensive report on: ${args.topic}.\n\nSEARCH CONTEXT:\n${searchResults.content}\n\nDEEP SCRAPE CONTEXT:\n${scrapedData}` }
-                        ]
-                    });
-
-                    for await (const chunk of stream) {
-                        // Check for early aborts!
-                        if (socket && socket.isInterrupted) {
-                            console.log("[Swarm] Stream aborted by user.");
-                            return { success: false, message: "Aborted." };
-                        }
-
-                        const content = chunk.data.choices[0].delta.content;
-                        if (content) {
-                            writerResponse += content;
-                            if (socket) {
-                                socket.emit('ai:tts:response:chunk', { chunk: content, displayText: content, isFinal: false });
-                            }
-                        }
+            const generation = await llmRouter.generate({
+                messages: [
+                    {
+                        role: 'user',
+                        content: `Write a comprehensive report on: ${args.topic}.\n\nSEARCH CONTEXT:\n${searchResults.content}\n\nDEEP SCRAPE CONTEXT:\n${scrapedData}`
                     }
-                    break; 
-                } catch (err) {
-                    retries--;
-                    emitUpdate(`API busy. Retrying... (${retries} attempts left)`);
-                    await delay(3000);
-                    if (retries === 0) throw new Error("Writer Agent failed after 3 attempts.");
-                }
-            }
+                ],
+                systemPrompt: 'You are an expert Writer Agent. Turn raw scraped data into a beautifully formatted, highly detailed Markdown report. Use headers, bullet points, and bold text.',
+                stream: true,
+                temperature: 0.2,
+                userContext: {
+                    userId,
+                    taskHint: 'deep research report generation'
+                },
+                signal: localAbortController.signal
+            });
+
+            const writerResponse = await streamingRuntime.consume(generation.stream, socket, localAbortController.signal);
 
             console.log(`[Manager Agent] Swarm execution complete.`);
 
@@ -116,6 +122,11 @@ module.exports = {
                 success: false,
                 error: `The Swarm encountered a fatal error: ${error.message}`
             };
+        } finally {
+            clearInterval(interruptionWatcher);
+            if (typeof signalCleanup === 'function') {
+                signalCleanup();
+            }
         }
     }
 };

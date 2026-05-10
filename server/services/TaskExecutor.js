@@ -21,7 +21,7 @@ const TOOL_CREDIT_COSTS = {
  * and the Modular Tool Registry. 
  */
 class TaskExecutor {
-    async executeTool(toolName, args, userId, socket = null) {
+    async executeTool(toolName, args, userId, socket = null, executionOptions = {}) {
         console.log(`[TaskExecutor] Before tool execution: ${toolName}`, args || {});
         
         try {
@@ -46,7 +46,10 @@ class TaskExecutor {
             }
 
             // Package the context (e.g., who is requesting this)
-            const context = { userId };
+            const context = {
+                userId,
+                signal: executionOptions?.signal || null
+            };
             
             // Execute the tool's modular logic
             const result = await tool.execute(args, context, socket);
