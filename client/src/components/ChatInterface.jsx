@@ -694,7 +694,13 @@ const ChatInterface = () => {
 
   useLayoutEffect(() => {
     if (!shouldAutoScrollRef.current) return;
-    chatEndRef.current?.scrollIntoView({ behavior: isBusy ? 'auto' : 'smooth', block: 'end' });
+    const container = messageContainerRef.current;
+    if (!container) return;
+
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: isBusy ? 'auto' : 'smooth'
+    });
   }, [messages, isProcessing, isSpeaking, isBusy]);
 
   const handleSubmit = (e) => {
