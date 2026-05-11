@@ -1,10 +1,11 @@
-const { Mistral } = require('@mistralai/mistralai');
 const AIMemory = require('../models/AIMemory');
 const UserFact = require('../models/UserFact');
 const TaskExecutor = require('./TaskExecutor');
 const toolRegistry = require('../tools/index');
 const pdfExtract = require('pdf-extraction'); // 🚀 The modern, working package!
 const { consumeCredits, isGuestActorId } = require('./creditService');
+const LLMRouter = require('../lib/llm/LLMRouter');
+const StreamingRuntime = require('../lib/llm/StreamingRuntime');
 
 const SCHEDULE_KEYWORDS = [
     'schedule',
@@ -155,9 +156,8 @@ const parseTimeOnDate = (text, baseDate) => {
 
 class AIService {
     constructor() {
-        const apiKey = process.env.MISTRAL_API_KEY;
-        this.client = new Mistral({ apiKey: apiKey });
-        this.defaultModel = process.env.MISTRAL_MODEL || 'mistral-small-latest'; 
+        this.llmRouter = new LLMRouter();
+        this.streamingRuntime = new StreamingRuntime();
         this.activeRequests = new Map();
     }
 
@@ -213,24 +213,10 @@ class AIService {
     }
 
     async emitAssistantText(socket, text) {
-        if (!socket) return;
-        const safeText = String(text || '').trim();
-        if (!safeText) {
-            socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
-            return;
-        }
-
-        console.log(`[Socket] Emitting assistant response: ${safeText}`);
-        const words = safeText.split(' ');
-        for (const word of words) {
-            if (socket.isInterrupted) break;
-            socket.emit('ai:tts:response:chunk', { chunk: `${word} `, displayText: `${word} `, isFinal: false });
-            await new Promise((r) => setTimeout(r, 20));
-        }
-        socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
+        await this.streamingRuntime.emitText(socket, text);
     }
 
-    async executeSchedulingPipeline(userId, rawText, socket) {
+    async executeSchedulingPipeline(userId, rawText, socket, signal = null) {
         const userCommand = String(rawText || '').trim();
         console.log(`[Planner] Incoming user command: ${userCommand}`);
 
@@ -257,7 +243,7 @@ class AIService {
         console.log(`[Planner] Chosen tools (in order): ${plannedTools.join(' -> ')}`);
 
         console.log('[Planner] Before tool execution:', { tool: 'checkCalendar', args: checkArgs });
-        const checkResult = await TaskExecutor.executeTool('checkCalendar', checkArgs, userId, socket);
+        const checkResult = await TaskExecutor.executeTool('checkCalendar', checkArgs, userId, socket, { signal });
         console.log('[Planner] After tool execution payload:', { tool: 'checkCalendar', payload: checkResult });
 
         let hasConflict = false;
@@ -278,7 +264,7 @@ class AIService {
         let scheduleResult;
         try {
             console.log('[Planner] Before tool execution:', { tool: 'scheduleMeeting', args: scheduleArgs });
-            scheduleResult = await TaskExecutor.executeTool('scheduleMeeting', scheduleArgs, userId, socket);
+            scheduleResult = await TaskExecutor.executeTool('scheduleMeeting', scheduleArgs, userId, socket, { signal });
             console.log('[Planner] After tool execution payload:', { tool: 'scheduleMeeting', payload: scheduleResult });
         } catch (error) {
             console.error('[Planner] scheduleMeeting pipeline error:', error?.stack || error);
@@ -328,7 +314,7 @@ class AIService {
 
             if (calendarIntent.type === 'schedule' && !imageBase64 && !document) {
                 const scheduleResponse = await Promise.race([
-                    this.executeSchedulingPipeline(userId, text, socket),
+                    this.executeSchedulingPipeline(userId, text, socket, controller.signal),
                     new Promise((resolve) => {
                         setTimeout(() => resolve('Meeting request processed but confirmation pending.'), 5000);
                     })
@@ -402,23 +388,10 @@ class AIService {
                 }
             }
 
-            let currentModel = this.defaultModel;
             let messageContent = text || (document ? `Please analyze the attached document: ${document.name}` : "Hello");
             messageContent = `${messageContent}${documentContext}`;
 
-            if (imageBase64) {
-                currentModel = 'pixtral-12b-2409'; 
-                messageContent = [
-                    { type: 'text', text: messageContent },
-                    { type: 'image_url', imageUrl: `data:image/jpeg;base64,${imageBase64}` }
-                ];
-                console.log("[Agent Router] Image detected! Swapped brain to Pixtral-12B Vision Model.");
-            }
-
-            const messages = [
-                {
-                    role: 'system',
-                    content: `You are ARC-AI, an advanced, highly intelligent autonomous agent.
+            const systemPrompt = `You are ARC-AI, an advanced, highly intelligent autonomous agent.
                     The current system date and time is: ${currentDateString}.
                     
                     CORE DIRECTIVES:
@@ -429,31 +402,49 @@ class AIService {
                     5. COMPUTATION: Use 'executeCode' for exact math, logic, iteration, parsing, or verification instead of guessing.
                     6. CALENDAR: Use 'checkCalendar' to inspect availability and 'scheduleMeeting' to create or update meetings when the user asks to manage Google Calendar.
                     7. WHATSAPP: Use 'sendWhatsAppMessage' only when the user explicitly asks to send, message, text, forward, or deliver content on WhatsApp. Do not trigger the WhatsApp tool for vague references, questions, contact checks, or phrases like 'can you see', 'is Mummy there', or similar unless the user clearly wants a message sent. Ask a follow-up if the recipient is ambiguous or the request is not an explicit send action.
-                    ${longTermMemoryText}` 
-                },
+                    ${longTermMemoryText}`;
+
+            const messages = [
                 ...history,
                 { role: 'user', content: messageContent }
             ];
 
             const tools = toolRegistry.getSchemas();
-            const useTools = tools.length > 0 && !imageBase64;
+            const attachments = imageBase64 ? [{ type: 'image', mimeType: 'image/jpeg', data: imageBase64 }] : [];
 
-            const response = await this.client.chat.complete({
-                model: currentModel,
-                messages: messages,
-                tools: useTools ? tools : undefined,
-                toolChoice: useTools ? "auto" : "none",
-            }, {
-                signal: controller.signal,
+            const response = await this.llmRouter.generate({
+                messages,
+                systemPrompt,
+                tools,
+                stream: false,
+                temperature: imageBase64 ? 0.2 : 0.3,
+                userContext: {
+                    userId,
+                    isGuest,
+                    calendarIntent,
+                    requestKey: key,
+                    taskMode: imageBase64 ? 'multimodal' : 'text'
+                },
+                attachments,
+                signal: controller.signal
             });
 
-            const message = response.choices[0].message;
-            let finalOutputText = "";
-            const toolCalls = message.toolCalls || message.tool_calls;
+            let finalOutputText = response?.text || "";
+            const toolCalls = response?.toolCalls || [];
 
             if (toolCalls && toolCalls.length > 0) {
                 console.log(`[Agent Router] AI requested ${toolCalls.length} tool(s). Executing...`);
-                messages.push(message);
+                messages.push({
+                    role: 'assistant',
+                    content: finalOutputText || '',
+                    toolCalls: toolCalls.map((toolCall) => ({
+                        id: toolCall?.id,
+                        function: {
+                            name: toolCall?.function?.name,
+                            arguments: toolCall?.function?.arguments || {}
+                        }
+                    }))
+                });
                 const plannedTools = toolCalls.map((toolCall) => this.mapCalendarToolName(toolCall.function.name, calendarIntent));
                 console.log(`[Planner] Chosen tools (in order): ${plannedTools.join(' -> ')}`);
 
@@ -476,7 +467,7 @@ class AIService {
 
                     console.log('[Planner] Before tool execution:', { tool: functionName, args });
 
-                    const toolResult = await TaskExecutor.executeTool(functionName, args, userId, socket);
+                    const toolResult = await TaskExecutor.executeTool(functionName, args, userId, socket, { signal: controller.signal });
                     console.log('[Planner] After tool execution payload:', { tool: functionName, payload: toolResult });
 
                     if (toolResult.clientAction && socket) {
@@ -510,7 +501,7 @@ class AIService {
                             }
                         }
 
-                        const confirmationResult = await TaskExecutor.executeTool('checkCalendar', confirmationArgs, userId, socket);
+                        const confirmationResult = await TaskExecutor.executeTool('checkCalendar', confirmationArgs, userId, socket, { signal: controller.signal });
                         messages.push({
                             role: 'tool',
                             name: 'checkCalendar',
@@ -520,29 +511,41 @@ class AIService {
                     }
                 }
                 
-                finalOutputText = await this.streamMistralResponse(messages, socket, currentModel, controller.signal);
+                const malformedContinuationMessages = messages.filter((message) => message.role === 'tool' && (!message.toolCallId || !message.name || typeof message.content !== 'string'));
+                if (malformedContinuationMessages.length > 0) {
+                    console.warn('[AIService] Malformed tool continuation payload detected.', {
+                        count: malformedContinuationMessages.length,
+                        sample: malformedContinuationMessages[0]
+                    });
+                }
+
+                const finalGeneration = await this.llmRouter.generate({
+                    messages,
+                    systemPrompt,
+                    tools: [],
+                    stream: true,
+                    temperature: imageBase64 ? 0.2 : 0.3,
+                    userContext: {
+                        userId,
+                        isGuest,
+                        calendarIntent,
+                        requestKey: key,
+                        taskMode: imageBase64 ? 'multimodal' : 'text'
+                    },
+                    attachments: [],
+                    signal: controller.signal
+                });
+
+                finalOutputText = await this.streamingRuntime.consume(finalGeneration.stream, socket, controller.signal);
             } else {
-                finalOutputText = message.content;
+                finalOutputText = response?.text || '';
                 if (socket) {
-                    console.log(`[Socket] Emitting assistant response: ${finalOutputText}`);
-                    const words = finalOutputText.split(' ');
-                    for (const word of words) {
-                        if (socket.isInterrupted) {
-                            break;
-                        }
-                        socket.emit('ai:tts:response:chunk', { chunk: word + ' ', displayText: word + ' ', isFinal: false });
-                        await new Promise(r => setTimeout(r, 20)); 
-                    }
+                    await this.streamingRuntime.emitText(socket, finalOutputText, controller.signal);
                 }
             }
 
             if (!finalOutputText || !String(finalOutputText).trim()) {
                 finalOutputText = 'Meeting request processed but confirmation pending.';
-            }
-
-            if (socket) {
-                console.log(`[Socket] Emitting assistant response: ${finalOutputText}`);
-                socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
             }
 
             if (finalOutputText && !(socket && socket.isInterrupted) && !isGuest) {
@@ -574,10 +577,10 @@ class AIService {
             console.error("[AIService] Error processing query:", error);
             let userFriendlyError = "An internal system error occurred.";
             
-            if (error.statusCode === 429 || (error.message && (error.message.includes('capacity exceeded') || error.message.includes('Rate limit exceeded')))) {
+                if (error.statusCode === 429 || (error.message && (error.message.includes('capacity exceeded') || error.message.includes('Rate limit exceeded')))) {
                 userFriendlyError = imageBase64 
-                    ? "Mistral's free tier has strict limits on image analysis. Please wait 1-2 minutes before uploading another photo."
-                    : "Mistral API capacity exceeded. Please wait a minute.";
+                    ? "Your current multimodal provider is rate-limited right now. Please wait 1-2 minutes and retry the image request."
+                    : "The current AI provider is rate-limited. Please wait a minute and try again.";
             } else if (error.statusCode === 400) {
                  userFriendlyError = "There was an issue processing the file format. Please try again.";
             }
@@ -589,31 +592,6 @@ class AIService {
         }
     }
 
-    async streamMistralResponse(messages, socket, modelToUse, signal) {
-        let accumulatedText = "";
-        const stream = await this.client.chat.stream({
-            model: modelToUse,
-            messages: messages
-        }, {
-            signal,
-        });
-
-        for await (const chunk of stream) {
-            if (socket && socket.isInterrupted) {
-                console.log("[Agent Router] Stream aborted by user.");
-                break; 
-            }
-
-            const content = chunk.data.choices[0].delta.content;
-            if (content) {
-                accumulatedText += content;
-                if (socket) {
-                    socket.emit('ai:tts:response:chunk', { chunk: content, displayText: content, isFinal: false });
-                }
-            }
-        }
-        return accumulatedText;
-    }
 }
 
 module.exports = new AIService();

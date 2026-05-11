@@ -5,12 +5,15 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "google:calendar:clear-stale": "node scripts/clearStaleGoogleCalendarTokens.js",
+    "google:calendar:clear-stale:apply": "node scripts/clearStaleGoogleCalendarTokens.js --apply"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google/genai": "^2.0.1",
     "@mistralai/mistralai": "^1.15.1",
     "@pinecone-database/pinecone": "^7.1.0",
     "axios": "^1.16.0",
