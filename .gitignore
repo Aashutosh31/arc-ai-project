@@ -29,3 +29,7 @@ client/dist/
 
 #Railway_Docker_Notes
 RAILWAY_DOCKER_NOTES.md
+
+# Internal implementation docs
+PHASE_1_IMPLEMENTATION.md
+PHASE_1_QUICK_REFERENCE.md

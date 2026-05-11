@@ -2,6 +2,7 @@ import React, { memo, useEffect, useLayoutEffect, useRef, useState } from 'react
 import styled, { keyframes } from 'styled-components';
 import { useChat } from '../contexts/ChatContext';
 import { useSocket } from '../hooks/useSocket';
+import { useConversation } from '../contexts/ConversationContext';
 
 const Waveform = keyframes`
   0%, 100% { height: 10px; transform: translateY(0); }
@@ -44,6 +45,8 @@ const MessageContainer = styled.div`
   transition: all 0.5s ease;
   scroll-behavior: smooth;
   overscroll-behavior: contain;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
   min-width: 0;
   min-height: 0;
 
@@ -482,8 +485,15 @@ const ChatMessage = memo(({ msg, isSpeaking, isLast }) => {
 ChatMessage.displayName = 'ChatMessage';
 
 const ChatInterface = () => {
-  const { messages, isProcessing, isSpeaking, mediaData, setMediaData, getLiveVisionFrame } = useChat();
-  const { interruptStream, sendCommand } = useSocket(); 
+  const { messages, replaceMessages, clearMessages, isProcessing, isSpeaking, mediaData, setMediaData, getLiveVisionFrame } = useChat();
+  const { interruptStream, sendCommand, socket } = useSocket();
+  const {
+    activeConversationId,
+    switchConversation,
+    fetchConversations,
+    fetchConversationMessages,
+    updateConversationTitle
+  } = useConversation();
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState(null); 
   const [selectedDocument, setSelectedDocument] = useState(null);
@@ -491,8 +501,66 @@ const ChatInterface = () => {
   const chatEndRef = useRef(null);
   const messageContainerRef = useRef(null);
   const historyScrollRef = useRef(null);
+  const shouldAutoScrollRef = useRef(true);
 
   const isBusy = isProcessing || isSpeaking;
+
+  // Listen for new conversation creation from socket
+  useEffect(() => {
+    if (!socket) return;
+    const handleConversationCreated = (data) => {
+      if (data?.conversationId) {
+        switchConversation(data.conversationId);
+        fetchConversations().catch(() => {});
+      }
+    };
+    socket.on('ai:conversation:created', handleConversationCreated);
+    return () => socket.off('ai:conversation:created', handleConversationCreated);
+  }, [socket, switchConversation, fetchConversations]);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleConversationTitle = (data) => {
+      if (!data?.conversationId || !data?.title) return;
+      updateConversationTitle(data.conversationId, data.title);
+    };
+
+    socket.on('ai:conversation:title', handleConversationTitle);
+    return () => socket.off('ai:conversation:title', handleConversationTitle);
+  }, [socket, updateConversationTitle]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadConversationMessages = async () => {
+      if (!activeConversationId) {
+        clearMessages();
+        return;
+      }
+
+      try {
+        const dbMessages = await fetchConversationMessages(activeConversationId, { limit: 500, skip: 0 });
+        if (isCancelled) return;
+
+        const mappedMessages = dbMessages.map((message) => ({
+          sender: message.role === 'user' ? 'user' : 'ai',
+          text: String(message.content || ''),
+          isStreaming: false
+        }));
+
+        replaceMessages(mappedMessages);
+      } catch (error) {
+        console.error('Failed loading conversation messages:', error);
+      }
+    };
+
+    loadConversationMessages();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeConversationId, fetchConversationMessages, replaceMessages, clearMessages]);
 
   useEffect(() => {
     setVisibleMessageCount((currentCount) => {
@@ -518,19 +586,17 @@ const ChatInterface = () => {
     setVisibleMessageCount((currentCount) => Math.min(messages.length, currentCount + LOAD_MORE_MESSAGES));
   };
 
-  const handleMessageWheel = (event) => {
+  const isNearBottom = (container) => {
+    if (!container) return true;
+    const threshold = 96;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    return distanceFromBottom <= threshold;
+  };
+
+  const handleMessageScroll = () => {
     const container = messageContainerRef.current;
     if (!container) return;
-
-    const { scrollTop, scrollHeight, clientHeight } = container;
-    const maxScrollTop = scrollHeight - clientHeight;
-    const canScrollUp = event.deltaY < 0 && scrollTop > 0;
-    const canScrollDown = event.deltaY > 0 && scrollTop < maxScrollTop;
-
-    if (!canScrollUp && !canScrollDown) return;
-
-    event.preventDefault();
-    container.scrollTop += event.deltaY;
+    shouldAutoScrollRef.current = isNearBottom(container);
   };
 
   useLayoutEffect(() => {
@@ -602,9 +668,10 @@ const ChatInterface = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isBusy, interruptStream]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (!shouldAutoScrollRef.current) return;
     chatEndRef.current?.scrollIntoView({ behavior: isBusy ? 'auto' : 'smooth', block: 'end' });
-  }, [messages, isProcessing, isSpeaking]);
+  }, [messages, isProcessing, isSpeaking, isBusy]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -613,7 +680,7 @@ const ChatInterface = () => {
     const uploadedImage = selectedImage?.base64 || null;
     const liveVisionFrame = uploadedImage ? null : getLiveVisionFrame();
     
-    sendCommand(inputText.trim(), uploadedImage || liveVisionFrame, selectedDocument);
+    sendCommand(inputText.trim(), uploadedImage || liveVisionFrame, selectedDocument, activeConversationId);
     
     setInputText('');
     setSelectedImage(null); 
@@ -635,7 +702,7 @@ const ChatInterface = () => {
         </FloatingPlayerContainer>
       )}
 
-      <MessageContainer ref={messageContainerRef} onWheel={handleMessageWheel}>
+      <MessageContainer ref={messageContainerRef} onScroll={handleMessageScroll}>
         {messages.length > visibleMessages.length ? (
           <HistoryButton type="button" onClick={handleLoadMoreMessages} disabled={visibleMessageCount >= messages.length}>
             Load earlier messages ({messages.length - visibleMessages.length} hidden)

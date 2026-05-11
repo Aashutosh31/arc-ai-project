@@ -21,6 +21,16 @@ export const ChatProvider = ({ children }) => {
     setMessages((prev) => [...prev, message]);
   };
 
+  const replaceMessages = (nextMessages = []) => {
+    setMessages(Array.isArray(nextMessages) ? nextMessages : []);
+    setIsProcessing(false);
+  };
+
+  const clearMessages = () => {
+    setMessages([]);
+    setIsProcessing(false);
+  };
+
   const appendBotChunk = (chunk) => {
     setMessages((prev) => {
       const lastMsg = prev[prev.length - 1];
@@ -62,6 +72,8 @@ export const ChatProvider = ({ children }) => {
     <ChatContext.Provider value={{ 
         messages, 
         addMessage, 
+        replaceMessages,
+        clearMessages,
         appendBotChunk, 
         finishBotStream,
         isProcessing, 

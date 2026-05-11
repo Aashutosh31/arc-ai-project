@@ -2,6 +2,8 @@
 import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { useSocket } from '../hooks/useSocket';
+import { ConversationProvider, useConversation } from '../contexts/ConversationContext';
+import { Sidebar } from '../components/Sidebar';
 import AdvancedVoiceButton from '../components/AdvancedVoiceButton.jsx';
 import ChatInterface from '../components/ChatInterface.jsx';
 import TestUserAccessModal from '../components/TestUserAccessModal';
@@ -9,14 +11,93 @@ import WhatsAppModal from '../components/WhatsAppModal.jsx';
 import WhatsAppConnectModal from '../components/WhatsAppConnectModal.jsx';
 
 const Page = styled.div`
-  min-height: 100vh;
+  min-height: 100dvh;
+  height: 100dvh;
   background: radial-gradient(circle at top, #1a1a3a 0, #050511 55%, #020208 100%);
   color: #ffffff;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   width: 100%;
   max-width: 100vw;
   overflow-x: hidden;
+  overflow-y: hidden;
+
+  @media (max-width: 768px) {
+    height: auto;
+    min-height: 100vh;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+`;
+
+const MainContent = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: hidden;
+
+  @media (max-width: 768px) {
+    min-height: 100vh;
+    overflow-y: auto;
+  }
+`;
+
+const HamburgerButton = styled.button`
+  display: none;
+  background: none;
+  border: none;
+  color: var(--primary-hex);
+  font-size: 24px;
+  cursor: pointer;
+  padding: 8px;
+  transition: all 0.3s ease;
+  z-index: 100;
+
+  &:hover {
+    color: var(--secondary-hex);
+    transform: scale(1.1);
+  }
+
+  @media (max-width: 768px) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+`;
+
+const SidebarOverlay = styled.div`
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 999;
+
+  @media (max-width: 768px) {
+    display: ${props => (props.$isOpen ? 'block' : 'none')};
+  }
+`;
+
+const DesktopSidebarWrapper = styled.div`
+  display: none;
+
+  @media (min-width: 769px) {
+    display: block;
+  }
+`;
+
+const MobileSidebarWrapper = styled.div`
+  display: none;
+
+  @media (max-width: 768px) {
+    display: block;
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 1000;
+  }
 `;
 
 const Header = styled.header`
@@ -31,10 +112,12 @@ const Header = styled.header`
   position: sticky;
   top: 0;
   z-index: 10;
+  width: 100%;
+  flex-wrap: wrap;
 
   @media (max-width: 640px) {
-    flex-direction: column;
-    align-items: flex-start;
+    padding: 14px 12px;
+    gap: 10px;
   }
 `;
 
@@ -102,6 +185,7 @@ const Dot = styled.span`
 
 const Container = styled.main`
   flex: 1;
+  min-height: 0;
   width: 100%;
   max-width: min(1600px, calc(100vw - 24px));
   margin: 0 auto;
@@ -109,7 +193,7 @@ const Container = styled.main`
   display: flex;
   gap: 16px;
   /* Must NOT have overflow: hidden — lets sticky work */
-  align-items: flex-start;
+  align-items: stretch;
   min-width: 0;
   overflow-x: clip;
 
@@ -294,7 +378,7 @@ const CardButton = styled.button`
   }
 `;
 
-const CardText = styled.p`
+const CardText = styled.div`
   margin: 0;
   font-size: 12px;
   color: #c9cee6;
@@ -424,7 +508,7 @@ const ListItem = styled.li`
   }
 `;
 
-const DashboardPage = () => {
+const DashboardPageContent = () => {
   const { isConnected, authInfo, setAuthInfo, socket } = useSocket();
   const [googleConnected, setGoogleConnected] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -433,6 +517,7 @@ const DashboardPage = () => {
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [showWhatsAppConnect, setShowWhatsAppConnect] = useState(false);
   const [whatsappConnected, setWhatsappConnected] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const showWhatsAppDebug = import.meta.env.DEV && localStorage.getItem('arc_whatsapp_debug') === 'true';
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
   const apiOrigin = (() => {
@@ -598,161 +683,188 @@ const DashboardPage = () => {
 
   return (
     <Page>
-      <Header>
-        <TitleWrapper>
-          <Title>ARC-AI Dashboard</Title>
-          <Subtitle>
-            Control your AI assistant with real-time chat and voice commands,
-            all in one place.
-          </Subtitle>
-        </TitleWrapper>
+      {/* Desktop Sidebar - Always visible on desktop */}
+      <DesktopSidebarWrapper>
+        <Sidebar isOpen={true} onClose={() => {}} />
+      </DesktopSidebarWrapper>
 
-        <StatusBadge $connected={isConnected}>
-          <Dot $connected={isConnected} />
-          {isConnected ? 'ONLINE' : 'OFFLINE'}
-        </StatusBadge>
-      </Header>
+      {/* Mobile Sidebar Overlay */}
+      <SidebarOverlay $isOpen={sidebarOpen} onClick={() => setSidebarOpen(false)} />
 
-      <Container>
-        <ChatBox>
-          <ChatInterface />
-        </ChatBox>
+      {/* Mobile Sidebar Drawer */}
+      <MobileSidebarWrapper>
+        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      </MobileSidebarWrapper>
 
-        <SidePanel>
-          <Card>
-            <CardTitle>Voice Control</CardTitle>
-            <CardSubtitle>Hands-free interaction</CardSubtitle>
-            <VoiceWrapper>
-              <Description>
-                Click the button below to activate voice input and talk to ARC-AI
-                like a real assistant.
-              </Description>
-              <AdvancedVoiceButton />
-              <Hint>Tip: Use a clear, steady voice for best accuracy.</Hint>
-            </VoiceWrapper>
-          </Card>
+      <MainContent>
+        <Header>
+          <TitleWrapper>
+            <Title>ARC-AI</Title>
+            <Subtitle>
+              Conversational AI workspace with real-time chat, voice control, and calendar integration.
+            </Subtitle>
+          </TitleWrapper>
 
-          <Card>
-            <CardTitle>Account</CardTitle>
-            <CardSubtitle>Session and credits</CardSubtitle>
-            <CardStack>
-              <SessionPill $guest={authInfo?.authType === 'guest'}>
-                {authInfo?.authType === 'guest' ? 'Guest Session' : 'Signed In'}
-              </SessionPill>
-              <CreditLine>
-                <span>Credits remaining</span>
-                <CreditValue>{authInfo?.creditsRemaining ?? '—'}</CreditValue>
-              </CreditLine>
-              {authInfo?.authType === 'guest' ? (
-                <CardText>
-                  Guest mode is limited. Sign up or sign in to unlock more credits and Google Calendar.
-                </CardText>
-              ) : (
-                <CardText>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <HamburgerButton onClick={() => setSidebarOpen(!sidebarOpen)}>
+              ☰
+            </HamburgerButton>
+            <StatusBadge $connected={isConnected}>
+              <Dot $connected={isConnected} />
+              {isConnected ? 'ONLINE' : 'OFFLINE'}
+            </StatusBadge>
+          </div>
+        </Header>
+
+        <Container>
+          <ChatBox>
+            <ChatInterface />
+          </ChatBox>
+
+          <SidePanel>
+            <Card>
+              <CardTitle>Voice Control</CardTitle>
+              <CardSubtitle>Hands-free interaction</CardSubtitle>
+              <VoiceWrapper>
+                <Description>
+                  Click the button below to activate voice input and talk to ARC-AI
+                  like a real assistant.
+                </Description>
+                <AdvancedVoiceButton />
+                <Hint>Tip: Use a clear, steady voice for best accuracy.</Hint>
+              </VoiceWrapper>
+            </Card>
+
+            <Card>
+              <CardTitle>Account</CardTitle>
+              <CardSubtitle>Session and credits</CardSubtitle>
+              <CardStack>
+                <SessionPill $guest={authInfo?.authType === 'guest'}>
+                  {authInfo?.authType === 'guest' ? 'Guest Session' : 'Signed In'}
+                </SessionPill>
                 <CreditLine>
-                  <span>Google link</span>
-                  <CreditValue>{authInfo?.googleLinked ? 'Linked' : 'Not linked'}</CreditValue>
+                  <span>Credits remaining</span>
+                  <CreditValue>{authInfo?.creditsRemaining ?? '—'}</CreditValue>
                 </CreditLine>
-                {authInfo?.authType !== 'guest' ? (
-                  <CardActionButton type="button" onClick={handleGoogleLink} disabled={googleLoading}>
-                    {authInfo?.googleLinked ? 'Reconnect Google Account' : 'Link Google Account'}
-                  </CardActionButton>
-                ) : null}
-                  Your signed-in account can use the full ARC-AI feature set with higher credit limits.
-                </CardText>
-              )}
-            </CardStack>
-          </Card>
-
-          <Card>
-            <CardTitle>Google Calendar</CardTitle>
-            <CardSubtitle>Executive scheduling</CardSubtitle>
-            <CardStack>
-              <CardStatus $connected={googleConnected}>
-                {googleConnected ? 'Connected' : 'Not connected'}
-              </CardStatus>
-              <CardText>
-                Connect ARC-AI to Google Calendar so it can read availability and schedule meetings.
-              </CardText>
-              <CardButton type="button" onClick={handleGoogleConnect} disabled={googleLoading}>
-                {authInfo?.authType === 'guest'
-                  ? 'Sign in to connect'
-                  : googleLoading
-                    ? 'Opening...'
-                    : googleConnected
-                      ? 'Reconnect Calendar'
-                      : 'Connect Google Calendar'}
-              </CardButton>
-              {googleMessage ? <CardText>{googleMessage}</CardText> : null}
-            </CardStack>
-          </Card>
-
-          {showWhatsAppDebug ? (
-            <Card>
-              <CardTitle>WhatsApp Debug</CardTitle>
-              <CardSubtitle>Hidden developer utility</CardSubtitle>
-              <CardStack>
-                <CardText>
-                  Temporary QR/session testing UI for local development only.
-                </CardText>
-                <CardButton type="button" onClick={() => {
-                  setShowWhatsAppModal(true);
-                  try {
-                    if (socket && socket.connected) socket.emit('whatsapp:connect');
-                  } catch (e) { console.warn('socket emit failed', e); }
-                }}>
-                  Connect WhatsApp
-                </CardButton>
+                {authInfo?.authType === 'guest' ? (
+                  <CardText>
+                    Guest mode is limited. Sign up or sign in to unlock more credits and Google Calendar.
+                  </CardText>
+                ) : (
+                  <CardText>
+                  <CreditLine>
+                    <span>Google link</span>
+                    <CreditValue>{authInfo?.googleLinked ? 'Linked' : 'Not linked'}</CreditValue>
+                  </CreditLine>
+                  {authInfo?.authType !== 'guest' ? (
+                    <CardActionButton type="button" onClick={handleGoogleLink} disabled={googleLoading}>
+                      {authInfo?.googleLinked ? 'Reconnect Google Account' : 'Link Google Account'}
+                    </CardActionButton>
+                  ) : null}
+                    Your signed-in account can use the full ARC-AI feature set with higher credit limits.
+                  </CardText>
+                )}
               </CardStack>
             </Card>
-          ) : null}
 
-          {/* Product-facing WhatsApp connect */}
-          {authInfo?.authType !== 'guest' ? (
             <Card>
-              <CardTitle>WhatsApp</CardTitle>
-              <CardSubtitle>Connect ARC to your WhatsApp</CardSubtitle>
+              <CardTitle>Google Calendar</CardTitle>
+              <CardSubtitle>Executive scheduling</CardSubtitle>
               <CardStack>
-                <CardStatus $connected={whatsappConnected}>{whatsappConnected ? 'Connected' : 'Not connected'}</CardStatus>
+                <CardStatus $connected={googleConnected}>
+                  {googleConnected ? 'Connected' : 'Not connected'}
+                </CardStatus>
                 <CardText>
-                  Connect once to use ARC to send messages on your behalf. Sessions persist until you unlink.
+                  Connect ARC-AI to Google Calendar so it can read availability and schedule meetings.
                 </CardText>
-                <CardButton type="button" onClick={() => {
-                  if (!authInfo?.ready) {
-                    alert('Please sign in first to connect WhatsApp.');
-                    return;
-                  }
-                  setShowWhatsAppConnect(true);
-                  try { if (socket && socket.connected) socket.emit('whatsapp:connect'); } catch (e) {}
-                }}>
-                  {whatsappConnected ? 'Reconnect WhatsApp' : 'Connect WhatsApp'}
+                <CardButton type="button" onClick={handleGoogleConnect} disabled={googleLoading}>
+                  {authInfo?.authType === 'guest'
+                    ? 'Sign in to connect'
+                    : googleLoading
+                      ? 'Opening...'
+                      : googleConnected
+                        ? 'Reconnect Calendar'
+                        : 'Connect Google Calendar'}
                 </CardButton>
+                {googleMessage ? <CardText>{googleMessage}</CardText> : null}
               </CardStack>
             </Card>
-          ) : null}
 
-          <Card>
-            <CardTitle>Features</CardTitle>
-            <CardSubtitle>What you get out of the box</CardSubtitle>
-            <List>
-              <ListItem>AI-powered responses tailored to your queries</ListItem>
-              <ListItem>Built-in voice recognition for hands-free usage</ListItem>
-              <ListItem>Real-time chat with low-latency updates</ListItem>
-              <ListItem>Secure socket connection status indicator</ListItem>
-              <ListItem>Google Calendar scheduling with OAuth</ListItem>
-            </List>
-          </Card>
-        </SidePanel>
-      </Container>
-      
-      <TestUserAccessModal
-        isOpen={showTestUserModal}
-        onClose={() => setShowTestUserModal(false)}
-        onProceed={handleProceedAsTestUser}
-      />
-      <WhatsAppModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
-      <WhatsAppConnectModal isOpen={showWhatsAppConnect} onClose={() => setShowWhatsAppConnect(false)} onConnected={() => setShowWhatsAppConnect(false)} />
+            {showWhatsAppDebug ? (
+              <Card>
+                <CardTitle>WhatsApp Debug</CardTitle>
+                <CardSubtitle>Hidden developer utility</CardSubtitle>
+                <CardStack>
+                  <CardText>
+                    Temporary QR/session testing UI for local development only.
+                  </CardText>
+                  <CardButton type="button" onClick={() => {
+                    setShowWhatsAppModal(true);
+                    try {
+                      if (socket && socket.connected) socket.emit('whatsapp:connect');
+                    } catch (e) { console.warn('socket emit failed', e); }
+                  }}>
+                    Connect WhatsApp
+                  </CardButton>
+                </CardStack>
+              </Card>
+            ) : null}
+
+            {/* Product-facing WhatsApp connect */}
+            {authInfo?.authType !== 'guest' ? (
+              <Card>
+                <CardTitle>WhatsApp</CardTitle>
+                <CardSubtitle>Connect ARC to your WhatsApp</CardSubtitle>
+                <CardStack>
+                  <CardStatus $connected={whatsappConnected}>{whatsappConnected ? 'Connected' : 'Not connected'}</CardStatus>
+                  <CardText>
+                    Connect once to use ARC to send messages on your behalf. Sessions persist until you unlink.
+                  </CardText>
+                  <CardButton type="button" onClick={() => {
+                    if (!authInfo?.ready) {
+                      alert('Please sign in first to connect WhatsApp.');
+                      return;
+                    }
+                    setShowWhatsAppConnect(true);
+                    try { if (socket && socket.connected) socket.emit('whatsapp:connect'); } catch (e) {}
+                  }}>
+                    {whatsappConnected ? 'Reconnect WhatsApp' : 'Connect WhatsApp'}
+                  </CardButton>
+                </CardStack>
+              </Card>
+            ) : null}
+
+            <Card>
+              <CardTitle>Features</CardTitle>
+              <CardSubtitle>What you get out of the box</CardSubtitle>
+              <List>
+                <ListItem>Persistent conversation history</ListItem>
+                <ListItem>AI-powered responses tailored to your queries</ListItem>
+                <ListItem>Built-in voice recognition for hands-free usage</ListItem>
+                <ListItem>Real-time chat with low-latency updates</ListItem>
+                <ListItem>Google Calendar scheduling with OAuth</ListItem>
+              </List>
+            </Card>
+          </SidePanel>
+        </Container>
+        
+        <TestUserAccessModal
+          isOpen={showTestUserModal}
+          onClose={() => setShowTestUserModal(false)}
+          onProceed={handleProceedAsTestUser}
+        />
+        <WhatsAppModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
+        <WhatsAppConnectModal isOpen={showWhatsAppConnect} onClose={() => setShowWhatsAppConnect(false)} onConnected={() => setShowWhatsAppConnect(false)} />
+      </MainContent>
     </Page>
+  );
+};
+
+const DashboardPage = () => {
+  return (
+    <ConversationProvider>
+      <DashboardPageContent />
+    </ConversationProvider>
   );
 };
 

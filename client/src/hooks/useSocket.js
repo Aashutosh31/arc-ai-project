@@ -113,7 +113,7 @@ export const useSocket = () => {
     };
   }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef, setMediaData, setAgentStatus, setAuthInfo]);
 
-  const sendCommand = (text, imageBase64 = null, documentData = null) => {
+  const sendCommand = (text, imageBase64 = null, documentData = null, conversationId = null) => {
     if (socket) {
       isInterruptedRef.current = false; 
       setAgentStatus(null);
@@ -128,7 +128,8 @@ export const useSocket = () => {
       socket.emit('ai:stt:final', { 
         command: text, 
         image: imageBase64,
-        document: documentData
+        document: documentData,
+        conversationId
       }); 
     }
   };
