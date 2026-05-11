@@ -45,7 +45,7 @@ const spin = keyframes`
 
 // Main container with dark background and particle effects
 const PageWrapper = styled.div`
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -66,7 +66,14 @@ const PageWrapper = styled.div`
   }
 
   @media (max-width: 768px) {
-    padding: 10px;
+    padding: 12px;
+    align-items: stretch;
+    justify-content: flex-start;
+
+    &::before {
+      animation-duration: 32s;
+      opacity: 0.5;
+    }
   }
 `;
 
@@ -137,6 +144,10 @@ const AuthContainer = styled.div`
 
   @media (max-width: 480px) {
     padding: 30px 20px;
+    border-radius: 18px;
+    width: 100%;
+    max-width: 100%;
+    animation: none;
   }
 `;
 
@@ -182,6 +193,10 @@ const Form = styled.form`
   display: flex;
   flex-direction: column;
   gap: 24px;
+
+  @media (max-width: 480px) {
+    gap: 18px;
+  }
 `;
 
 const InputGroup = styled.div`
@@ -443,6 +458,10 @@ const ButtonGroup = styled.div`
   display: flex;
   flex-direction: column;
   gap: 12px;
+
+  @media (max-width: 480px) {
+    gap: 10px;
+  }
 `;
 
 const SecondaryButton = styled.button`
@@ -519,7 +538,7 @@ const ToggleLink = styled.span`
   cursor: pointer;
   font-weight: 600;
   text-decoration: none;
-  transition: all 0.3s ease;
+  transition: color 0.2s ease, text-shadow 0.2s ease;
   position: relative;
   
   &::after {
@@ -546,6 +565,10 @@ const ToggleLink = styled.span`
     outline: 2px solid rgba(0, 255, 255, 0.5);
     outline-offset: 4px;
     border-radius: 2px;
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(0, 255, 255, 0.7);
   }
 `;
 

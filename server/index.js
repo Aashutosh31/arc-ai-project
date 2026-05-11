@@ -8,6 +8,7 @@ const jwt = require('jsonwebtoken');
 
 const authRoutes = require('./routes/auth.js');
 const googleAuthRoutes = require('./routes/googleAuth.js');
+const conversationRoutes = require('./routes/conversations.js');
 const AIService = require('./services/AIService.js'); 
 
 const app = express();
@@ -83,7 +84,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('ai:stt:final', async (data) => {
-        const { command, image, document } = data; 
+        const { command, image, document, conversationId } = data; 
         const userId = socket.userId; 
         socket.isInterrupted = false; 
 
@@ -91,7 +92,7 @@ io.on('connection', (socket) => {
         AIService.abortForSocket(socket.id);
 
         console.log(`🧠 Processing command from user ${userId}: "${command}"`);
-        await AIService.processQuery(userId, command, socket, image, document);
+        await AIService.processQuery(userId, command, socket, image, document, conversationId);
     });
 
     socket.on('disconnect', () => {
@@ -111,5 +112,6 @@ io.on('connection', (socket) => {
 app.get('/', (req, res) => res.status(200).send('ARC-AI Server Running. Status: Operational.'));
 app.use('/api/auth', authRoutes);
 app.use('/api/google', googleAuthRoutes);
+app.use('/api/conversations', conversationRoutes);
 
 server.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));

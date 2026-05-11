@@ -1,5 +1,7 @@
 const AIMemory = require('../models/AIMemory');
 const UserFact = require('../models/UserFact');
+const Conversation = require('../models/Conversation');
+const Message = require('../models/Message');
 const TaskExecutor = require('./TaskExecutor');
 const toolRegistry = require('../tools/index');
 const pdfExtract = require('pdf-extraction'); // 🚀 The modern, working package!
@@ -278,7 +280,7 @@ class AIService {
         return `Meeting "${scheduleResult.title}" created for ${scheduleResult.start} to ${scheduleResult.end}. Event ID: ${scheduleResult.eventId}.`;
     }
 
-    async processQuery(userId, text, socket = null, imageBase64 = null, document = null) {
+    async processQuery(userId, text, socket = null, imageBase64 = null, document = null, conversationId = null) {
         const creditCharge = await consumeCredits(userId, 1, 'ai request');
         if (!creditCharge.success) {
             if (socket) {
@@ -293,6 +295,40 @@ class AIService {
                 creditsRemaining: creditCharge.creditsRemaining,
                 reason: 'ai request'
             });
+        }
+
+        // Handle conversation lifecycle
+        if (!isGuestActorId(userId)) {
+            try {
+                if (!conversationId) {
+                    // Create a new conversation
+                    const newConversation = new Conversation({
+                        userId,
+                        title: 'New Conversation'
+                    });
+                    await newConversation.save();
+                    conversationId = newConversation._id;
+                    
+                    // Notify frontend of new conversation ID
+                    if (socket) {
+                        socket.emit('ai:conversation:created', { conversationId: conversationId.toString() });
+                    }
+                }
+
+                // Save user message
+                await Message.create({
+                    conversationId,
+                    role: 'user',
+                    content: text || (document ? `Attached document: ${document.name}` : ''),
+                    attachments: imageBase64 ? [{ type: 'image' }] : (document ? [{ type: 'document', name: document.name }] : []),
+                    metadata: {
+                        streaming: false
+                    }
+                });
+            } catch (err) {
+                console.error('[AIService] Error handling conversation:', err);
+                // Don't block query on conversation error
+            }
         }
 
         const { key, controller } = this.beginRequest(socket, userId);
@@ -555,6 +591,33 @@ class AIService {
                 
                 const newMemory = new AIMemory({ userId, query: memoryQuery, response: finalOutputText });
                 await newMemory.save();
+
+                // Also save to conversation messages
+                if (conversationId) {
+                    try {
+                        await Message.create({
+                            conversationId,
+                            role: 'ai',
+                            content: finalOutputText,
+                            provider: response?.provider || null,
+                            model: response?.model || null,
+                            metadata: {
+                                tokens: response?.tokens || { input: 0, output: 0 },
+                                streaming: true,
+                                interrupted: false
+                            }
+                        });
+
+                        // Generate title async on first message
+                        const messageCount = await Message.countDocuments({ conversationId });
+                        if (messageCount === 2) { // 1 user + 1 ai
+                            const conversationCtrl = require('../controllers/conversationController');
+                            conversationCtrl.generateConversationTitle(conversationId, text || '');
+                        }
+                    } catch (err) {
+                        console.error('[AIService] Error saving conversation message:', err);
+                    }
+                }
             }
 
             return finalOutputText;
