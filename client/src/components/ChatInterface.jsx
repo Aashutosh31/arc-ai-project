@@ -63,9 +63,11 @@ const MessageContainer = styled.div`
 const MessageBubble = styled.div`
   max-width: 80%;
   margin-bottom: 12px;
-  padding: 12px 16px;
+  padding: 14px 18px;
   border-radius: 12px;
-  line-height: 1.4;
+  line-height: 1.7;
+  letter-spacing: 0.3px;
+  word-spacing: 0.1em;
   align-self: ${props => props.$role === 'user' ? 'flex-end' : 'flex-start'};
   background: ${props => props.$role === 'user' ? 'rgba(var(--primary-rgb), 0.15)' : 'rgba(var(--secondary-rgb), 0.15)'};
   border: 1px solid ${props => props.$role === 'user' ? 'rgba(var(--primary-rgb), 0.4)' : 'rgba(var(--secondary-rgb), 0.4)'};
@@ -78,10 +80,13 @@ const MessageBubble = styled.div`
 
   @media (max-width: 480px) {
     max-width: 92%;
-    padding: 9px 12px;
+    padding: 11px 14px;
     font-size: 14px;
     margin-bottom: 8px;
     border-radius: 10px;
+    line-height: 1.6;
+    letter-spacing: 0.2px;
+    word-spacing: 0.05em;
   }
 `;
 
