@@ -453,12 +453,27 @@ const ChatMessage = memo(({ msg, isSpeaking, isLast }) => {
   const text = String(msg.text || '');
   const shouldCollapse = text.length > LONG_MESSAGE_PREVIEW_CHARS;
   const displayedText = shouldCollapse && !isExpanded ? `${text.slice(0, LONG_MESSAGE_PREVIEW_CHARS).trimEnd()}…` : text;
+  const isSchedulingConfirmation = text.includes('successfully scheduled') || text.includes('Meeting');
 
   return (
     <MessageBubble $role={msg.sender === 'ai' ? 'assistant' : 'user'}>
       <MessageContent>
-        {msg.sender === 'ai' && <span style={{ fontWeight: 'bold' }}>ARC-AI: </span>}
-        <MessageText $collapsed={shouldCollapse && !isExpanded}>{displayedText}</MessageText>
+        {isSchedulingConfirmation && msg.sender === 'ai' && (
+          <div style={{
+            marginBottom: '8px',
+            padding: '8px 12px',
+            background: 'rgba(0, 255, 120, 0.1)',
+            border: '1px solid rgba(0, 255, 120, 0.4)',
+            borderRadius: '8px',
+            color: '#4dffb0',
+            fontSize: '13px',
+            fontWeight: '600'
+          }}>
+            ✓ {text}
+          </div>
+        )}
+        {msg.sender === 'ai' && !isSchedulingConfirmation && <span style={{ fontWeight: 'bold' }}>ARC-AI: </span>}
+        {!isSchedulingConfirmation && <MessageText $collapsed={shouldCollapse && !isExpanded}>{displayedText}</MessageText>}
 
         {shouldCollapse && (
           <MessageToggleButton

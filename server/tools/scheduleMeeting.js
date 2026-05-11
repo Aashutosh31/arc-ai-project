@@ -22,7 +22,14 @@ const toIsoDate = (value, label) => {
     if (Number.isNaN(date.getTime())) {
         throw new Error(`Invalid ${label} supplied to scheduleMeeting.`);
     }
-    return date.toISOString();
+    // Return the value as-is if it's already a local format string (no Z suffix)
+    // The timeZone field in the Google Calendar API event will handle the interpretation
+    if (typeof value === 'string' && !value.endsWith('Z')) {
+        return value; // Already in local format (YYYY-MM-DDTHH:mm:ss)
+    }
+    // If it's a Z-format string, strip the Z to preserve local time interpretation
+    const isoStr = date.toISOString();
+    return isoStr.endsWith('Z') ? isoStr.slice(0, -1) : isoStr;
 };
 
 module.exports = {
@@ -115,23 +122,14 @@ module.exports = {
             const createdTitle = created.summary || event.summary;
             const createdStart = created.start?.dateTime || created.start?.date || event.start.dateTime;
             const createdEnd = created.end?.dateTime || created.end?.date || event.end.dateTime;
-            const createdEventId = created.id || '';
 
+            // Return sanitized response without sensitive event IDs
             return {
                 success: true,
                 title: createdTitle,
                 start: createdStart,
                 end: createdEnd,
-                eventId: createdEventId,
                 calendarId,
-                event: {
-                    id: createdEventId,
-                    summary: createdTitle,
-                    htmlLink: created.htmlLink || '',
-                    status: created.status || 'confirmed',
-                    start: createdStart,
-                    end: createdEnd
-                },
                 message: `Meeting "${event.summary}" scheduled successfully.`
             };
         } catch (error) {
