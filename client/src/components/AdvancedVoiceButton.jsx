@@ -3,6 +3,7 @@ import styled, { css, keyframes } from 'styled-components';
 import { useSocket } from '../hooks/useSocket';
 import { useAdvancedVoice } from '../hooks/useAdvancedVoice';
 import { useChat } from '../contexts/ChatContext';
+import { useConversation } from '../contexts/ConversationContext';
 import LiveVisionCamera from './LiveVisionCamera';
 
 const pulse = keyframes`
@@ -152,6 +153,7 @@ const AdvancedVoiceButton = () => {
   const { sendCommand, interruptStream } = useSocket();
   const { isProcessing, isSpeaking, agentStatus, setLiveVisionCapture } = useChat();
   const captureFrameRef = useRef(() => null);
+  const { activeConversationId, createNewConversation } = useConversation();
 
   const handleCaptureReady = useCallback((captureFn) => {
     const safeCapture = typeof captureFn === 'function' ? captureFn : () => null;
@@ -163,7 +165,20 @@ const AdvancedVoiceButton = () => {
   const handleFinalCommand = (transcript) => {
     if (transcript.trim()) {
       const currentFrame = captureFrameRef.current?.() || null;
-      sendCommand(transcript, currentFrame);
+      (async () => {
+        try {
+          let cid = activeConversationId;
+          if (!cid) {
+            const conv = await createNewConversation();
+            cid = conv?._id || cid;
+          }
+          sendCommand(transcript, currentFrame, null, cid);
+        } catch (err) {
+          // fallback to sending without conversation id
+          console.warn('Voice command failed to attach to conversation, sending without id', err?.message || err);
+          sendCommand(transcript, currentFrame);
+        }
+      })();
     }
   };
 
