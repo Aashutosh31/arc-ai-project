@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "google:calendar:clear-stale": "node scripts/clearStaleGoogleCalendarTokens.js",
+    "google:calendar:clear-stale:apply": "node scripts/clearStaleGoogleCalendarTokens.js --apply"
   },
   "keywords": [],
   "author": "",
