@@ -227,7 +227,19 @@ class AIService {
         const durationMinutes = parseDurationMinutes(userCommand);
         const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
         const summary = parseMeetingTitle(userCommand);
-        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata';
+
+        // Helper: Format local time as ISO string WITHOUT Z suffix
+        // This allows Google Calendar API to interpret it in the specified timezone
+        const formatLocalTime = (date) => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+        };
 
         const checkArgs = {
             timeMin: new Date(start.getTime() - 15 * 60 * 1000).toISOString(),
@@ -236,8 +248,8 @@ class AIService {
         };
         const scheduleArgs = {
             summary,
-            startDateTime: start.toISOString(),
-            endDateTime: end.toISOString(),
+            startDateTime: formatLocalTime(start),
+            endDateTime: formatLocalTime(end),
             timeZone
         };
 
@@ -277,7 +289,8 @@ class AIService {
             return scheduleResult?.error || 'Unable to schedule the meeting right now.';
         }
 
-        return `Meeting "${scheduleResult.title}" created for ${scheduleResult.start} to ${scheduleResult.end}. Event ID: ${scheduleResult.eventId}.`;
+        // Security: Don't expose event IDs in chat responses
+        return `Meeting "${scheduleResult.title}" successfully scheduled for ${scheduleResult.start} to ${scheduleResult.end}.`;
     }
 
     async processQuery(userId, text, socket = null, imageBase64 = null, document = null, conversationId = null) {
