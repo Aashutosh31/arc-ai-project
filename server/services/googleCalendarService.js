@@ -214,7 +214,18 @@ const saveTokensForUser = async (userId, tokens) => {
         throw new Error('User not found while saving Google tokens.');
     }
 
-    const existingTokens = decryptJson(user.googleCalendar?.encryptedTokenData);
+    let existingTokens = null;
+    try {
+        existingTokens = decryptJson(user.googleCalendar?.encryptedTokenData);
+    } catch (error) {
+        // Key rotation or corrupted blob: keep OAuth flow healthy by replacing with fresh tokens.
+        console.warn('[Google OAuth] Existing encrypted token blob could not be decrypted. Replacing with fresh tokens.', {
+            userId: String(userId),
+            reason: error?.message || 'unknown'
+        });
+        existingTokens = null;
+    }
+
     const mergedTokens = {
         ...(existingTokens || {}),
         ...tokens
