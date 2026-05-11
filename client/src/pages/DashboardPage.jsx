@@ -40,8 +40,8 @@ const MainContent = styled.div`
   overflow-y: hidden;
 
   @media (max-width: 768px) {
-    min-height: 100vh;
-    overflow-y: auto;
+    min-height: auto;
+    overflow-y: visible;
   }
 `;
 

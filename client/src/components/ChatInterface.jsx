@@ -50,6 +50,12 @@ const MessageContainer = styled.div`
   min-width: 0;
   min-height: 0;
 
+  @media (max-width: 768px) {
+    overscroll-behavior: auto;
+    overscroll-behavior-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
   &::-webkit-scrollbar { width: 8px; }
   &::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
   &::-webkit-scrollbar-thumb { background: var(--primary-hex); border-radius: 4px; }
@@ -58,6 +64,9 @@ const MessageContainer = styled.div`
     padding: 10px 10px 8px;
     border-radius: 10px;
     min-height: 200px;
+    overscroll-behavior: auto;
+    overscroll-behavior-y: auto;
+    -webkit-overflow-scrolling: touch;
 
     &::-webkit-scrollbar { width: 4px; }
   }
