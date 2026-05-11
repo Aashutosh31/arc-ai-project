@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { useChat } from '../contexts/ChatContext';
 import { useSocket } from '../hooks/useSocket';
@@ -21,6 +21,8 @@ const ChatWrapper = styled.div`
   height: 100%;
   gap: 12px;
   position: relative;
+  min-width: 0;
+  min-height: 0;
 
   @media (max-width: 480px) {
     gap: 8px;
@@ -40,6 +42,10 @@ const MessageContainer = styled.div`
   box-shadow: 0 0 22px rgba(var(--primary-rgb), 0.25);
   min-height: 260px;
   transition: all 0.5s ease;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+  min-width: 0;
+  min-height: 0;
 
   &::-webkit-scrollbar { width: 8px; }
   &::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
@@ -66,6 +72,8 @@ const MessageBubble = styled.div`
   color: #fff;
   white-space: pre-wrap;
   word-wrap: break-word;
+  overflow-wrap: anywhere;
+  hyphens: auto;
   transition: all 0.5s ease;
 
   @media (max-width: 480px) {
@@ -163,6 +171,7 @@ const InputContainer = styled.div`
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
 
   @media (max-width: 480px) {
     gap: 6px;
@@ -226,9 +235,11 @@ const InputForm = styled.form`
   gap: 10px;
   width: 100%;
   align-items: center;
+  min-width: 0;
 
   @media (max-width: 480px) {
     gap: 6px;
+    flex-wrap: wrap;
   }
 `;
 
@@ -242,6 +253,8 @@ const UploadLabel = styled.label`
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
   transition: all 0.3s;
   font-size: 16px;
   flex-shrink: 0;
@@ -283,6 +296,7 @@ const TextInput = styled.input`
     padding: 10px 14px;
     font-size: 14px;
     border-radius: 20px;
+    width: 100%;
   }
 `;
 
@@ -298,6 +312,7 @@ const SendButton = styled.button`
   transition: all 0.5s ease;
   flex-shrink: 0;
   white-space: nowrap;
+  min-width: 88px;
 
   &:hover {
     box-shadow: 0 0 15px rgba(var(--primary-rgb), 0.4);
@@ -314,6 +329,7 @@ const SendButton = styled.button`
     height: 40px;
     font-size: 14px;
     border-radius: 20px;
+    width: 100%;
   }
 `;
 
@@ -332,11 +348,13 @@ const FloatingPlayerContainer = styled.div`
   animation: slideIn 0.3s ease-out forwards;
 
   @media (max-width: 480px) {
+    position: relative;
     width: calc(100% - 30px);
     height: 180px;
-    top: 10px;
-    right: 15px;
-    left: 15px;
+    top: 0;
+    right: 0;
+    left: 0;
+    margin: 0 auto;
   }
 `;
 
@@ -361,15 +379,165 @@ const ClosePlayerButton = styled.button`
   &:hover { background: darkred; }
 `;
 
+const HistoryButton = styled.button`
+  align-self: center;
+  border: 1px solid rgba(var(--primary-rgb), 0.28);
+  background: rgba(0, 0, 0, 0.18);
+  color: #c8fbff;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+
+  &:hover {
+    background: rgba(var(--primary-rgb), 0.12);
+    transform: translateY(-1px);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+    transform: none;
+  }
+`;
+
+const MessageContent = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+`;
+
+const MessageText = styled.div`
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+  min-width: 0;
+  max-height: ${props => (props.$collapsed ? '9.5rem' : 'none')};
+  overflow: ${props => (props.$collapsed ? 'hidden' : 'visible')};
+`;
+
+const MessageToggleButton = styled.button`
+  align-self: flex-start;
+  border: none;
+  background: rgba(var(--primary-rgb), 0.12);
+  color: var(--primary-hex);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+
+  &:hover {
+    background: rgba(var(--primary-rgb), 0.2);
+    transform: translateY(-1px);
+  }
+`;
+
+const LONG_MESSAGE_PREVIEW_CHARS = 640;
+const INITIAL_VISIBLE_MESSAGES = 60;
+const LOAD_MORE_MESSAGES = 40;
+
+const ChatMessage = memo(({ msg, isSpeaking, isLast }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const text = String(msg.text || '');
+  const shouldCollapse = text.length > LONG_MESSAGE_PREVIEW_CHARS;
+  const displayedText = shouldCollapse && !isExpanded ? `${text.slice(0, LONG_MESSAGE_PREVIEW_CHARS).trimEnd()}…` : text;
+
+  return (
+    <MessageBubble $role={msg.sender === 'ai' ? 'assistant' : 'user'}>
+      <MessageContent>
+        {msg.sender === 'ai' && <span style={{ fontWeight: 'bold' }}>ARC-AI: </span>}
+        <MessageText $collapsed={shouldCollapse && !isExpanded}>{displayedText}</MessageText>
+
+        {shouldCollapse && (
+          <MessageToggleButton
+            type="button"
+            onClick={() => setIsExpanded((prev) => !prev)}
+            aria-expanded={isExpanded}
+          >
+            {isExpanded ? 'Show less' : 'Show more'}
+          </MessageToggleButton>
+        )}
+
+        {msg.image && <BubbleImage src={msg.image} alt="User upload" />}
+
+        {msg.documentName && <DocumentAttachment>📄 {msg.documentName}</DocumentAttachment>}
+
+        {msg.sender === 'ai' && (msg.isStreaming || (isSpeaking && isLast)) && (
+          <WaveformBars><div></div><div></div><div></div><div></div><div></div></WaveformBars>
+        )}
+      </MessageContent>
+    </MessageBubble>
+  );
+});
+
+ChatMessage.displayName = 'ChatMessage';
+
 const ChatInterface = () => {
   const { messages, isProcessing, isSpeaking, mediaData, setMediaData, getLiveVisionFrame } = useChat();
   const { interruptStream, sendCommand } = useSocket(); 
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState(null); 
   const [selectedDocument, setSelectedDocument] = useState(null);
+  const [visibleMessageCount, setVisibleMessageCount] = useState(INITIAL_VISIBLE_MESSAGES);
   const chatEndRef = useRef(null);
+  const messageContainerRef = useRef(null);
+  const historyScrollRef = useRef(null);
 
   const isBusy = isProcessing || isSpeaking;
+
+  useEffect(() => {
+    setVisibleMessageCount((currentCount) => {
+      const nextCount = Math.min(Math.max(currentCount, INITIAL_VISIBLE_MESSAGES), messages.length);
+      return nextCount;
+    });
+  }, [messages.length]);
+
+  const visibleMessages = messages.slice(Math.max(0, messages.length - visibleMessageCount));
+
+  const handleLoadMoreMessages = () => {
+    const container = messageContainerRef.current;
+    if (!container) {
+      setVisibleMessageCount((currentCount) => Math.min(messages.length, currentCount + LOAD_MORE_MESSAGES));
+      return;
+    }
+
+    historyScrollRef.current = {
+      scrollTop: container.scrollTop,
+      scrollHeight: container.scrollHeight
+    };
+
+    setVisibleMessageCount((currentCount) => Math.min(messages.length, currentCount + LOAD_MORE_MESSAGES));
+  };
+
+  const handleMessageWheel = (event) => {
+    const container = messageContainerRef.current;
+    if (!container) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const maxScrollTop = scrollHeight - clientHeight;
+    const canScrollUp = event.deltaY < 0 && scrollTop > 0;
+    const canScrollDown = event.deltaY > 0 && scrollTop < maxScrollTop;
+
+    if (!canScrollUp && !canScrollDown) return;
+
+    event.preventDefault();
+    container.scrollTop += event.deltaY;
+  };
+
+  useLayoutEffect(() => {
+    const container = messageContainerRef.current;
+    const snapshot = historyScrollRef.current;
+
+    if (!container || !snapshot) return;
+
+    const heightDelta = container.scrollHeight - snapshot.scrollHeight;
+    container.scrollTop = snapshot.scrollTop + heightDelta;
+    historyScrollRef.current = null;
+  }, [visibleMessageCount]);
 
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
@@ -430,7 +598,7 @@ const ChatInterface = () => {
   }, [isBusy, interruptStream]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    chatEndRef.current?.scrollIntoView({ behavior: isBusy ? 'auto' : 'smooth', block: 'end' });
   }, [messages, isProcessing, isSpeaking]);
 
   const handleSubmit = (e) => {
@@ -462,25 +630,23 @@ const ChatInterface = () => {
         </FloatingPlayerContainer>
       )}
 
-      <MessageContainer>
-        {messages.map((msg, index) => (
-          <MessageBubble key={index} $role={msg.sender === 'ai' ? 'assistant' : 'user'}>
-            {msg.sender === 'ai' && <span style={{ fontWeight: 'bold' }}>ARC-AI: </span>}
-            {msg.text}
-            
-            {msg.image && <><br/><BubbleImage src={msg.image} alt="User upload" /></>}
-            
-            {msg.documentName && (
-              <><br/><DocumentAttachment>📄 {msg.documentName}</DocumentAttachment></>
-            )}
+      <MessageContainer ref={messageContainerRef} onWheel={handleMessageWheel}>
+        {messages.length > visibleMessages.length ? (
+          <HistoryButton type="button" onClick={handleLoadMoreMessages} disabled={visibleMessageCount >= messages.length}>
+            Load earlier messages ({messages.length - visibleMessages.length} hidden)
+          </HistoryButton>
+        ) : null}
 
-            {msg.sender === 'ai' && (msg.isStreaming || (isSpeaking && index === messages.length - 1)) && (
-              <WaveformBars><div></div><div></div><div></div><div></div><div></div></WaveformBars>
-            )}
-          </MessageBubble>
+        {visibleMessages.map((msg, index) => (
+          <ChatMessage
+            key={`${messages.length - visibleMessages.length + index}`}
+            msg={msg}
+            isSpeaking={isSpeaking}
+            isLast={index === visibleMessages.length - 1}
+          />
         ))}
 
-        {isProcessing && (messages.length === 0 || messages[messages.length - 1].sender !== 'ai') && (
+        {isProcessing && (visibleMessages.length === 0 || visibleMessages[visibleMessages.length - 1].sender !== 'ai') && (
           <MessageBubble $role="assistant">
             <TypingIndicator><span></span><span></span><span></span></TypingIndicator>
           </MessageBubble>

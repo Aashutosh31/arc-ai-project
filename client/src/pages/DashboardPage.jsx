@@ -14,6 +14,9 @@ const Page = styled.div`
   color: #ffffff;
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
 `;
 
 const Header = styled.header`
@@ -100,13 +103,15 @@ const Dot = styled.span`
 const Container = styled.main`
   flex: 1;
   width: 100%;
-  max-width: 1280px;
+  max-width: min(1600px, calc(100vw - 24px));
   margin: 0 auto;
   padding: 16px 12px 24px;
   display: flex;
   gap: 16px;
   /* Must NOT have overflow: hidden — lets sticky work */
   align-items: flex-start;
+  min-width: 0;
+  overflow-x: clip;
 
   @media (max-width: 1024px) {
     flex-direction: column;
@@ -114,17 +119,18 @@ const Container = styled.main`
   }
 
   @media (min-width: 1440px) {
-    max-width: 1400px;
+    max-width: min(1680px, calc(100vw - 32px));
   }
 
   @media (max-width: 600px) {
     padding: 12px 10px 20px;
     gap: 12px;
+    max-width: 100%;
   }
 `;
 
 const ChatBox = styled.section`
-  flex: 1.7;
+  flex: 2.2;
   background: rgba(11, 11, 35, 0.95);
   border-radius: 16px;
   padding: 12px;
@@ -133,12 +139,19 @@ const ChatBox = styled.section`
     0 16px 32px rgba(0, 0, 0, 0.75),
     0 0 18px rgba(0, 255, 255, 0.08);
   min-height: 360px;
+  height: auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
+  min-height: 0;
 
   @media (min-width: 768px) {
     padding: 16px;
+  }
+
+  @media (min-width: 1025px) {
+    min-height: clamp(560px, 78vh, calc(100vh - 164px));
   }
 
   @media (max-width: 600px) {
@@ -147,11 +160,18 @@ const ChatBox = styled.section`
 `;
 
 const SidePanel = styled.aside`
-  flex: 1;
-  max-width: 360px;
+  flex: 0.9;
+  max-width: 340px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
+
+  @media (min-width: 1025px) {
+    align-self: stretch;
+    max-height: calc(100vh - 164px);
+    overflow-y: auto;
+  }
 
   /* Keep the panel in normal page flow on laptops so it scrolls with the page. */
   @media (min-width: 1440px) {
@@ -167,12 +187,12 @@ const SidePanel = styled.aside`
 
   @media (max-width: 1024px) {
     max-width: 100%;
-    flex-direction: row;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   @media (max-width: 768px) {
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 `;
 
@@ -194,6 +214,8 @@ const Card = styled.div`
   position: relative;
   overflow: hidden;
   flex: 0 0 auto;
+  min-width: 0;
+  width: 100%;
 
   &::before {
     content: '';
