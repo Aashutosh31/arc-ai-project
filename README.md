@@ -33,7 +33,88 @@ It can:
 
 ---
 
-## 🎥 Main Showcase Demo
+## ARC-AI: Persistent AI Workspace
+
+**Major Platform Release** – ARC-AI now evolves from a real-time AI assistant into a **persistent AI workspace platform** similar to ChatGPT, Claude, and Cursor.
+
+### 🚀 New Platform Capabilities
+
+**🧠 Persistent AI Workspace**
+* Persistent conversations across sessions
+* Complete message history storage & retrieval
+* Real-time conversation switching
+* Paginated message retrieval pipeline
+* Workspace-style AI sessions
+
+**💬 Conversation Infrastructure**
+* MongoDB conversation/message architecture
+* Dedicated conversation lifecycle management
+* Async auto-title generation from first exchange
+* Soft-delete archival system
+* Conversation metadata tracking
+
+**⚡ Real-time System Upgrades**
+* Socket.IO conversation synchronization
+* Streaming-compatible persistence pipeline
+* Voice + multimodal compatibility fully preserved
+* Improved real-time state coordination
+* Backward compatible with all existing features
+
+**📱 Responsive Workspace UI**
+* New sidebar conversation system
+* Mobile/tablet adaptive layouts (desktop, tablet, mobile modes)
+* Workspace-style navigation
+* Real-time conversation switching
+* Relative timestamps & conversation organization
+
+**🏗️ Backend Enhancements**
+* New REST APIs for conversation management
+* AIService persistence integration
+* Message-level storage architecture
+* Pagination-ready retrieval pipeline
+* Conversation REST endpoints: `/api/conversations`, `/api/conversations/:id`, `/api/conversations/:id/messages`
+
+### ✅ Existing Systems Fully Preserved
+* Advanced interruptible voice mode
+* Multi-agent swarm workflows
+* GPT-4o Live Vision
+* WhatsApp automation
+* RAG memory system
+* Web research tools
+* Proactive cron routines
+* WebSocket streaming architecture
+* Tool calling & execution
+
+**Status**: ✅ Complete & Tested | Build: ✅ 157 modules, zero errors | Mobile Support: ✅ Desktop/Tablet/Mobile responsive
+
+---
+
+## 🔥 ARC-AI  — Provider-Agnostic Runtime & Multimodal Architecture
+
+**A Major Backend Architecture Transformation**
+
+ARC-AI has evolved from a tightly-coupled single-provider system into a **scalable provider-agnostic AI runtime** capable of:
+
+* **Intelligent Provider Routing** – Dynamically select Gemini (reasoning, multimodal) or Mistral (fast, cost-effective) based on workload
+* **Multimodal Capability Safety** – Prevent invalid multimodal fallbacks; gracefully fail when no compatible provider exists
+* **Interruption-Safe Streaming** – Guaranteed stream finalization, safe cleanup, realtime token lifecycle management
+* **Normalized Tool Orchestration** – Multi-step tool continuation across providers with consistent semantics
+* **Provider-Independent Runtime** – Foundation for future OpenAI, Claude, Groq, and Ollama adapters
+* **Structured Observability** – Route selection, fallback usage, latency tracking, interruption events
+
+**Key Architecture Components**:
+- `server/lib/llm/LLMRouter.js` – Intelligent orchestration & provider selection
+- `server/lib/llm/StreamingRuntime.js` – Provider-independent streaming & interruption handling
+- `server/lib/llm/providers/` – Modular Gemini & Mistral adapters
+
+**Fully Compatible** with existing Socket.IO frontend, MongoDB persistence, Pinecone memory, dynamic tools, and voice workflows.
+
+🎥 Demo:
+https://www.instagram.com/aashutosh_vaishnav.31/reel/DYNhWsDxFG1/
+
+---
+
+## 🎥  Showcase Demo
 
 ▶️ https://www.youtube.com/watch?v=jt7q8v5KsrU
 
