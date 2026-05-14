@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { useConversation } from '../contexts/ConversationContext';
 
@@ -60,7 +60,7 @@ const Logo = styled.div`
 `;
 
 const NewChatButton = styled.button`
-  padding: 9px 14px;
+  padding: 10px 14px;
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.25), rgba(var(--secondary-rgb), 0.15));
   border: 1px solid rgba(var(--primary-rgb), 0.4);
   border-radius: 8px;
@@ -70,6 +70,8 @@ const NewChatButton = styled.button`
   cursor: pointer;
   transition: all 0.3s ease;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 
   &:hover {
     background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.35), rgba(var(--secondary-rgb), 0.25));
@@ -82,9 +84,76 @@ const NewChatButton = styled.button`
   }
 
   @media (max-width: 480px) {
-    padding: 8px 12px;
+    padding: 9px 12px;
     font-size: 12px;
   }
+`;
+
+const CommandPaletteButton = styled.button`
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.15), rgba(var(--secondary-rgb), 0.08));
+  border: 1px solid rgba(var(--primary-rgb), 0.3);
+  border-radius: 8px;
+  color: var(--primary-hex);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+
+  &:hover {
+    background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.25), rgba(var(--secondary-rgb), 0.15));
+    border-color: rgba(var(--primary-rgb), 0.5);
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  @media (max-width: 480px) {
+    padding: 9px 12px;
+    font-size: 12px;
+    gap: 8px;
+  }
+`;
+
+const ActionButtonsContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 12px 14px 12px;
+  border-bottom: 1px solid rgba(var(--primary-rgb), 0.15);
+
+  @media (max-width: 768px) {
+    gap: 9px;
+    padding: 14px 10px 12px 10px;
+  }
+
+  @media (max-width: 480px) {
+    gap: 8px;
+    padding: 12px 8px 10px 8px;
+  }
+`;
+
+const CommandPaletteIcon = styled.div`
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.4), rgba(var(--secondary-rgb), 0.3));
+  border: 1.5px solid rgba(var(--primary-rgb), 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--primary-hex);
+  font-weight: 700;
 `;
 
 const CloseButton = styled.button`
@@ -300,17 +369,23 @@ const formatDate = (date) => {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-export const Sidebar = ({ isOpen = true, onClose = () => {} }) => {
+export const Sidebar = ({ isOpen = true, onClose = () => {}, onCommandPaletteClick = () => {} }) => {
   const {
     conversations,
     activeConversationId,
     loadingConversations,
     createNewConversation,
     switchConversation,
-    deleteConversation
+    deleteConversation,
+    searchWorkspace,
+    setFocusedMessageId
   } = useConversation();
 
   const [hoveredId, setHoveredId] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
   const [pendingDeleteConversation, setPendingDeleteConversation] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -321,6 +396,60 @@ export const Sidebar = ({ isOpen = true, onClose = () => {} }) => {
     } catch (err) {
       console.error('Failed to create conversation:', err);
     }
+  };
+
+  useEffect(() => {
+    const query = String(searchQuery || '').trim();
+    if (!query) {
+      setSearchResults([]);
+      setSearchError('');
+      setSearchLoading(false);
+      return undefined;
+    }
+
+    let isCancelled = false;
+    setSearchLoading(true);
+    setSearchError('');
+
+    const timer = setTimeout(() => {
+      searchWorkspace(query, { limit: 8 })
+        .then((result) => {
+          if (isCancelled) return;
+          setSearchResults(Array.isArray(result?.items) ? result.items : []);
+        })
+        .catch((error) => {
+          if (isCancelled) return;
+          setSearchError(error?.message || 'Search failed');
+          setSearchResults([]);
+        })
+        .finally(() => {
+          if (!isCancelled) setSearchLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery, searchWorkspace]);
+
+  const groupedSearchResults = useMemo(() => {
+    const conversationsHit = searchResults.filter((item) => item.type === 'conversation');
+    const messageHit = searchResults.filter((item) => item.type === 'message');
+    const memoryHit = searchResults.filter((item) => item.type !== 'conversation' && item.type !== 'message');
+    return { conversationsHit, messageHit, memoryHit };
+  }, [searchResults]);
+
+  const handleSearchSelect = (item) => {
+    if (item?.conversationId) {
+      switchConversation(item.conversationId);
+    }
+    if (item?.messageId && setFocusedMessageId) {
+      setFocusedMessageId(item.messageId);
+    }
+    onClose();
+    setSearchQuery('');
+    setSearchResults([]);
   };
 
   const handleDelete = async (e, conversationId) => {
@@ -350,9 +479,69 @@ export const Sidebar = ({ isOpen = true, onClose = () => {} }) => {
         <CloseButton onClick={onClose}>×</CloseButton>
       </SidebarHeader>
 
-      <NewChatButton onClick={handleNewChat}>
-        + New Chat
-      </NewChatButton>
+      <ActionButtonsContainer>
+        <NewChatButton onClick={handleNewChat}>
+          + New Chat
+        </NewChatButton>
+
+        <CommandPaletteButton onClick={onCommandPaletteClick}>
+          <CommandPaletteIcon>⌘</CommandPaletteIcon>
+          <span>Command Palette</span>
+        </CommandPaletteButton>
+      </ActionButtonsContainer>
+
+      <div style={{ padding: '12px 12px 0', position: 'relative' }}>
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search conversations, messages, memories"
+          style={{
+            width: '100%',
+            padding: '12px 14px',
+            borderRadius: '12px',
+            border: '1px solid rgba(var(--primary-rgb), 0.28)',
+            background: 'rgba(0,0,0,0.22)',
+            color: '#f3fbff',
+            outline: 'none',
+            fontSize: '13px'
+          }}
+        />
+        {(searchLoading || searchError || searchResults.length > 0) && (
+          <div style={{
+            marginTop: '10px',
+            background: 'rgba(7, 10, 24, 0.96)',
+            border: '1px solid rgba(var(--primary-rgb), 0.18)',
+            borderRadius: '12px',
+            overflow: 'hidden'
+          }}>
+            {searchLoading && <div style={{ padding: '10px 12px', color: '#9ddcff', fontSize: '12px' }}>Searching workspace...</div>}
+            {!searchLoading && searchError && <div style={{ padding: '10px 12px', color: '#ff9f9f', fontSize: '12px' }}>{searchError}</div>}
+            {!searchLoading && !searchError && searchResults.length === 0 && searchQuery.trim() && <div style={{ padding: '10px 12px', color: '#8ca0c7', fontSize: '12px' }}>No workspace matches.</div>}
+            {!searchLoading && !searchError && groupedSearchResults.conversationsHit.map((item) => (
+              <button key={item.id} type="button" onClick={() => handleSearchSelect(item)} style={{ width: '100%', textAlign: 'left', padding: '10px 12px', background: 'transparent', border: 'none', color: '#f1f7ff', cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                <div style={{ fontSize: '12px', color: '#7df7ff', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Conversation</div>
+                <div style={{ fontWeight: 700, marginTop: '2px' }}>{item.title || 'Conversation'}</div>
+                <div style={{ fontSize: '12px', color: '#b5c4e4', marginTop: '4px' }}>{item.snippet || 'Open conversation'}</div>
+              </button>
+            ))}
+            {!searchLoading && !searchError && groupedSearchResults.messageHit.map((item) => (
+              <button key={item.id} type="button" onClick={() => handleSearchSelect(item)} style={{ width: '100%', textAlign: 'left', padding: '10px 12px', background: 'transparent', border: 'none', color: '#f1f7ff', cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                <div style={{ fontSize: '12px', color: '#ffcf70', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Message</div>
+                <div style={{ fontWeight: 700, marginTop: '2px' }}>{item.snippet || 'Matched message'}</div>
+                <div style={{ fontSize: '12px', color: '#b5c4e4', marginTop: '4px' }}>Jump to conversation</div>
+              </button>
+            ))}
+            {!searchLoading && !searchError && groupedSearchResults.memoryHit.map((item) => (
+              <button key={item.id} type="button" onClick={() => handleSearchSelect(item)} style={{ width: '100%', textAlign: 'left', padding: '10px 12px', background: 'transparent', border: 'none', color: '#f1f7ff', cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                <div style={{ fontSize: '12px', color: '#b887ff', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Memory</div>
+                <div style={{ fontWeight: 700, marginTop: '2px' }}>{item.snippet || 'Memory result'}</div>
+                <div style={{ fontSize: '12px', color: '#b5c4e4', marginTop: '4px' }}>{item.type === 'userFact' ? 'User fact' : 'Semantic memory'}</div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       <ConversationListWrapper>
         {loadingConversations && (

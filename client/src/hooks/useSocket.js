@@ -8,7 +8,7 @@ let lastReminderTime = 0;
 
 export const useSocket = () => {
   const { socket, isConnected, authInfo, setAuthInfo } = useContext(SocketContext) || {}; 
-  const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef, setMediaData, setAgentStatus } = useChat();
+  const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef, setMediaData, setAgentStatus, setProviderInfo } = useChat();
   const { processStreamChunk, stop } = useTextToSpeech();
 
   useEffect(() => {
@@ -37,6 +37,16 @@ export const useSocket = () => {
 
     socket.on('ai:agent:status', (data) => {
       setAgentStatus(data?.status || null);
+    });
+
+    socket.on('ai:provider:info', (data) => {
+      if (setProviderInfo) {
+        setProviderInfo({
+          provider: data?.provider || null,
+          fallbackUsed: Boolean(data?.fallbackUsed),
+          detail: data?.detail || ''
+        });
+      }
     });
 
     socket.on('ai:credits:update', (data) => {
@@ -109,6 +119,7 @@ export const useSocket = () => {
       socket.off('bot_error');
       socket.off('ai:client:action');
       socket.off('ai:agent:status');
+      socket.off('ai:provider:info');
       socket.off('ai:credits:update');
     };
   }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef, setMediaData, setAgentStatus, setAuthInfo]);

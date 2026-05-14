@@ -55,6 +55,14 @@ const ConversationSchema = new mongoose.Schema({
   }
 });
 
+ConversationSchema.index({ title: 'text', 'lastMessage.content': 'text' }, {
+  weights: {
+    title: 8,
+    'lastMessage.content': 2
+  },
+  name: 'conversation_text_search'
+});
+
 // Auto-update timestamp on save
 ConversationSchema.pre('save', function (next) {
   this.updatedAt = Date.now();

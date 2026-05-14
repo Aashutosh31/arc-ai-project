@@ -13,6 +13,7 @@ export const useConversation = () => {
 export const ConversationProvider = ({ children }) => {
   const [conversations, setConversations] = useState([]);
   const [activeConversationId, setActiveConversationId] = useState(null);
+  const [focusedMessageId, setFocusedMessageId] = useState(null);
   const [loadingConversations, setLoadingConversations] = useState(false);
   const [conversationError, setConversationError] = useState(null);
 
@@ -94,6 +95,94 @@ export const ConversationProvider = ({ children }) => {
     }
   }, []);
 
+  const searchWorkspace = useCallback(async (query, options = {}) => {
+    const normalizedQuery = String(query || '').trim();
+    if (!normalizedQuery) {
+      return { query: '', items: [], grouped: { conversations: [], messages: [], memories: [] }, stats: { total: 0, conversations: 0, messages: 0, memories: 0 } };
+    }
+
+    const controller = options.signal ? null : new AbortController();
+    const signal = options.signal || controller?.signal;
+    const response = await fetch(`${API_URL}/api/search?q=${encodeURIComponent(normalizedQuery)}&limit=${Number(options.limit || 10)}`, {
+      headers: getAuthHeaders(),
+      signal
+    });
+
+    if (!response.ok) throw new Error('Failed to search workspace');
+    return response.json();
+  }, []);
+
+  const fetchMemoryDashboard = useCallback(async () => {
+    const response = await fetch(`${API_URL}/api/memory`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to load memory dashboard');
+    return response.json();
+  }, []);
+
+  const updateMemoryPreferences = useCallback(async (memoryLearningEnabled) => {
+    const response = await fetch(`${API_URL}/api/memory/preferences`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({ memoryLearningEnabled })
+    });
+
+    if (!response.ok) throw new Error('Failed to update memory preferences');
+    return response.json();
+  }, []);
+
+  const updateMemoryFact = useCallback(async (memoryId, updates) => {
+    const response = await fetch(`${API_URL}/api/memory/facts/${memoryId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify(updates)
+    });
+
+    if (!response.ok) throw new Error('Failed to update memory fact');
+    return response.json();
+  }, []);
+
+  const deleteMemoryFact = useCallback(async (memoryId) => {
+    const response = await fetch(`${API_URL}/api/memory/facts/${memoryId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to delete memory fact');
+    return response.json();
+  }, []);
+
+  const updateSemanticMemory = useCallback(async (memoryId, updates) => {
+    const response = await fetch(`${API_URL}/api/memory/semantic/${memoryId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify(updates)
+    });
+
+    if (!response.ok) throw new Error('Failed to update semantic memory');
+    return response.json();
+  }, []);
+
+  const deleteSemanticMemory = useCallback(async (memoryId) => {
+    const response = await fetch(`${API_URL}/api/memory/semantic/${memoryId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to delete semantic memory');
+    return response.json();
+  }, []);
+
   // Delete conversation
   const deleteConversation = useCallback(async (conversationId) => {
     try {
@@ -155,6 +244,8 @@ export const ConversationProvider = ({ children }) => {
   const value = {
     conversations,
     activeConversationId,
+    focusedMessageId,
+    setFocusedMessageId,
     loadingConversations,
     conversationError,
     fetchConversations,
@@ -164,7 +255,14 @@ export const ConversationProvider = ({ children }) => {
     deleteConversation,
     fetchConversationMessages,
     addConversationFromSocket,
-    updateConversationTitle
+    updateConversationTitle,
+    searchWorkspace,
+    fetchMemoryDashboard,
+    updateMemoryPreferences,
+    updateMemoryFact,
+    deleteMemoryFact,
+    updateSemanticMemory,
+    deleteSemanticMemory
   };
 
   return (

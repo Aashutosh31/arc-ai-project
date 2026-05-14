@@ -16,10 +16,22 @@ const userFactSchema = new mongoose.Schema({
         type: String,
         default: 'general'
     },
+    pinned: {
+        type: Boolean,
+        default: false
+    },
     createdAt: {
         type: Date,
         default: Date.now
     }
+});
+
+userFactSchema.index({ fact: 'text', category: 'text' }, {
+    weights: {
+        fact: 10,
+        category: 1
+    },
+    name: 'user_fact_text_search'
 });
 
 module.exports = mongoose.model('UserFact', userFactSchema);

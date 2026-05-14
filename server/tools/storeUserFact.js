@@ -1,4 +1,5 @@
 const UserFact = require('../models/UserFact');
+const { upsertTextVector } = require('../services/workspaceIndexService');
 
 module.exports = {
     // 1. Mistral Function Calling Schema
@@ -30,10 +31,21 @@ module.exports = {
             const newFact = new UserFact({
                 userId: context.userId,
                 fact: args.fact,
-                category: args.category || 'general'
+                category: args.category || 'general',
+                pinned: false
             });
             
             await newFact.save();
+            await upsertTextVector({
+                userId: context.userId,
+                kind: 'userFact',
+                entityId: newFact._id,
+                text: args.fact,
+                metadata: {
+                    category: args.category || 'general',
+                    source: 'explicit'
+                }
+            });
             
             return { 
                 success: true, 

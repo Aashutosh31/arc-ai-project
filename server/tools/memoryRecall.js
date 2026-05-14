@@ -1,4 +1,5 @@
 const { Pinecone } = require('@pinecone-database/pinecone');
+const { getNamespace } = require('../services/workspaceIndexService');
 
 module.exports = {
     schema: {
@@ -45,12 +46,13 @@ module.exports = {
             // 2. Search Pinecone for the 3 most semantically similar memories
             const pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
             const index = pc.index('arc-brain');
+            const namespace = getNamespace(uid);
 
             const queryResponse = await index.query({
+                namespace,
                 vector: queryVector,
-                topK: 3, // Fetch the top 3 most relevant memories
-                includeMetadata: true,
-                filter: { userId: uid } // Only pull memories belonging to this specific user!
+                topK: 3,
+                includeMetadata: true
             });
 
             if (!queryResponse.matches || queryResponse.matches.length === 0) {

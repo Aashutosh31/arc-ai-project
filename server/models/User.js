@@ -43,7 +43,8 @@ const UserSchema = new mongoose.Schema({
     // AI Preferences (for personality/voice customization)
     preferences: {
         voice: { type: String, default: 'professional' },
-        accentColor: { type: String, default: '#00FFFF' } // Neon Cyan
+        accentColor: { type: String, default: '#00FFFF' }, // Neon Cyan
+        memoryLearningEnabled: { type: Boolean, default: true }
     },
     googleCalendar: {
         connected: { type: Boolean, default: false },

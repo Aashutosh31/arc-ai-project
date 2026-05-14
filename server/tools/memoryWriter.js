@@ -1,4 +1,5 @@
 const { Pinecone } = require('@pinecone-database/pinecone');
+const { getNamespace } = require('../services/workspaceIndexService');
 
 module.exports = {
     schema: {
@@ -53,17 +54,23 @@ module.exports = {
 
             // Generate a unique ID for this memory
             const memoryId = `mem_${Date.now()}`;
+            const namespace = getNamespace(uid);
+            const tagList = String(args.tags || '')
+                .split(',')
+                .map((tag) => tag.trim())
+                .filter(Boolean);
 
             await index.upsert([{
                 id: memoryId,
                 values: vector,
                 metadata: {
-                    userId: uid, // VERY IMPORTANT: Only save it for THIS user!
+                    userId: uid,
                     text: args.content,
-                    tags: args.tags,
-                    timestamp: new Date().toISOString()
+                    tags: tagList,
+                    timestamp: new Date().toISOString(),
+                    kind: 'semanticMemory'
                 }
-            }]);
+            }], { namespace });
 
             console.log(`[Tool: memorize] Memory saved successfully! ID: ${memoryId}`);
             return { success: true, message: "Information has been permanently encoded into my long-term memory." };
