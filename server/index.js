@@ -9,6 +9,8 @@ const jwt = require('jsonwebtoken');
 const authRoutes = require('./routes/auth.js');
 const googleAuthRoutes = require('./routes/googleAuth.js');
 const conversationRoutes = require('./routes/conversations.js');
+const searchRoutes = require('./routes/search.js');
+const memoryRoutes = require('./routes/memory.js');
 const AIService = require('./services/AIService.js'); 
 
 const app = express();
@@ -113,5 +115,7 @@ app.get('/', (req, res) => res.status(200).send('ARC-AI Server Running. Status: 
 app.use('/api/auth', authRoutes);
 app.use('/api/google', googleAuthRoutes);
 app.use('/api/conversations', conversationRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/memory', memoryRoutes);
 
 server.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));

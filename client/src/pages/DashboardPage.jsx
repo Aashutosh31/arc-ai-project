@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { useSocket } from '../hooks/useSocket';
+import { useChat } from '../contexts/ChatContext';
 import { ConversationProvider, useConversation } from '../contexts/ConversationContext';
 import { Sidebar } from '../components/Sidebar';
 import AdvancedVoiceButton from '../components/AdvancedVoiceButton.jsx';
@@ -9,6 +10,8 @@ import ChatInterface from '../components/ChatInterface.jsx';
 import TestUserAccessModal from '../components/TestUserAccessModal';
 import WhatsAppModal from '../components/WhatsAppModal.jsx';
 import WhatsAppConnectModal from '../components/WhatsAppConnectModal.jsx';
+import WorkspaceMemoryModal from '../components/WorkspaceMemoryModal.jsx';
+import WorkspaceCommandPalette from '../components/WorkspaceCommandPalette.jsx';
 
 const Page = styled.div`
   min-height: 100dvh;
@@ -510,13 +513,18 @@ const ListItem = styled.li`
 
 const DashboardPageContent = () => {
   const { isConnected, authInfo, setAuthInfo, socket } = useSocket();
+  const { providerInfo } = useChat();
+  const { createNewConversation } = useConversation();
   const [googleConnected, setGoogleConnected] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [googleMessage, setGoogleMessage] = useState('');
   const [showTestUserModal, setShowTestUserModal] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [showWhatsAppConnect, setShowWhatsAppConnect] = useState(false);
+  const [showMemoryModal, setShowMemoryModal] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [whatsappConnected, setWhatsappConnected] = useState(false);
+  const [memoryLearningEnabled, setMemoryLearningEnabled] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const showWhatsAppDebug = import.meta.env.DEV && localStorage.getItem('arc_whatsapp_debug') === 'true';
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
@@ -527,6 +535,15 @@ const DashboardPageContent = () => {
       return 'http://localhost:5000';
     }
   })();
+
+  const handleNewChat = async () => {
+    try {
+      await createNewConversation();
+      setSidebarOpen(false);
+    } catch (error) {
+      console.error('Failed to create conversation from command palette:', error);
+    }
+  };
 
   const persistAuthPayload = (payload) => {
     const user = payload?.user || payload;
@@ -580,7 +597,26 @@ const DashboardPageContent = () => {
 
     window.addEventListener('message', handleGoogleMessage);
     return () => window.removeEventListener('message', handleGoogleMessage);
-    }, [apiOrigin]);
+  }, [apiOrigin]);
+
+  useEffect(() => {
+    const loadMemoryStatus = async () => {
+      const token = authInfo?.token || localStorage.getItem('token');
+      if (!authInfo?.ready || !token) return;
+      try {
+        const response = await fetch(`${apiUrl}/api/memory`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        setMemoryLearningEnabled(Boolean(data?.preferences?.memoryLearningEnabled));
+      } catch {
+        // ignore memory status load failures
+      }
+    };
+
+    loadMemoryStatus();
+  }, [authInfo?.ready, authInfo?.token, apiUrl]);
 
   useEffect(() => {
     const loadGoogleStatus = async () => {
@@ -605,7 +641,20 @@ const DashboardPageContent = () => {
     };
 
     loadGoogleStatus();
-  }, [authInfo?.ready, authInfo?.token, authInfo?.authType, googleConnected]);
+  }, [authInfo?.ready, authInfo?.token, authInfo?.authType, googleConnected, apiUrl]);
+
+  const handleOpenMemory = () => setShowMemoryModal(true);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
+        event.preventDefault();
+        setShowCommandPalette((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const handleGoogleConnect = async () => {
     const token = authInfo?.token || localStorage.getItem('token');
@@ -681,11 +730,16 @@ const DashboardPageContent = () => {
     }
   };
 
+  const handleCommandPaletteClick = () => {
+    setShowCommandPalette(true);
+    setSidebarOpen(false);
+  };
+
   return (
     <Page>
       {/* Desktop Sidebar - Always visible on desktop */}
       <DesktopSidebarWrapper>
-        <Sidebar isOpen={true} onClose={() => {}} />
+        <Sidebar isOpen={true} onClose={() => {}} onCommandPaletteClick={handleCommandPaletteClick} />
       </DesktopSidebarWrapper>
 
       {/* Mobile Sidebar Overlay */}
@@ -693,7 +747,7 @@ const DashboardPageContent = () => {
 
       {/* Mobile Sidebar Drawer */}
       <MobileSidebarWrapper>
-        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} onCommandPaletteClick={handleCommandPaletteClick} />
       </MobileSidebarWrapper>
 
       <MainContent>
@@ -855,6 +909,28 @@ const DashboardPageContent = () => {
         />
         <WhatsAppModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
         <WhatsAppConnectModal isOpen={showWhatsAppConnect} onClose={() => setShowWhatsAppConnect(false)} onConnected={() => setShowWhatsAppConnect(false)} />
+        <WorkspaceMemoryModal isOpen={showMemoryModal} onClose={() => setShowMemoryModal(false)} />
+        <WorkspaceCommandPalette 
+          isOpen={showCommandPalette} 
+          onClose={() => setShowCommandPalette(false)} 
+          onNewChat={handleNewChat} 
+          onOpenMemory={handleOpenMemory} 
+          onToggleMemoryLearning={() => {
+            setMemoryLearningEnabled(!memoryLearningEnabled);
+            const token = authInfo?.token || localStorage.getItem('token');
+            if (token) {
+              fetch(`${apiUrl}/api/memory/preferences`, {
+                method: 'PATCH',
+                headers: { 
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ memoryLearningEnabled: !memoryLearningEnabled })
+              }).catch(() => {});
+            }
+          }}
+          memoryLearningEnabled={memoryLearningEnabled}
+        />
       </MainContent>
     </Page>
   );

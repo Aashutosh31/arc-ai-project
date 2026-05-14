@@ -1,5 +1,6 @@
 const AIMemory = require('../models/AIMemory');
 const UserFact = require('../models/UserFact');
+const User = require('../models/User');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const TaskExecutor = require('./TaskExecutor');
@@ -8,6 +9,8 @@ const pdfExtract = require('pdf-extraction'); // 🚀 The modern, working packag
 const { consumeCredits, isGuestActorId } = require('./creditService');
 const LLMRouter = require('../lib/llm/LLMRouter');
 const StreamingRuntime = require('../lib/llm/StreamingRuntime');
+const { buildMemoryContext, searchWorkspace } = require('./workspaceSearchService');
+const { upsertTextVector } = require('./workspaceIndexService');
 
 const SCHEDULE_KEYWORDS = [
     'schedule',
@@ -354,6 +357,9 @@ class AIService {
             });
 
             const calendarIntent = classifyCalendarIntent(text);
+            const isGuest = isGuestActorId(userId);
+            const user = isGuest ? null : await User.findById(userId).select('preferences.memoryLearningEnabled preferences.voice preferences.accentColor').lean();
+            const memoryLearningEnabled = user?.preferences?.memoryLearningEnabled !== false;
 
             if (calendarIntent.type !== 'none') {
                 console.log(
@@ -373,11 +379,12 @@ class AIService {
                     await this.emitAssistantText(socket, scheduleResponse);
                 }
 
-                if (!isGuestActorId(userId)) {
+                if (!isGuestActorId(userId) && memoryLearningEnabled) {
                     const newMemory = new AIMemory({
                         userId,
                         query: text || 'Schedule meeting request',
-                        response: scheduleResponse
+                        response: scheduleResponse,
+                        source: 'conversation'
                     });
                     await newMemory.save();
                 }
@@ -385,20 +392,57 @@ class AIService {
                 return scheduleResponse;
             }
 
-            const isGuest = isGuestActorId(userId);
-            const history = isGuest ? [] : await AIMemory.find({ userId }).sort({ timestamp: -1 }).limit(15)
-                .then((recentMemories) => recentMemories.reverse()
+            if (socket) {
+                socket.emit('ai:agent:status', {
+                    status: 'searching history',
+                    detail: 'Looking through conversations, memories, and facts.'
+                });
+            }
+
+            const recentMemories = isGuest ? [] : await AIMemory.find({ userId }).sort({ pinned: -1, timestamp: -1 }).limit(8)
+                .then((items) => items.reverse()
                     .filter(mem => mem.query && mem.response)
                     .map(mem => [
                         { role: 'user', content: String(mem.query) },
                         { role: 'assistant', content: String(mem.response) }
                     ]).flat());
 
-            const userFacts = isGuest ? [] : await UserFact.find({ userId });
+            const baseMessageContent = text || (document ? `Please analyze the attached document: ${document.name}` : 'Hello');
+
+            const userFacts = isGuest ? [] : await UserFact.find({ userId }).sort({ pinned: -1, createdAt: -1 }).limit(12).lean();
+            const retrievalItems = isGuest ? [] : await buildMemoryContext({
+                userId,
+                query: baseMessageContent,
+                limit: 10
+            });
+
+            const recentMemoryTurnsText = recentMemories.length > 0
+                ? `\n\nRECENT MEMORY TURNS:\n${recentMemories.map((message, index) => `${index + 1}. ${String(message.content || '').slice(0, 180)}`).join('\n')}`
+                : '';
+
+            const memoryContextLines = retrievalItems.length > 0
+                ? retrievalItems.map((item) => {
+                    const label = item.type === 'conversation' ? 'Conversation' : item.type === 'message' ? 'Message' : 'Memory';
+                    return `- [${label} | ${item.source} | score ${(item.score * 100).toFixed(0)}] ${String(item.snippet || '').slice(0, 220)}`;
+                }).join('\n')
+                : '';
+
             let longTermMemoryText = "";
             if (userFacts.length > 0) {
                 longTermMemoryText = "\n\nCRITICAL CONTEXT - You permanently know these facts about the user:\n" + 
                     userFacts.map(f => `- ${f.fact}`).join("\n");
+            }
+
+            let retrievalContextText = recentMemoryTurnsText;
+            if (memoryContextLines) {
+                retrievalContextText += `\n\nRELEVANT RETRIEVAL CONTEXT (ranked, deduplicated):\n${memoryContextLines}`;
+            }
+
+            if (socket) {
+                socket.emit('ai:agent:status', {
+                    status: retrievalItems.length > 0 ? 'retrieving memory' : 'thinking',
+                    detail: retrievalItems.length > 0 ? `${retrievalItems.length} relevant workspace items prepared.` : 'No strong memory matches found.'
+                });
             }
 
             let documentContext = "";
@@ -437,10 +481,25 @@ class AIService {
                 }
             }
 
-            let messageContent = text || (document ? `Please analyze the attached document: ${document.name}` : "Hello");
+            let messageContent = baseMessageContent;
             messageContent = `${messageContent}${documentContext}`;
 
-                const systemPrompt = `You are ARC-AI, an advanced, highly intelligent autonomous agent.
+            const messages = [
+                ...recentMemories,
+                {
+                    role: 'user',
+                    content: messageContent
+                }
+            ];
+
+            if (socket) {
+                socket.emit('ai:agent:status', {
+                    status: retrievalItems.length > 0 ? 'retrieving memory' : 'thinking',
+                    detail: retrievalItems.length > 0 ? `${retrievalItems.length} relevant workspace items prepared.` : 'No strong memory matches found.'
+                });
+            }
+
+            const systemPrompt = `You are ARC-AI, an advanced, highly intelligent autonomous agent.
                     The current system date and time is: ${currentDateString}.
                     
                     CORE DIRECTIVES:
@@ -452,20 +511,28 @@ class AIService {
                     6. CALENDAR: Use 'checkCalendar' to inspect availability and 'scheduleMeeting' to create or update meetings when the user asks to manage Google Calendar.
                     7. WHATSAPP: Use 'sendWhatsAppMessage' only when the user explicitly asks to send, message, text, forward, or deliver content on WhatsApp. Do not trigger the WhatsApp tool for vague references, questions, contact checks, or phrases like 'can you see', 'is Mummy there', or similar unless the user clearly wants a message sent. Ask a follow-up if the recipient is ambiguous or the request is not an explicit send action.
 
+                    MEMORY DIRECTIVE:
+                    Use the ranked retrieval context below only when it is relevant. Prefer the most recent and semantically matching items. Ignore duplicates.
+
+                    ${longTermMemoryText}${retrievalContextText}
+
                     IDENTITY DIRECTIVE:
                     If a user asks "who created you", "who made you", or similar identity/creator questions, reply exactly with:
 
                     "I am ARC-AI, an autonomous multimodal AI platform created by Aashutosh Bairagi — an AI systems engineer focused on realtime architectures, autonomous agents, and next-generation intelligent software systems."
-
-                    ${longTermMemoryText}`;
-
-            const messages = [
-                ...history,
-                { role: 'user', content: messageContent }
-            ];
+                    `;
 
             const tools = toolRegistry.getSchemas();
-            const attachments = imageBase64 ? [{ type: 'image', mimeType: 'image/jpeg', data: imageBase64 }] : [];
+            const attachments = imageBase64
+                ? [{ type: 'image', data: imageBase64, mimeType: 'image/jpeg' }]
+                : [];
+
+            if (socket) {
+                socket.emit('ai:agent:status', {
+                    status: 'thinking',
+                    detail: 'Generating the response with the best available provider.'
+                });
+            }
 
             const response = await this.llmRouter.generate({
                 messages,
@@ -483,6 +550,17 @@ class AIService {
                 attachments,
                 signal: controller.signal
             });
+
+            if (socket) {
+                socket.emit('ai:provider:info', {
+                    provider: response?.provider || null,
+                    fallbackUsed: Boolean(response?.fallbackUsed),
+                    route: response?.route || null,
+                    detail: response?.fallbackUsed
+                        ? `Falling back to ${response?.provider || 'a backup provider'} for this request.`
+                        : `Using ${response?.provider || 'the selected'} provider for this request.`
+                });
+            }
 
             let finalOutputText = response?.text || "";
             const toolCalls = response?.toolCalls || [];
@@ -604,17 +682,17 @@ class AIService {
             }
 
             if (finalOutputText && !(socket && socket.isInterrupted) && !isGuest) {
-                let memoryQuery = text || "Uploaded a file.";
-                if (imageBase64) memoryQuery = `[Attached Image] ${text || ""}`;
-                if (document) memoryQuery = `[Attached Document: ${document.name}] ${text || ""}`;
-                
-                const newMemory = new AIMemory({ userId, query: memoryQuery, response: finalOutputText });
-                await newMemory.save();
+                const memoryQuery = text || (document ? `Uploaded document: ${document.name}` : 'Uploaded a file.');
+                const shouldSaveMemory = memoryLearningEnabled;
 
-                // Also save to conversation messages
+                if (shouldSaveMemory) {
+                    const newMemory = new AIMemory({ userId, query: memoryQuery, response: finalOutputText, source: 'conversation' });
+                    await newMemory.save();
+                }
+
                 if (conversationId) {
                     try {
-                        await Message.create({
+                        const savedMessage = await Message.create({
                             conversationId,
                             role: 'ai',
                             content: finalOutputText,
@@ -627,9 +705,35 @@ class AIService {
                             }
                         });
 
-                        // Generate title async on first message
+                        if (shouldSaveMemory) {
+                            setImmediate(() => {
+                                upsertTextVector({
+                                    userId,
+                                    kind: 'message',
+                                    entityId: savedMessage._id,
+                                    text: `${text || ''} ${finalOutputText}`,
+                                    metadata: {
+                                        conversationId: String(conversationId),
+                                        messageId: String(savedMessage._id),
+                                        title: 'assistant message',
+                                        provider: response?.provider || null
+                                    }
+                                }).catch((error) => {
+                                    console.warn('[WorkspaceIndex] message vector upsert failed:', error?.message || error);
+                                });
+                            });
+                        }
+
+                        if (socket) {
+                            socket.emit('ai:provider:info', {
+                                provider: response?.provider || null,
+                                fallbackUsed: Boolean(response?.fallbackUsed),
+                                route: response?.route || null
+                            });
+                        }
+
                         const messageCount = await Message.countDocuments({ conversationId });
-                        if (messageCount === 2) { // 1 user + 1 ai
+                        if (messageCount === 2) {
                             const conversationCtrl = require('../controllers/conversationController');
                             conversationCtrl.generateConversationTitle(conversationId, text || '');
                         }

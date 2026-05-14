@@ -148,8 +148,13 @@ const inferTaskProfile = ({ messages = [], tools = [], attachments = [], userCon
   if (hasImageAttachment) return 'multimodal';
   if (/(summari[sz]e|compress|title generation|title|headline|shorten|brief)/i.test(combinedText)) return 'lightweight';
   if (/(memory compression|condense memory|memory summary)/i.test(combinedText)) return 'memory_compression';
-  if (/(reason|reasoning|plan|planning|code|coding|debug|architecture|research|analy[sz]e|tool orchestration|agent|multi-agent|long context|vision|multimodal)/i.test(combinedText)) {
+  // Only classify as 'reasoning' for truly complex tasks (debugging, architecture, complex analysis)
+  if (/(debug|architecture|design pattern|algorithm|refactor|optimize|security|vulnerability|complex analy[sz]e|research paper|formal proof|mathematical proof)/i.test(combinedText)) {
     return 'reasoning';
+  }
+  // If has plan, code, or agent keywords but simpler context, still use lightweight
+  if (/(reason|plan|code|agent)/i.test(combinedText) && textLength < 2000 && messages.length < 8) {
+    return 'lightweight';
   }
   if (textLength > 6000 || messages.length > 12) return 'long_context';
   if (hasTools) return 'tool_orchestration';
@@ -168,14 +173,18 @@ const classifyProviderFailure = (error) => {
     message.includes('resource_exhausted') ||
     message.includes('too many requests');
 
+  // Treat API key errors (400) as transient to trigger provider fallback
+  const isApiKeyError = status === 400 && message.includes('api key');
+
   const isTransient =
     isRateLimit ||
+    isApiKeyError ||
     status >= 500 ||
     message.includes('unavailable') ||
     message.includes('timeout') ||
     message.includes('network');
 
-  return { isRateLimit, isTransient, status, message };
+  return { isRateLimit, isTransient, status, message, isApiKeyError };
 };
 
 module.exports = {

@@ -69,6 +69,13 @@ const MessageSchema = new mongoose.Schema({
   }
 });
 
+MessageSchema.index({ content: 'text' }, {
+  weights: {
+    content: 10
+  },
+  name: 'message_text_search'
+});
+
 // Index for conversation querying
 MessageSchema.index({ conversationId: 1, createdAt: 1 });
 
