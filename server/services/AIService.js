@@ -159,6 +159,31 @@ const parseTimeOnDate = (text, baseDate) => {
     return date;
 };
 
+const buildEmptyToolResponse = ({ calendarIntent, toolCalls = [], fallbackToolResults = [] } = {}) => {
+    if (calendarIntent?.type === 'schedule') {
+        return 'Meeting request processed but confirmation pending.';
+    }
+
+    const toolNames = new Set([
+        ...toolCalls.map((toolCall) => toolCall?.function?.name),
+        ...fallbackToolResults.map((entry) => entry?.name)
+    ].filter(Boolean));
+
+    if (toolNames.has('storeUserFact') || toolNames.has('memorize')) {
+        return 'Got it, I’ll remember that.';
+    }
+
+    if (toolNames.has('recallMemory')) {
+        return 'I checked your memory store for relevant matches.';
+    }
+
+    if (toolNames.has('checkCalendar')) {
+        return 'I checked your calendar.';
+    }
+
+    return 'Done.';
+};
+
 class AIService {
     constructor() {
         this.llmRouter = new LLMRouter();
@@ -678,7 +703,11 @@ class AIService {
             }
 
             if (!finalOutputText || !String(finalOutputText).trim()) {
-                finalOutputText = 'Meeting request processed but confirmation pending.';
+                finalOutputText = buildEmptyToolResponse({
+                    calendarIntent,
+                    toolCalls,
+                    fallbackToolResults: []
+                });
             }
 
             if (finalOutputText && !(socket && socket.isInterrupted) && !isGuest) {

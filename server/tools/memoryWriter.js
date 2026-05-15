@@ -60,17 +60,20 @@ module.exports = {
                 .map((tag) => tag.trim())
                 .filter(Boolean);
 
-            await index.upsert([{
-                id: memoryId,
-                values: vector,
-                metadata: {
-                    userId: uid,
-                    text: args.content,
-                    tags: tagList,
-                    timestamp: new Date().toISOString(),
-                    kind: 'semanticMemory'
-                }
-            }], { namespace });
+            await index.upsert({
+                records: [{
+                    id: memoryId,
+                    values: vector,
+                    metadata: {
+                        userId: uid,
+                        text: args.content,
+                        tags: tagList,
+                        timestamp: new Date().toISOString(),
+                        kind: 'semanticMemory'
+                    }
+                }],
+                namespace
+            });
 
             console.log(`[Tool: memorize] Memory saved successfully! ID: ${memoryId}`);
             return { success: true, message: "Information has been permanently encoded into my long-term memory." };
