@@ -5,7 +5,7 @@ import { useConversation } from '../contexts/ConversationContext';
 const SidebarWrapper = styled.div`
   display: flex;
   flex-direction: column;
-  width: 280px;
+  width: ${({ $collapsed }) => ($collapsed ? '84px' : '280px')};
   height: 100%;
   background: linear-gradient(180deg, rgba(10, 10, 20, 0.95) 0%, rgba(15, 15, 30, 0.95) 100%);
   border-right: 2px solid rgba(var(--primary-rgb), 0.2);
@@ -14,7 +14,7 @@ const SidebarWrapper = styled.div`
   overflow: hidden;
   box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
 
-  @media (max-width: 768px) {
+  @media (max-width: 999px) {
     position: fixed;
     left: 0;
     top: 0;
@@ -43,6 +43,13 @@ const SidebarHeader = styled.div`
   }
 `;
 
+const SidebarHeaderStack = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+`;
+
 const Logo = styled.div`
   font-size: 18px;
   font-weight: 700;
@@ -56,6 +63,46 @@ const Logo = styled.div`
 
   @media (max-width: 768px) {
     font-size: 16px;
+  }
+`;
+
+const LogoFull = styled.span`
+  display: ${({ $collapsed }) => ($collapsed ? 'none' : 'inline')};
+
+  @media (max-width: 768px) {
+    display: inline;
+  }
+`;
+
+const LogoCompact = styled.span`
+  display: ${({ $collapsed }) => ($collapsed ? 'inline' : 'none')};
+
+  @media (max-width: 768px) {
+    display: none;
+  }
+`;
+
+const SidebarToggleButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(var(--primary-rgb), 0.24);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--primary-hex);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: rgba(var(--primary-rgb), 0.12);
+    border-color: rgba(var(--primary-rgb), 0.4);
+  }
+
+  @media (max-width: 768px) {
+    display: none;
   }
 `;
 
@@ -82,6 +129,19 @@ const NewChatButton = styled.button`
   &:active {
     transform: translateY(0);
   }
+
+  ${({ $collapsed }) => $collapsed && `
+    width: 100%;
+    min-width: 44px;
+    padding: 10px 0;
+    font-size: 0;
+
+    &::before {
+      content: '+';
+      font-size: 16px;
+      font-weight: 700;
+    }
+  `}
 
   @media (max-width: 480px) {
     padding: 9px 12px;
@@ -116,6 +176,20 @@ const CommandPaletteButton = styled.button`
     transform: translateY(0);
   }
 
+  ${({ $collapsed }) => $collapsed && `
+    width: 100%;
+    min-width: 44px;
+    padding: 10px 0;
+    font-size: 0;
+    gap: 0;
+
+    &::before {
+      content: '⌘';
+      font-size: 16px;
+      font-weight: 700;
+    }
+  `}
+
   @media (max-width: 480px) {
     padding: 9px 12px;
     font-size: 12px;
@@ -129,6 +203,11 @@ const ActionButtonsContainer = styled.div`
   gap: 10px;
   padding: 16px 12px 14px 12px;
   border-bottom: 1px solid rgba(var(--primary-rgb), 0.15);
+
+  ${({ $collapsed }) => $collapsed && `
+    align-items: stretch;
+    padding: 12px 10px 12px 10px;
+  `}
 
   @media (max-width: 768px) {
     gap: 9px;
@@ -156,6 +235,25 @@ const CommandPaletteIcon = styled.div`
   font-weight: 700;
 `;
 
+const ButtonLabel = styled.span`
+  min-width: 0;
+
+  ${({ $collapsed }) => $collapsed && `
+    display: none;
+  `}
+`;
+
+const CompactSearchHint = styled.div`
+  display: ${({ $collapsed }) => ($collapsed ? 'flex' : 'none')};
+  align-items: center;
+  justify-content: center;
+  padding: 14px 10px 12px;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11px;
+  text-align: center;
+  border-bottom: 1px solid rgba(var(--primary-rgb), 0.15);
+`;
+
 const CloseButton = styled.button`
   display: none;
   background: none;
@@ -170,7 +268,7 @@ const CloseButton = styled.button`
     color: var(--secondary-hex);
   }
 
-  @media (max-width: 768px) {
+  @media (max-width: 999px) {
     display: block;
   }
 `;
@@ -183,6 +281,7 @@ const ConversationListWrapper = styled.div`
   display: flex;
   flex-direction: column;
   gap: 6px;
+  display: ${({ $collapsed }) => ($collapsed ? 'none' : 'flex')};
 
   /* Custom scrollbar */
   &::-webkit-scrollbar {
@@ -369,7 +468,13 @@ const formatDate = (date) => {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-export const Sidebar = ({ isOpen = true, onClose = () => {}, onCommandPaletteClick = () => {} }) => {
+export const Sidebar = ({
+  isOpen = true,
+  collapsed = false,
+  onToggleCollapse = () => {},
+  onClose = () => {},
+  onCommandPaletteClick = () => {}
+}) => {
   const {
     conversations,
     activeConversationId,
@@ -473,24 +578,34 @@ export const Sidebar = ({ isOpen = true, onClose = () => {}, onCommandPaletteCli
   };
 
   return (
-    <SidebarWrapper $isOpen={isOpen}>
+    <SidebarWrapper $isOpen={isOpen} $collapsed={collapsed}>
       <SidebarHeader>
-        <Logo>ARC-AI</Logo>
+        <SidebarHeaderStack>
+          <Logo $collapsed={collapsed}>
+            <LogoFull $collapsed={collapsed}>ARC-AI</LogoFull>
+            <LogoCompact $collapsed={collapsed}>ARC</LogoCompact>
+          </Logo>
+        </SidebarHeaderStack>
+        <SidebarToggleButton type="button" onClick={onToggleCollapse} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+          {collapsed ? '›' : '‹'}
+        </SidebarToggleButton>
         <CloseButton onClick={onClose}>×</CloseButton>
       </SidebarHeader>
 
-      <ActionButtonsContainer>
-        <NewChatButton onClick={handleNewChat}>
-          + New Chat
+      <ActionButtonsContainer $collapsed={collapsed}>
+        <NewChatButton $collapsed={collapsed} onClick={handleNewChat} aria-label="Start a new chat">
+          <ButtonLabel $collapsed={collapsed}>+ New Chat</ButtonLabel>
         </NewChatButton>
 
-        <CommandPaletteButton onClick={onCommandPaletteClick}>
+        <CommandPaletteButton $collapsed={collapsed} onClick={onCommandPaletteClick} aria-label="Open command palette">
           <CommandPaletteIcon>⌘</CommandPaletteIcon>
-          <span>Command Palette</span>
+          <ButtonLabel $collapsed={collapsed}>Command Palette</ButtonLabel>
         </CommandPaletteButton>
       </ActionButtonsContainer>
 
-      <div style={{ padding: '12px 12px 0', position: 'relative' }}>
+      <CompactSearchHint $collapsed={collapsed}>Search and conversations expand when you open the rail.</CompactSearchHint>
+
+      <div style={{ padding: collapsed ? '0' : '12px 12px 0', position: 'relative', display: collapsed ? 'none' : 'block' }}>
         <input
           type="search"
           value={searchQuery}
@@ -543,7 +658,7 @@ export const Sidebar = ({ isOpen = true, onClose = () => {}, onCommandPaletteCli
         )}
       </div>
 
-      <ConversationListWrapper>
+      <ConversationListWrapper $collapsed={collapsed}>
         {loadingConversations && (
           <EmptyState>Loading conversations...</EmptyState>
         )}
