@@ -28,21 +28,24 @@ const upsertTextVector = async ({ userId, kind, entityId, text, metadata = {}, s
   const namespace = getNamespace(userId);
   const id = makeVectorId(kind, entityId, text);
 
-  await index.upsert([
-    {
-      id,
-      values: vector,
-      metadata: {
-        userId: String(userId),
-        kind,
-        entityId: String(entityId),
-        text: normalizeText(text).slice(0, 1000),
-        cacheKey: cacheKeyFor(text),
-        timestamp: new Date().toISOString(),
-        ...metadata
+  await index.upsert({
+    records: [
+      {
+        id,
+        values: vector,
+        metadata: {
+          userId: String(userId),
+          kind,
+          entityId: String(entityId),
+          text: normalizeText(text).slice(0, 1000),
+          cacheKey: cacheKeyFor(text),
+          timestamp: new Date().toISOString(),
+          ...metadata
+        }
       }
-    }
-  ], { namespace });
+    ],
+    namespace
+  });
 
   return { success: true, id, namespace };
 };
