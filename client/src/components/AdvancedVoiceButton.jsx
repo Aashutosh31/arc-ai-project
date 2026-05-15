@@ -153,7 +153,7 @@ const AdvancedVoiceButton = () => {
   const { sendCommand, interruptStream } = useSocket();
   const { isProcessing, isSpeaking, agentStatus, setLiveVisionCapture } = useChat();
   const captureFrameRef = useRef(() => null);
-  const { activeConversationId, createNewConversation } = useConversation();
+  const { activeConversationId, ensureConversationReady } = useConversation();
 
   const handleCaptureReady = useCallback((captureFn) => {
     const safeCapture = typeof captureFn === 'function' ? captureFn : () => null;
@@ -167,12 +167,8 @@ const AdvancedVoiceButton = () => {
       const currentFrame = captureFrameRef.current?.() || null;
       (async () => {
         try {
-          let cid = activeConversationId;
-          if (!cid) {
-            const conv = await createNewConversation();
-            cid = conv?._id || cid;
-          }
-          sendCommand(transcript, currentFrame, null, cid);
+          const cid = await ensureConversationReady?.('New Conversation');
+          sendCommand(transcript, currentFrame, null, cid || activeConversationId);
         } catch (err) {
           // fallback to sending without conversation id
           console.warn('Voice command failed to attach to conversation, sending without id', err?.message || err);

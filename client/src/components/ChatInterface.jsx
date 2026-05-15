@@ -511,13 +511,7 @@ ChatMessage.displayName = 'ChatMessage';
 const ChatInterface = () => {
   const { messages, replaceMessages, clearMessages, isProcessing, isStreaming, isSpeaking, mediaData, setMediaData, getLiveVisionFrame } = useChat();
   const { interruptStream, sendCommand, socket } = useSocket();
-  const {
-    activeConversationId,
-    switchConversation,
-    fetchConversations,
-    fetchConversationMessages,
-    updateConversationTitle
-  } = useConversation();
+  const { activeConversationId, switchConversation, fetchConversations, fetchConversationMessages, updateConversationTitle, ensureConversationReady } = useConversation();
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState(null); 
   const [selectedDocument, setSelectedDocument] = useState(null);
@@ -704,14 +698,14 @@ const ChatInterface = () => {
     });
   }, [messages, isProcessing, isSpeaking, isBusy]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if ((!inputText.trim() && !selectedImage && !selectedDocument) || isBusy) return;
 
     const uploadedImage = selectedImage?.base64 || null;
     const liveVisionFrame = uploadedImage ? null : getLiveVisionFrame();
-    
-    sendCommand(inputText.trim(), uploadedImage || liveVisionFrame, selectedDocument, activeConversationId);
+    const conversationId = await ensureConversationReady?.('New Conversation');
+    sendCommand(inputText.trim(), uploadedImage || liveVisionFrame, selectedDocument, conversationId || activeConversationId);
     
     setInputText('');
     setSelectedImage(null); 

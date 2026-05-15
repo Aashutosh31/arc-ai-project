@@ -66,6 +66,15 @@ export const ConversationProvider = ({ children }) => {
     }
   }, []);
 
+  const ensureConversationReady = useCallback(async (title = 'New Conversation') => {
+    if (activeConversationId) {
+      return activeConversationId;
+    }
+
+    const newConversation = await createNewConversation(title);
+    return newConversation?._id || null;
+  }, [activeConversationId, createNewConversation]);
+
   // Switch to a conversation
   const switchConversation = useCallback((conversationId) => {
     setActiveConversationId(conversationId);
@@ -250,6 +259,7 @@ export const ConversationProvider = ({ children }) => {
     conversationError,
     fetchConversations,
     createNewConversation,
+    ensureConversationReady,
     switchConversation,
     updateConversation,
     deleteConversation,
