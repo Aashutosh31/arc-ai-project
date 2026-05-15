@@ -55,8 +55,10 @@ class StreamingRuntime {
           break;
         }
 
-        const text = String(chunk?.text || chunk?.chunk || chunk?.displayText || '').trim();
-        if (!text) continue;
+        // Preserve whitespace inside chunks; do not trim here. Frontend will safely concatenate.
+        const text = String(chunk?.text || chunk?.chunk || chunk?.displayText || '');
+        if (text === null || text === undefined) continue;
+        if (text.length === 0) continue;
 
         accumulatedText += text;
 

@@ -692,10 +692,25 @@ class AIService {
 
                 if (conversationId) {
                     try {
+                        // Sanitize final text for storage to remove markdown artefacts and normalize spacing
+                        const sanitizeForStorage = (t) => {
+                            if (!t || typeof t !== 'string') return t;
+                            let s = String(t);
+                            s = s.replace(/\*{1,2}/g, '');
+                            s = s.replace(/`+/g, '');
+                            s = s.replace(/([.,!?:;])(?=\S)/g, '$1 ');
+                            s = s.replace(/(\S)([—–-])/g, '$1 $2');
+                            s = s.replace(/([—–-])(\S)/g, '$1 $2');
+                            s = s.replace(/\s{2,}/g, ' ');
+                            return s.trim();
+                        };
+
+                        const storedOutput = sanitizeForStorage(finalOutputText || '');
+
                         const savedMessage = await Message.create({
                             conversationId,
                             role: 'ai',
-                            content: finalOutputText,
+                            content: storedOutput,
                             provider: response?.provider || null,
                             model: response?.model || null,
                             metadata: {

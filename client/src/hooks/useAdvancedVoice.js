@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
+import { useChat } from '../contexts/ChatContext';
 
 export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
   const [isVoiceModeActive, setIsVoiceModeActive] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState('');
+  const { setIsVoiceListening } = useChat();
   
   const recognitionRef = useRef(null);
   const silenceTimerRef = useRef(null);
@@ -37,6 +39,7 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
 
     recognition.onstart = () => {
       console.log("[Advanced Voice] Listening...");
+      setIsVoiceListening(true);
     };
 
     recognition.onspeechstart = () => {
@@ -77,6 +80,7 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
     };
 
     recognition.onend = () => {
+      setIsVoiceListening(false);
       if (isVoiceModeActiveRef.current) {
         try {
           recognition.start();
@@ -95,6 +99,7 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
     return () => {
       recognition.stop();
       clearTimeout(silenceTimerRef.current);
+      setIsVoiceListening(false);
     };
   }, []);
 
@@ -107,6 +112,7 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
       } catch (e) {}
       setLiveTranscript('');
       clearTimeout(silenceTimerRef.current);
+        setIsVoiceListening(false);
     } else {
       setIsVoiceModeActive(true);
       isVoiceModeActiveRef.current = true;

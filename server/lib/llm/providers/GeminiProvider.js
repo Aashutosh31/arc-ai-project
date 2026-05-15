@@ -97,7 +97,7 @@ class GeminiProvider {
 
       async function* normalizedStream() {
         for await (const chunk of streamResponse) {
-          const text = String(chunk?.text || '').trim();
+          const text = String(chunk?.text || '');
           if (!text) continue;
           yield {
             text,

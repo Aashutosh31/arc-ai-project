@@ -8,8 +8,8 @@ let lastReminderTime = 0;
 
 export const useSocket = () => {
   const { socket, isConnected, authInfo, setAuthInfo } = useContext(SocketContext) || {}; 
-  const { addMessage, appendBotChunk, finishBotStream, setIsProcessing, isInterruptedRef, setMediaData, setAgentStatus, setProviderInfo } = useChat();
-  const { processStreamChunk, stop } = useTextToSpeech();
+  const { addMessage, appendBotChunk, finishBotStream, markBotInterrupted, setIsProcessing, setIsStreaming, isInterruptedRef, setIsInterrupted, setMediaData, setAgentStatus, setProviderInfo } = useChat();
+  const { processStreamChunk, stop, stopSpeech } = useTextToSpeech();
 
   useEffect(() => {
     if (!socket) return;
@@ -109,6 +109,9 @@ export const useSocket = () => {
     });
 
     socket.on('bot_error', (errorMsg) => {
+      if (isInterruptedRef.current) {
+        return;
+      }
       setAgentStatus(null);
       finishBotStream();
       addMessage({ sender: 'ai', text: `[Error]: ${errorMsg}` });
@@ -127,7 +130,9 @@ export const useSocket = () => {
   const sendCommand = (text, imageBase64 = null, documentData = null, conversationId = null) => {
     if (socket) {
       isInterruptedRef.current = false; 
+      if (setIsInterrupted) setIsInterrupted(false);
       setAgentStatus(null);
+      if (setIsStreaming) setIsStreaming(true);
       stop();
       setIsProcessing(true);
       
@@ -148,10 +153,15 @@ export const useSocket = () => {
   const interruptStream = () => {
     if (socket) {
       isInterruptedRef.current = true; 
+      if (setIsInterrupted) setIsInterrupted(true);
       setAgentStatus(null);
       socket.emit('ai:stream:stop');   
-      stop();                          
-      finishBotStream();               
+      if (typeof stopSpeech === 'function') {
+        stopSpeech();
+      } else {
+        stop();
+      }
+      markBotInterrupted?.();          
     }
   };
 
