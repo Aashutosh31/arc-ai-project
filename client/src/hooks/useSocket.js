@@ -155,12 +155,12 @@ export const useSocket = () => {
       isInterruptedRef.current = true; 
       if (setIsInterrupted) setIsInterrupted(true);
       setAgentStatus(null);
-      socket.emit('ai:stream:stop');   
       if (typeof stopSpeech === 'function') {
         stopSpeech();
       } else {
         stop();
       }
+      socket.emit('ai:stream:stop');   
       markBotInterrupted?.();          
     }
   };

@@ -1,5 +1,15 @@
-import { useRef, useCallback } from 'react';
+import { useCallback } from 'react';
 import { useChat } from '../contexts/ChatContext'; // 🚀 FIX: Import global context
+
+const sharedSpeechState = {
+  sentenceBuffer: '',
+  speechQueue: [],
+  isQueueRunning: false,
+  currentUtterance: null,
+  pendingDelay: null,
+  activeSpeechSessionId: 0,
+  currentSpeechSessionId: 0
+};
 
 const cleanTextForSpeech = (text) => {
   let cleaned = String(text || '');
@@ -104,38 +114,32 @@ const splitTextForSpeech = (text) => {
 
 export const useTextToSpeech = () => {
   const { setIsSpeaking } = useChat(); // 🚀 FIX: Use Global State
-  const sentenceBuffer = useRef(''); 
-  const speechQueue = useRef([]);
-  const isQueueRunning = useRef(false);
-  const currentUtterance = useRef(null);
-  const activeSpeechSessionId = useRef(0);
-  const currentSpeechSessionId = useRef(0);
   const queueDelayMs = 100;
 
   const startNewSpeechSession = useCallback(() => {
-    currentSpeechSessionId.current += 1;
-    activeSpeechSessionId.current = currentSpeechSessionId.current;
-    return activeSpeechSessionId.current;
+    sharedSpeechState.currentSpeechSessionId += 1;
+    sharedSpeechState.activeSpeechSessionId = sharedSpeechState.currentSpeechSessionId;
+    return sharedSpeechState.activeSpeechSessionId;
   }, []);
 
   const invalidateSpeechSession = useCallback(() => {
-    currentSpeechSessionId.current += 1;
-    activeSpeechSessionId.current = 0;
+    sharedSpeechState.currentSpeechSessionId += 1;
+    sharedSpeechState.activeSpeechSessionId = 0;
   }, []);
 
   const finishQueue = useCallback((sessionId) => {
-    if (sessionId !== currentSpeechSessionId.current) return;
-    isQueueRunning.current = false;
-    currentUtterance.current = null;
-    speechQueue.current = [];
-    activeSpeechSessionId.current = 0;
+    if (sessionId !== sharedSpeechState.currentSpeechSessionId) return;
+    sharedSpeechState.isQueueRunning = false;
+    sharedSpeechState.currentUtterance = null;
+    sharedSpeechState.speechQueue = [];
+    sharedSpeechState.activeSpeechSessionId = 0;
     if (!window.speechSynthesis.pending && !window.speechSynthesis.speaking) {
       setIsSpeaking(false);
     }
   }, [setIsSpeaking]);
 
   const speakNextInQueue = useCallback((sessionId) => {
-    if (sessionId !== currentSpeechSessionId.current) {
+    if (sessionId !== sharedSpeechState.currentSpeechSessionId) {
       return;
     }
 
@@ -144,34 +148,34 @@ export const useTextToSpeech = () => {
       return;
     }
 
-    const nextItem = speechQueue.current.shift();
+    const nextItem = sharedSpeechState.speechQueue.shift();
     const nextText = nextItem?.text || '';
     if (!nextText) {
       finishQueue(sessionId);
       return;
     }
 
-    if (sessionId !== currentSpeechSessionId.current) {
+    if (sessionId !== sharedSpeechState.currentSpeechSessionId) {
       return;
     }
 
     const utterance = new SpeechSynthesisUtterance(nextText);
-    currentUtterance.current = utterance;
+    sharedSpeechState.currentUtterance = utterance;
     utterance.rate = 1.04;
     utterance.pitch = 0.94;
     utterance.volume = 1;
 
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => {
-      if (sessionId !== currentSpeechSessionId.current) {
+      if (sessionId !== sharedSpeechState.currentSpeechSessionId) {
         return;
       }
-      currentUtterance.current = null;
-      setTimeout(() => {
-        if (sessionId !== currentSpeechSessionId.current) {
+      sharedSpeechState.currentUtterance = null;
+      sharedSpeechState.pendingDelay = setTimeout(() => {
+        if (sessionId !== sharedSpeechState.currentSpeechSessionId) {
           return;
         }
-        if (speechQueue.current.length > 0) {
+        if (sharedSpeechState.speechQueue.length > 0) {
           speakNextInQueue(sessionId);
           return;
         }
@@ -179,12 +183,12 @@ export const useTextToSpeech = () => {
       }, queueDelayMs);
     };
     utterance.onerror = () => {
-      if (sessionId !== currentSpeechSessionId.current) {
+      if (sessionId !== sharedSpeechState.currentSpeechSessionId) {
         return;
       }
-      currentUtterance.current = null;
-      if (speechQueue.current.length > 0) {
-        setTimeout(() => speakNextInQueue(sessionId), queueDelayMs);
+      sharedSpeechState.currentUtterance = null;
+      if (sharedSpeechState.speechQueue.length > 0) {
+        sharedSpeechState.pendingDelay = setTimeout(() => speakNextInQueue(sessionId), queueDelayMs);
       } else {
         finishQueue(sessionId);
       }
@@ -199,11 +203,11 @@ export const useTextToSpeech = () => {
     const queueItems = Array.isArray(segments) ? segments.map((segment) => String(segment || '').trim()).filter(Boolean) : [];
     if (queueItems.length === 0) return;
 
-    const sessionId = activeSpeechSessionId.current || startNewSpeechSession();
-    speechQueue.current.push(...queueItems.map((text) => ({ sessionId, text })));
-    if (isQueueRunning.current) return;
+    const sessionId = sharedSpeechState.activeSpeechSessionId || startNewSpeechSession();
+    sharedSpeechState.speechQueue.push(...queueItems.map((text) => ({ sessionId, text })));
+    if (sharedSpeechState.isQueueRunning) return;
 
-    isQueueRunning.current = true;
+    sharedSpeechState.isQueueRunning = true;
     speakNextInQueue(sessionId);
   }, [speakNextInQueue, startNewSpeechSession]);
 
@@ -213,23 +217,27 @@ export const useTextToSpeech = () => {
   }, [speakQueue]);
 
   const processStreamChunk = useCallback((chunk, isFinal) => {
-    if (chunk) sentenceBuffer.current += chunk;
+    if (chunk) sharedSpeechState.sentenceBuffer += chunk;
 
-    const shouldFlush = isFinal || /[.!?]/.test(chunk) || sentenceBuffer.current.length >= 220;
+    const shouldFlush = isFinal || /[.!?]/.test(chunk) || sharedSpeechState.sentenceBuffer.length >= 220;
     if (shouldFlush) {
-        const sentenceToSpeak = sentenceBuffer.current;
+        const sentenceToSpeak = sharedSpeechState.sentenceBuffer;
         if (sentenceToSpeak) speak(sentenceToSpeak);
-        sentenceBuffer.current = '';
+        sharedSpeechState.sentenceBuffer = '';
     }
   }, [speak]);
 
   const stopSpeech = useCallback(() => {
     if ('speechSynthesis' in window) {
+      if (sharedSpeechState.pendingDelay) {
+        clearTimeout(sharedSpeechState.pendingDelay);
+        sharedSpeechState.pendingDelay = null;
+      }
       invalidateSpeechSession();
-      speechQueue.current = [];
-      isQueueRunning.current = false;
-      currentUtterance.current = null;
-      sentenceBuffer.current = '';
+      sharedSpeechState.speechQueue = [];
+      sharedSpeechState.isQueueRunning = false;
+      sharedSpeechState.currentUtterance = null;
+      sharedSpeechState.sentenceBuffer = '';
       window.speechSynthesis.cancel();
       setIsSpeaking(false); // Instantly turn off speaking state
     }
