@@ -114,7 +114,7 @@ class MistralProvider {
 
       async function* normalizedStream() {
         for await (const chunk of streamResponse) {
-          const text = String(chunk?.data?.choices?.[0]?.delta?.content || '').trim();
+          const text = String(chunk?.data?.choices?.[0]?.delta?.content || '');
           if (!text) continue;
           yield {
             text,

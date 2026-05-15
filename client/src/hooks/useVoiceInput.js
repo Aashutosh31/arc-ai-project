@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useChat } from '../contexts/ChatContext';
 import { useSocket } from './useSocket';
 
 // Get the browser-native speech recognition object
@@ -7,6 +8,7 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 export const useVoiceInput = () => {
     // 🚀 FIX 2: We extract 'sendCommand' to display your voice text in the UI
     const { socket, isConnected, sendCommand } = useSocket();
+    const { setIsVoiceListening } = useChat();
     
     const [isListening, setIsListening] = useState(false);
     const [transcript, setTranscript] = useState('');
@@ -32,6 +34,7 @@ export const useVoiceInput = () => {
 
         recognition.onstart = () => {
             setIsListening(true);
+            setIsVoiceListening(true);
             setTranscript('');
             finalCommandRef.current = ''; 
         };
@@ -65,6 +68,7 @@ export const useVoiceInput = () => {
 
         recognition.onerror = (event) => {
             setIsListening(false);
+            setIsVoiceListening(false);
             console.error('STT Error:', event.error);
             setTranscript(`Error: ${event.error}`);
 
@@ -76,6 +80,7 @@ export const useVoiceInput = () => {
 
         recognition.onend = () => {
             setIsListening(false);
+            setIsVoiceListening(false);
         };
 
         recognitionRef.current = recognition;
@@ -86,6 +91,7 @@ export const useVoiceInput = () => {
         if (recognitionRef.current) {
             recognitionRef.current.stop();
         }
+        setIsVoiceListening(false);
     };
     
     useEffect(() => {

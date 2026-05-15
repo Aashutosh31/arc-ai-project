@@ -1,6 +1,6 @@
 import React, { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import styled, { keyframes } from 'styled-components';
-import { useChat } from '../contexts/ChatContext';
+import { useChat, sanitizeForDisplay } from '../contexts/ChatContext';
 import { useSocket } from '../hooks/useSocket';
 import { useConversation } from '../contexts/ConversationContext';
 
@@ -509,7 +509,7 @@ const ChatMessage = memo(({ msg, isSpeaking, isLast }) => {
 ChatMessage.displayName = 'ChatMessage';
 
 const ChatInterface = () => {
-  const { messages, replaceMessages, clearMessages, isProcessing, isSpeaking, mediaData, setMediaData, getLiveVisionFrame } = useChat();
+  const { messages, replaceMessages, clearMessages, isProcessing, isStreaming, isSpeaking, mediaData, setMediaData, getLiveVisionFrame } = useChat();
   const { interruptStream, sendCommand, socket } = useSocket();
   const {
     activeConversationId,
@@ -527,7 +527,7 @@ const ChatInterface = () => {
   const historyScrollRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
 
-  const isBusy = isProcessing || isSpeaking;
+  const isBusy = isProcessing || isStreaming || isSpeaking;
 
   // Listen for new conversation creation from socket
   useEffect(() => {
@@ -569,7 +569,7 @@ const ChatInterface = () => {
 
         const mappedMessages = dbMessages.map((message) => ({
           sender: message.role === 'user' ? 'user' : 'ai',
-          text: String(message.content || ''),
+          text: sanitizeForDisplay(String(message.content || '')),
           isStreaming: false
         }));
 
@@ -684,12 +684,13 @@ const ChatInterface = () => {
     const handleKeyDown = (event) => {
       if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
       if (event.code === 'Space' && isBusy) {
-        event.preventDefault(); 
+        event.preventDefault();
+        event.stopPropagation();
         interruptStream();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isBusy, interruptStream]);
 
   useLayoutEffect(() => {

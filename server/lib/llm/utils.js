@@ -8,14 +8,14 @@ const safeString = (value) => {
 const extractTextFromContent = (content) => {
   if (content === null || content === undefined) return '';
   if (typeof content === 'string') return content;
-  if (Array.isArray(content)) return content.map(extractTextFromContent).join('');
+  if (Array.isArray(content)) return content.map(extractTextFromContent).filter(Boolean).join(' ');
 
   if (typeof content === 'object') {
     if (typeof content.text === 'string') return content.text;
     if (typeof content.content === 'string') return content.content;
     if (typeof content.message === 'string') return content.message;
     if (Array.isArray(content.parts)) {
-      return content.parts.map(extractTextFromContent).join('');
+      return content.parts.map(extractTextFromContent).filter(Boolean).join(' ');
     }
   }
 
