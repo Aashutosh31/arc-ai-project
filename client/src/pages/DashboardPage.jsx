@@ -4,6 +4,7 @@ import styled from 'styled-components';
 import { useSocket } from '../hooks/useSocket';
 import { useChat } from '../contexts/ChatContext';
 import { ConversationProvider, useConversation } from '../contexts/ConversationContext';
+import { useWorkspaceViewport } from '../hooks/useWorkspaceViewport';
 import { Sidebar } from '../components/Sidebar';
 import AdvancedVoiceButton from '../components/AdvancedVoiceButton.jsx';
 import ChatInterface from '../components/ChatInterface.jsx';
@@ -25,7 +26,7 @@ const Page = styled.div`
   overflow-x: hidden;
   overflow-y: hidden;
 
-  @media (max-width: 768px) {
+  @media (max-width: 999px) {
     height: auto;
     min-height: 100vh;
     flex-direction: column;
@@ -41,8 +42,9 @@ const MainContent = styled.div`
   min-height: 0;
   overflow-x: hidden;
   overflow-y: hidden;
+  min-width: 0;
 
-  @media (max-width: 768px) {
+  @media (max-width: 999px) {
     min-height: auto;
     overflow-y: visible;
   }
@@ -64,7 +66,7 @@ const HamburgerButton = styled.button`
     transform: scale(1.1);
   }
 
-  @media (max-width: 768px) {
+  @media (max-width: 999px) {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -72,35 +74,23 @@ const HamburgerButton = styled.button`
 `;
 
 const SidebarOverlay = styled.div`
-  display: none;
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
   z-index: 999;
-
-  @media (max-width: 768px) {
-    display: ${props => (props.$isOpen ? 'block' : 'none')};
-  }
+  display: ${({ $isOpen }) => ($isOpen ? 'block' : 'none')};
 `;
 
 const DesktopSidebarWrapper = styled.div`
-  display: none;
-
-  @media (min-width: 769px) {
-    display: block;
-  }
+  display: ${({ $visible }) => ($visible ? 'block' : 'none')};
 `;
 
 const MobileSidebarWrapper = styled.div`
-  display: none;
-
-  @media (max-width: 768px) {
-    display: block;
-    position: fixed;
-    left: 0;
-    top: 0;
-    z-index: 1000;
-  }
+  display: ${({ $visible }) => ($visible ? 'block' : 'none')};
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1000;
 `;
 
 const Header = styled.header`
@@ -193,16 +183,21 @@ const Container = styled.main`
   max-width: min(1600px, calc(100vw - 24px));
   margin: 0 auto;
   padding: 16px 12px 24px;
-  display: flex;
+  display: grid;
+  grid-template-columns: ${({ $mode }) => {
+    if ($mode === 'desktop-wide') return 'minmax(0, 1fr) minmax(300px, 340px)';
+    if ($mode === 'desktop-compact') return 'minmax(0, 1fr) minmax(260px, 300px)';
+    return 'minmax(0, 1fr)';
+  }};
+  grid-auto-flow: row;
   gap: 16px;
   /* Must NOT have overflow: hidden — lets sticky work */
   align-items: stretch;
   min-width: 0;
   overflow-x: clip;
 
-  @media (max-width: 1024px) {
-    flex-direction: column;
-    align-items: stretch;
+  @media (max-width: 999px) {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   @media (min-width: 1440px) {
@@ -217,7 +212,8 @@ const Container = styled.main`
 `;
 
 const ChatBox = styled.section`
-  flex: 2.2;
+  flex: 1;
+  min-width: 0;
   background: rgba(11, 11, 35, 0.95);
   border-radius: 16px;
   padding: 12px;
@@ -247,7 +243,7 @@ const ChatBox = styled.section`
 `;
 
 const SidePanel = styled.aside`
-  flex: 0.9;
+  flex: 0 0 auto;
   max-width: 340px;
   display: flex;
   flex-direction: column;
@@ -272,14 +268,19 @@ const SidePanel = styled.aside`
     &::-webkit-scrollbar { display: none; }
   }
 
-  @media (max-width: 1024px) {
+  @media (max-width: 1399px) {
     max-width: 100%;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  @media (max-width: 999px) {
+    position: relative;
+    top: auto;
+    align-self: stretch;
+    max-height: none;
   }
 
   @media (max-width: 768px) {
-    grid-template-columns: 1fr;
+    gap: 12px;
   }
 `;
 
@@ -515,6 +516,7 @@ const DashboardPageContent = () => {
   const { isConnected, authInfo, setAuthInfo, socket } = useSocket();
   const { providerInfo } = useChat();
   const { createNewConversation } = useConversation();
+  const { workspaceMode, isDesktopWide, isDesktopCompact, isTablet, isMobile } = useWorkspaceViewport();
   const [googleConnected, setGoogleConnected] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [googleMessage, setGoogleMessage] = useState('');
@@ -525,7 +527,8 @@ const DashboardPageContent = () => {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [whatsappConnected, setWhatsappConnected] = useState(false);
   const [memoryLearningEnabled, setMemoryLearningEnabled] = useState(true);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
   const showWhatsAppDebug = import.meta.env.DEV && localStorage.getItem('arc_whatsapp_debug') === 'true';
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
   const apiOrigin = (() => {
@@ -536,10 +539,27 @@ const DashboardPageContent = () => {
     }
   })();
 
+  useEffect(() => {
+    if (isDesktopWide) {
+      setSidebarCollapsed(false);
+      setSidebarDrawerOpen(false);
+      return;
+    }
+
+    if (isDesktopCompact) {
+      setSidebarCollapsed(true);
+      setSidebarDrawerOpen(false);
+      return;
+    }
+
+    setSidebarCollapsed(false);
+    setSidebarDrawerOpen(false);
+  }, [isDesktopWide, isDesktopCompact, isTablet, isMobile]);
+
   const handleNewChat = async () => {
     try {
       await createNewConversation();
-      setSidebarOpen(false);
+      setSidebarDrawerOpen(false);
     } catch (error) {
       console.error('Failed to create conversation from command palette:', error);
     }
@@ -732,22 +752,47 @@ const DashboardPageContent = () => {
 
   const handleCommandPaletteClick = () => {
     setShowCommandPalette(true);
-    setSidebarOpen(false);
+    setSidebarDrawerOpen(false);
+  };
+
+  const handleSidebarToggle = () => {
+    if (isDesktopWide || isDesktopCompact) {
+      setSidebarCollapsed((prev) => !prev);
+      return;
+    }
+
+    setSidebarDrawerOpen((prev) => !prev);
+  };
+
+  const handleSidebarClose = () => {
+    setSidebarDrawerOpen(false);
   };
 
   return (
     <Page>
       {/* Desktop Sidebar - Always visible on desktop */}
-      <DesktopSidebarWrapper>
-        <Sidebar isOpen={true} onClose={() => {}} onCommandPaletteClick={handleCommandPaletteClick} />
+      <DesktopSidebarWrapper $visible={isDesktopWide || isDesktopCompact}>
+        <Sidebar
+          isOpen={true}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={handleSidebarToggle}
+          onClose={() => {}}
+          onCommandPaletteClick={handleCommandPaletteClick}
+        />
       </DesktopSidebarWrapper>
 
       {/* Mobile Sidebar Overlay */}
-      <SidebarOverlay $isOpen={sidebarOpen} onClick={() => setSidebarOpen(false)} />
+      <SidebarOverlay $isOpen={sidebarDrawerOpen} onClick={handleSidebarClose} />
 
       {/* Mobile Sidebar Drawer */}
-      <MobileSidebarWrapper>
-        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} onCommandPaletteClick={handleCommandPaletteClick} />
+      <MobileSidebarWrapper $visible={!isDesktopWide && !isDesktopCompact && sidebarDrawerOpen}>
+        <Sidebar
+          isOpen={sidebarDrawerOpen}
+          collapsed={false}
+          onToggleCollapse={handleSidebarToggle}
+          onClose={handleSidebarClose}
+          onCommandPaletteClick={handleCommandPaletteClick}
+        />
       </MobileSidebarWrapper>
 
       <MainContent>
@@ -760,7 +805,7 @@ const DashboardPageContent = () => {
           </TitleWrapper>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <HamburgerButton onClick={() => setSidebarOpen(!sidebarOpen)}>
+            <HamburgerButton onClick={handleSidebarToggle}>
               ☰
             </HamburgerButton>
             <StatusBadge $connected={isConnected}>
@@ -770,7 +815,7 @@ const DashboardPageContent = () => {
           </div>
         </Header>
 
-        <Container>
+        <Container $mode={workspaceMode}>
           <ChatBox>
             <ChatInterface />
           </ChatBox>
