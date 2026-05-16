@@ -2,15 +2,18 @@ import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { useConversation } from '../contexts/ConversationContext';
 
+const SIDEBAR_RAIL_WIDTH = 84;
+const SIDEBAR_FULL_WIDTH = 280;
+
 const SidebarWrapper = styled.div`
   display: flex;
   flex-direction: column;
-  width: ${({ $collapsed }) => ($collapsed ? '84px' : '280px')};
+  width: ${({ $collapsed }) => ($collapsed ? `${SIDEBAR_RAIL_WIDTH}px` : `${SIDEBAR_FULL_WIDTH}px`)};
   height: 100%;
   background: linear-gradient(180deg, rgba(10, 10, 20, 0.95) 0%, rgba(15, 15, 30, 0.95) 100%);
   border-right: 2px solid rgba(var(--primary-rgb), 0.2);
   backdrop-filter: blur(10px);
-  transition: all 0.3s ease;
+  transition: width 0.28s ease, transform 0.28s ease, box-shadow 0.28s ease;
   overflow: hidden;
   box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
 
@@ -28,6 +31,14 @@ const SidebarWrapper = styled.div`
   @media (max-width: 480px) {
     width: 240px;
   }
+`;
+
+const SidebarCore = styled.div`
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  opacity: ${({ $collapsed }) => ($collapsed ? 0.98 : 1)};
 `;
 
 const SidebarHeader = styled.div`
@@ -64,6 +75,21 @@ const Logo = styled.div`
   @media (max-width: 768px) {
     font-size: 16px;
   }
+`;
+
+const RailLogo = styled.div`
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.2), rgba(var(--secondary-rgb), 0.12));
+  border: 1px solid rgba(var(--primary-rgb), 0.3);
+  color: var(--primary-hex);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  box-shadow: 0 0 20px rgba(var(--primary-rgb), 0.12);
 `;
 
 const LogoFull = styled.span`
@@ -104,6 +130,78 @@ const SidebarToggleButton = styled.button`
   @media (max-width: 768px) {
     display: none;
   }
+`;
+
+const RailActionRow = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0 12px;
+  border-bottom: 1px solid rgba(var(--primary-rgb), 0.14);
+`;
+
+const RailActionButton = styled.button`
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  border: 1px solid ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.65)' : 'rgba(var(--primary-rgb), 0.24)')};
+  background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.18)' : 'rgba(255, 255, 255, 0.04)')};
+  color: ${({ $active }) => ($active ? '#f5ffff' : 'var(--primary-hex)')};
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+  box-shadow: ${({ $active }) => ($active ? '0 0 18px rgba(var(--primary-rgb), 0.18)' : 'none')};
+
+  &:hover {
+    transform: translateY(-1px) scale(1.02);
+    border-color: rgba(var(--primary-rgb), 0.5);
+    background: rgba(var(--primary-rgb), 0.14);
+  }
+`;
+
+const RailActionIcon = styled.span`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+`;
+
+const RailTooltipHost = styled.div`
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+
+  &:hover > span {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+`;
+
+const RailTooltip = styled.span`
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateX(-4px) translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(7, 10, 24, 0.98);
+  border: 1px solid rgba(var(--primary-rgb), 0.2);
+  color: #f3fbff;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.45);
+  transition: opacity 150ms ease, transform 150ms ease;
+  z-index: 20;
 `;
 
 const NewChatButton = styled.button`
@@ -235,23 +333,10 @@ const CommandPaletteIcon = styled.div`
   font-weight: 700;
 `;
 
-const ButtonLabel = styled.span`
+const ActionLabel = styled.span`
   min-width: 0;
-
-  ${({ $collapsed }) => $collapsed && `
-    display: none;
-  `}
-`;
-
-const CompactSearchHint = styled.div`
-  display: ${({ $collapsed }) => ($collapsed ? 'flex' : 'none')};
-  align-items: center;
-  justify-content: center;
-  padding: 14px 10px 12px;
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 11px;
-  text-align: center;
-  border-bottom: 1px solid rgba(var(--primary-rgb), 0.15);
+  overflow: hidden;
+  text-overflow: ellipsis;
 `;
 
 const CloseButton = styled.button`
@@ -305,6 +390,88 @@ const ConversationListWrapper = styled.div`
     gap: 5px;
   }
 `;
+
+const RailConversationList = styled.div`
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 0 14px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  align-items: center;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(var(--primary-rgb), 0.26);
+    border-radius: 999px;
+  }
+`;
+
+const RailConversationButton = styled.button`
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  border: 1px solid ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.75)' : 'rgba(var(--primary-rgb), 0.15)')};
+  background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.16)' : 'rgba(255, 255, 255, 0.03)')};
+  color: ${({ $active }) => ($active ? '#ffffff' : '#d5dbf0')};
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  box-shadow: ${({ $active }) => ($active ? '0 0 18px rgba(var(--primary-rgb), 0.18)' : 'none')};
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+
+  &:hover {
+    transform: translateY(-1px) scale(1.03);
+    border-color: rgba(var(--primary-rgb), 0.45);
+    background: rgba(var(--primary-rgb), 0.1);
+  }
+`;
+
+const RailConversationAvatar = styled.span`
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+`;
+
+const RailActiveDot = styled.span`
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #26ff8a;
+  box-shadow: 0 0 8px rgba(38, 255, 138, 0.85);
+`;
+
+const RailDivider = styled.div`
+  width: 26px;
+  height: 1px;
+  background: rgba(var(--primary-rgb), 0.16);
+  margin: 2px 0;
+`;
+
+const getConversationGlyph = (conversation) => {
+  const title = String(conversation?.title || 'Conversation').trim();
+  const firstChar = title.charAt(0).toUpperCase();
+  return firstChar || 'A';
+};
 
 const ConversationItem = styled.div`
   padding: 11px 12px;
@@ -577,35 +744,110 @@ export const Sidebar = ({
     }
   };
 
+  const renderRailTooltip = (label) => <RailTooltip>{label}</RailTooltip>;
+
+  if (collapsed) {
+    return (
+      <SidebarWrapper $isOpen={isOpen} $collapsed>
+        <SidebarCore $collapsed>
+          <RailTooltipHost style={{ paddingTop: '12px' }}>
+            <RailActionButton type="button" onClick={onToggleCollapse} aria-label="Expand sidebar">
+              <RailLogo>ARC</RailLogo>
+            </RailActionButton>
+            {renderRailTooltip('Expand sidebar')}
+          </RailTooltipHost>
+
+          <RailActionRow>
+            <RailTooltipHost>
+              <RailActionButton type="button" onClick={handleNewChat} aria-label="New Chat">
+                <RailActionIcon>+</RailActionIcon>
+              </RailActionButton>
+              {renderRailTooltip('New Chat')}
+            </RailTooltipHost>
+
+            <RailTooltipHost>
+              <RailActionButton type="button" onClick={onCommandPaletteClick} aria-label="Command Palette">
+                <RailActionIcon>⌘</RailActionIcon>
+              </RailActionButton>
+              {renderRailTooltip('Command Palette')}
+            </RailTooltipHost>
+          </RailActionRow>
+
+          <RailDivider />
+
+          <RailConversationList>
+            {loadingConversations && (
+              <RailTooltipHost>
+                <RailConversationButton type="button" disabled aria-label="Loading conversations">
+                  <RailConversationAvatar>...</RailConversationAvatar>
+                </RailConversationButton>
+                {renderRailTooltip('Loading conversations')}
+              </RailTooltipHost>
+            )}
+
+            {!loadingConversations && conversations.length === 0 && (
+              <RailTooltipHost>
+                <RailConversationButton type="button" disabled aria-label="No conversations yet">
+                  <RailConversationAvatar>+</RailConversationAvatar>
+                </RailConversationButton>
+                {renderRailTooltip('No conversations yet')}
+              </RailTooltipHost>
+            )}
+
+            {conversations.map((conv) => {
+              const isActive = activeConversationId === conv._id;
+              const glyph = getConversationGlyph(conv);
+
+              return (
+                <RailTooltipHost key={conv._id}>
+                  <RailConversationButton
+                    type="button"
+                    $active={isActive}
+                    onClick={() => {
+                      switchConversation(conv._id);
+                    }}
+                    aria-label={conv.title || 'Conversation'}
+                  >
+                    <RailConversationAvatar>{glyph}</RailConversationAvatar>
+                    {isActive && <RailActiveDot />}
+                  </RailConversationButton>
+                  {renderRailTooltip(conv.title || 'Conversation')}
+                </RailTooltipHost>
+              );
+            })}
+          </RailConversationList>
+        </SidebarCore>
+      </SidebarWrapper>
+    );
+  }
+
   return (
     <SidebarWrapper $isOpen={isOpen} $collapsed={collapsed}>
-      <SidebarHeader>
-        <SidebarHeaderStack>
-          <Logo $collapsed={collapsed}>
-            <LogoFull $collapsed={collapsed}>ARC-AI</LogoFull>
-            <LogoCompact $collapsed={collapsed}>ARC</LogoCompact>
-          </Logo>
-        </SidebarHeaderStack>
-        <SidebarToggleButton type="button" onClick={onToggleCollapse} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-          {collapsed ? '›' : '‹'}
-        </SidebarToggleButton>
-        <CloseButton onClick={onClose}>×</CloseButton>
-      </SidebarHeader>
+      <SidebarCore>
+        <SidebarHeader>
+          <SidebarHeaderStack>
+            <Logo>
+              <LogoFull>ARC-AI</LogoFull>
+            </Logo>
+          </SidebarHeaderStack>
+          <SidebarToggleButton type="button" onClick={onToggleCollapse} aria-label="Collapse sidebar">
+            ‹
+          </SidebarToggleButton>
+          <CloseButton onClick={onClose}>×</CloseButton>
+        </SidebarHeader>
 
-      <ActionButtonsContainer $collapsed={collapsed}>
-        <NewChatButton $collapsed={collapsed} onClick={handleNewChat} aria-label="Start a new chat">
-          <ButtonLabel $collapsed={collapsed}>+ New Chat</ButtonLabel>
-        </NewChatButton>
+        <ActionButtonsContainer>
+          <NewChatButton onClick={handleNewChat} aria-label="Start a new chat">
+            + New Chat
+          </NewChatButton>
 
-        <CommandPaletteButton $collapsed={collapsed} onClick={onCommandPaletteClick} aria-label="Open command palette">
-          <CommandPaletteIcon>⌘</CommandPaletteIcon>
-          <ButtonLabel $collapsed={collapsed}>Command Palette</ButtonLabel>
-        </CommandPaletteButton>
-      </ActionButtonsContainer>
+          <CommandPaletteButton onClick={onCommandPaletteClick} aria-label="Open command palette">
+            <CommandPaletteIcon>⌘</CommandPaletteIcon>
+            <span>Command Palette</span>
+          </CommandPaletteButton>
+        </ActionButtonsContainer>
 
-      <CompactSearchHint $collapsed={collapsed}>Search and conversations expand when you open the rail.</CompactSearchHint>
-
-      <div style={{ padding: collapsed ? '0' : '12px 12px 0', position: 'relative', display: collapsed ? 'none' : 'block' }}>
+        <div style={{ padding: '12px 12px 0', position: 'relative' }}>
         <input
           type="search"
           value={searchQuery}
@@ -658,7 +900,7 @@ export const Sidebar = ({
         )}
       </div>
 
-      <ConversationListWrapper $collapsed={collapsed}>
+      <ConversationListWrapper>
         {loadingConversations && (
           <EmptyState>Loading conversations...</EmptyState>
         )}
@@ -729,6 +971,7 @@ export const Sidebar = ({
           </ConfirmModal>
         </ConfirmOverlay>
       )}
+      </SidebarCore>
     </SidebarWrapper>
   );
 };

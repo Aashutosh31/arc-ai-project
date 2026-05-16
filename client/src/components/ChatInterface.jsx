@@ -49,6 +49,9 @@ const MessageContainer = styled.div`
   touch-action: pan-y;
   min-width: 0;
   min-height: 0;
+  justify-content: ${({ $isEmpty }) => ($isEmpty ? 'center' : 'flex-start')};
+  align-items: ${({ $isEmpty }) => ($isEmpty ? 'center' : 'stretch')};
+  gap: ${({ $isEmpty }) => ($isEmpty ? '0' : '0')};
 
   @media (max-width: 768px) {
     overscroll-behavior: auto;
@@ -453,6 +456,71 @@ const MessageToggleButton = styled.button`
   }
 `;
 
+const EmptyStatePanel = styled.div`
+  width: min(100%, ${({ $layoutMode, $sidebarCollapsed }) => {
+    if ($layoutMode === 'desktop-wide' && !$sidebarCollapsed) return '640px';
+    if ($layoutMode === 'desktop-compact') return '720px';
+    if ($layoutMode === 'tablet') return '100%';
+    return '100%';
+  }});
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: ${({ $layoutMode }) => ($layoutMode === 'mobile' ? '14px 8px' : '18px 20px')};
+  gap: 14px;
+  color: #dbe4ff;
+`;
+
+const EmptyBadge = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--primary-rgb), 0.24);
+  background: rgba(var(--primary-rgb), 0.08);
+  color: #7df7ff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+`;
+
+const EmptyTitle = styled.h2`
+  margin: 0;
+  font-size: clamp(24px, 3vw, 38px);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  color: #f7f9ff;
+`;
+
+const EmptyCopy = styled.p`
+  margin: 0;
+  max-width: 56ch;
+  font-size: 14px;
+  line-height: 1.6;
+  color: rgba(219, 228, 255, 0.72);
+`;
+
+const EmptyPills = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+`;
+
+const EmptyPill = styled.span`
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--primary-rgb), 0.18);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(238, 242, 255, 0.82);
+  font-size: 12px;
+  white-space: nowrap;
+`;
+
 const LONG_MESSAGE_PREVIEW_CHARS = 640;
 const INITIAL_VISIBLE_MESSAGES = 60;
 const LOAD_MORE_MESSAGES = 40;
@@ -508,7 +576,7 @@ const ChatMessage = memo(({ msg, isSpeaking, isLast }) => {
 
 ChatMessage.displayName = 'ChatMessage';
 
-const ChatInterface = () => {
+const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = false }) => {
   const { messages, replaceMessages, clearMessages, isProcessing, isStreaming, isSpeaking, mediaData, setMediaData, getLiveVisionFrame } = useChat();
   const { interruptStream, sendCommand, socket } = useSocket();
   const { activeConversationId, switchConversation, fetchConversations, fetchConversationMessages, updateConversationTitle, ensureConversationReady } = useConversation();
@@ -712,6 +780,13 @@ const ChatInterface = () => {
     setSelectedDocument(null);
   };
 
+  const isEmptyConversation = visibleMessages.length === 0;
+  const emptyHints = [
+    'Ask a question',
+    'Start with voice',
+    'Attach a file or image'
+  ];
+
   return (
     <ChatWrapper>
       {mediaData && (
@@ -727,21 +802,36 @@ const ChatInterface = () => {
         </FloatingPlayerContainer>
       )}
 
-      <MessageContainer ref={messageContainerRef} onScroll={handleMessageScroll}>
+      <MessageContainer ref={messageContainerRef} onScroll={handleMessageScroll} $isEmpty={isEmptyConversation}>
         {messages.length > visibleMessages.length ? (
           <HistoryButton type="button" onClick={handleLoadMoreMessages} disabled={visibleMessageCount >= messages.length}>
             Load earlier messages ({messages.length - visibleMessages.length} hidden)
           </HistoryButton>
         ) : null}
 
-        {visibleMessages.map((msg, index) => (
-          <ChatMessage
-            key={`${messages.length - visibleMessages.length + index}`}
-            msg={msg}
-            isSpeaking={isSpeaking}
-            isLast={index === visibleMessages.length - 1}
-          />
-        ))}
+        {isEmptyConversation ? (
+          <EmptyStatePanel $layoutMode={workspaceMode} $sidebarCollapsed={sidebarCollapsed}>
+            <EmptyBadge>Ready to assist</EmptyBadge>
+            <EmptyTitle>What would you like ARC-AI to do?</EmptyTitle>
+            <EmptyCopy>
+              Start a conversation, attach a document, or use voice. The workspace now adapts its width based on the current shell mode instead of assuming a fixed desktop sidebar.
+            </EmptyCopy>
+            <EmptyPills>
+              {emptyHints.map((hint) => (
+                <EmptyPill key={hint}>{hint}</EmptyPill>
+              ))}
+            </EmptyPills>
+          </EmptyStatePanel>
+        ) : (
+          visibleMessages.map((msg, index) => (
+            <ChatMessage
+              key={`${messages.length - visibleMessages.length + index}`}
+              msg={msg}
+              isSpeaking={isSpeaking}
+              isLast={index === visibleMessages.length - 1}
+            />
+          ))
+        )}
 
         {isProcessing && (visibleMessages.length === 0 || visibleMessages[visibleMessages.length - 1].sender !== 'ai') && (
           <MessageBubble $role="assistant">
