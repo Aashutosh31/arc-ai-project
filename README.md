@@ -5,7 +5,7 @@
 <p><strong>A MERN-stack Digital Assistant featuring RAG Memory, Live Web Research, Proactive Cron Routines, and Serverless Microservices.</strong></p>
 
 <a href="https://arc-ai-project.vercel.app/" target="_blank">
-  <img width="100%" alt="ARC-AI Demo" src="https://github.com/user-attachments/assets/ffa1f39d-89a1-4b3e-a8f8-740f98a300c1" />
+  <img width="100%" alt="ARC-AI Demo" src="https://github.com/user-attachments/assets/3f9fd56f-263c-4fdd-b6fd-391612ba7807" />
 </a>
 
 <p><strong>🔗 Click the image to try the Live Application</strong></p>
