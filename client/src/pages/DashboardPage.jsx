@@ -180,9 +180,9 @@ const Container = styled.main`
   flex: 1;
   min-height: 0;
   width: 100%;
-  max-width: min(1600px, calc(100vw - 24px));
-  margin: 0 auto;
-  padding: 16px 12px 24px;
+  max-width: ${({ $layoutMode }) => ($layoutMode === 'expanded' ? 'min(1600px, calc(100vw - 24px))' : 'none')};
+  margin: ${({ $layoutMode }) => ($layoutMode === 'expanded' ? '0 auto' : '0')};
+  padding: ${({ $layoutMode }) => ($layoutMode === 'expanded' ? '16px 12px 24px' : '16px 14px 24px')};
   display: grid;
   grid-template-columns: ${({ $mode }) => {
     if ($mode === 'desktop-wide') return 'minmax(0, 1fr) minmax(300px, 340px)';
@@ -540,18 +540,15 @@ const DashboardPageContent = () => {
   })();
 
   useEffect(() => {
-    if (isDesktopWide) {
+    // Do not auto-collapse on "laptop" widths (desktop-compact).
+    // Treat compact desktops like wide desktops: start expanded by default.
+    if (isDesktopWide || isDesktopCompact) {
       setSidebarCollapsed(false);
       setSidebarDrawerOpen(false);
       return;
     }
 
-    if (isDesktopCompact) {
-      setSidebarCollapsed(true);
-      setSidebarDrawerOpen(false);
-      return;
-    }
-
+    // For tablet and mobile keep default (drawer controls visibility).
     setSidebarCollapsed(false);
     setSidebarDrawerOpen(false);
   }, [isDesktopWide, isDesktopCompact, isTablet, isMobile]);
@@ -768,6 +765,12 @@ const DashboardPageContent = () => {
     setSidebarDrawerOpen(false);
   };
 
+  const shellLayoutMode = (isDesktopWide || isDesktopCompact)
+    ? (sidebarCollapsed ? 'rail' : 'expanded')
+    : isTablet
+      ? 'tablet'
+      : 'mobile';
+
   return (
     <Page>
       {/* Desktop Sidebar - Always visible on desktop */}
@@ -815,9 +818,9 @@ const DashboardPageContent = () => {
           </div>
         </Header>
 
-        <Container $mode={workspaceMode}>
+        <Container $mode={workspaceMode} $layoutMode={shellLayoutMode}>
           <ChatBox>
-            <ChatInterface />
+            <ChatInterface workspaceMode={workspaceMode} sidebarCollapsed={sidebarCollapsed} />
           </ChatBox>
 
           <SidePanel>
