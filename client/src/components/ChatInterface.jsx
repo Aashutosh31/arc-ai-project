@@ -3,6 +3,7 @@ import styled, { keyframes } from 'styled-components';
 import { useChat, sanitizeForDisplay } from '../contexts/ChatContext';
 import { useSocket } from '../hooks/useSocket';
 import { useConversation } from '../contexts/ConversationContext';
+import { useExecution } from '../contexts/ExecutionContext';
 
 const Waveform = keyframes`
   0%, 100% { height: 10px; transform: translateY(0); }
@@ -422,6 +423,31 @@ const HistoryButton = styled.button`
   }
 `;
 
+const PresenceStrip = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--primary-rgb), 0.28);
+  background: rgba(0, 0, 0, 0.18);
+  color: #d7faff;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 10px 0;
+  box-shadow: 0 0 14px rgba(var(--primary-rgb), 0.12);
+`;
+
+const PresenceDot = styled.span`
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: ${({ $status }) => ($status === 'Completed' ? '#4dffb0' : $status === 'Failed' ? '#ff7070' : $status === 'Cancelled' ? '#ffb347' : '#00ffff')};
+  box-shadow: 0 0 12px rgba(var(--primary-rgb), 0.35);
+`;
+
 const MessageContent = styled.div`
   display: flex;
   flex-direction: column;
@@ -579,6 +605,7 @@ ChatMessage.displayName = 'ChatMessage';
 const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = false }) => {
   const { messages, replaceMessages, clearMessages, isProcessing, isStreaming, isSpeaking, mediaData, setMediaData, getLiveVisionFrame } = useChat();
   const { interruptStream, sendCommand, socket } = useSocket();
+  const { activeExecution, presence, cancelActiveExecution } = useExecution();
   const { activeConversationId, switchConversation, fetchConversations, fetchConversationMessages, updateConversationTitle, ensureConversationReady } = useConversation();
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState(null); 
@@ -590,6 +617,11 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
   const shouldAutoScrollRef = useRef(true);
 
   const isBusy = isProcessing || isStreaming || isSpeaking;
+
+  const handleCancelWork = () => {
+    cancelActiveExecution?.();
+    interruptStream();
+  };
 
   // Listen for new conversation creation from socket
   useEffect(() => {
@@ -748,7 +780,7 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
       if (event.code === 'Space' && isBusy) {
         event.preventDefault();
         event.stopPropagation();
-        interruptStream();
+        handleCancelWork();
       }
     };
     window.addEventListener('keydown', handleKeyDown, true);
@@ -789,6 +821,14 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
 
   return (
     <ChatWrapper>
+      {activeExecution ? (
+        <PresenceStrip aria-live="polite">
+          <PresenceDot $status={presence} />
+          <strong style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.12em' }}>{presence}</strong>
+          <span style={{ opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeExecution.title || 'Autonomous execution'}</span>
+        </PresenceStrip>
+      ) : null}
+
       {mediaData && (
         <FloatingPlayerContainer>
           <ClosePlayerButton onClick={() => setMediaData(null)}>X</ClosePlayerButton>
@@ -840,7 +880,7 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
         )}
 
         {isBusy && (
-          <StopButton onClick={interruptStream}>
+          <StopButton onClick={handleCancelWork}>
             ⏹ {isSpeaking ? "Stop Speaking" : "Stop Generating"} (Press Space)
           </StopButton>
         )}

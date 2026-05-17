@@ -123,6 +123,111 @@ const normalizeMistralToolCalls = (message) => {
   }));
 };
 
+const isAssistantToolCallMessage = (message) => {
+  return (message?.role || '').toLowerCase() === 'assistant' && Array.isArray(message?.toolCalls) && message.toolCalls.length > 0;
+};
+
+const buildProviderContinuationMessages = ({
+  messages = [],
+  assistantMessage = null,
+  toolResults = [],
+  provider = 'mistral'
+} = {}) => {
+  const sourceAssistantMessage = assistantMessage || [...messages].reverse().find(isAssistantToolCallMessage) || null;
+  const sourceToolCalls = Array.isArray(sourceAssistantMessage?.toolCalls)
+    ? sourceAssistantMessage.toolCalls
+    : Array.isArray(sourceAssistantMessage?.tool_calls)
+      ? sourceAssistantMessage.tool_calls
+      : [];
+
+  const assistantToolCalls = [];
+  const assistantToolCallIds = new Set();
+
+  for (const toolCall of sourceToolCalls) {
+    const toolCallId = toolCall?.id || toolCall?.toolCallId || toolCall?.tool_call_id;
+    if (!toolCallId) {
+      throw new Error('buildProviderContinuationMessages: assistant tool call is missing an id.');
+    }
+    if (assistantToolCallIds.has(toolCallId)) {
+      throw new Error(`buildProviderContinuationMessages: duplicate assistant tool_call_id detected: ${toolCallId}`);
+    }
+    assistantToolCallIds.add(toolCallId);
+    assistantToolCalls.push({
+      id: toolCallId,
+      function: {
+        name: toolCall?.function?.name || toolCall?.name,
+        arguments: toolCall?.function?.arguments || toolCall?.arguments || {}
+      }
+    });
+  }
+
+  const toolResultsById = new Map();
+  for (const result of toolResults || []) {
+    const toolCallId = result?.toolCallId || result?.tool_call_id;
+    if (!toolCallId) {
+      throw new Error('buildProviderContinuationMessages: tool result missing tool_call_id.');
+    }
+    if (!assistantToolCallIds.has(toolCallId)) {
+      throw new Error(`buildProviderContinuationMessages: orphan tool result detected for tool_call_id ${toolCallId}`);
+    }
+    if (toolResultsById.has(toolCallId)) {
+      throw new Error(`buildProviderContinuationMessages: duplicate tool result detected for tool_call_id ${toolCallId}`);
+    }
+
+    toolResultsById.set(toolCallId, {
+      role: 'tool',
+      name: result?.name || result?.toolName || result?.tool || null,
+      toolCallId,
+      tool_call_id: toolCallId,
+      content: typeof result?.content === 'string'
+        ? result.content
+        : JSON.stringify(result?.content ?? result?.result ?? result?.data ?? result?.output ?? {})
+    });
+  }
+
+  for (const toolCallId of assistantToolCallIds) {
+    if (!toolResultsById.has(toolCallId)) {
+      throw new Error(`buildProviderContinuationMessages: missing tool result for tool_call_id ${toolCallId}`);
+    }
+  }
+
+  const baseMessages = [];
+  let seenAssistantToolCallSegment = false;
+
+  for (const message of messages || []) {
+    if (isAssistantToolCallMessage(message)) {
+      seenAssistantToolCallSegment = true;
+      continue;
+    }
+
+    if ((message?.role || '').toLowerCase() === 'tool') {
+      continue;
+    }
+
+    baseMessages.push({
+      ...message,
+      role: message?.role || 'user',
+      content: extractTextFromContent(message?.content)
+    });
+  }
+
+  if (!seenAssistantToolCallSegment && assistantToolCalls.length > 0) {
+    // The caller is reconstructing a fresh continuation chain.
+  }
+
+  const continuation = [
+    ...baseMessages,
+    {
+      role: 'assistant',
+      content: extractTextFromContent(sourceAssistantMessage?.content || ''),
+      toolCalls: assistantToolCalls
+    },
+    ...Array.from(toolResultsById.values())
+  ];
+
+  return continuation;
+};
+
 const extractResponseText = (response) => {
   if (!response) return '';
   if (typeof response.text === 'string') return response.text;
@@ -195,6 +300,7 @@ module.exports = {
   normalizeGeminiToolCalls,
   normalizeMessages,
   normalizeMistralToolCalls,
+  buildProviderContinuationMessages,
   toGeminiContents,
   toGeminiTools
 };

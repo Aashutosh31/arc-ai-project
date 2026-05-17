@@ -10,7 +10,11 @@ const { consumeCredits, isGuestActorId } = require('./creditService');
 const LLMRouter = require('../lib/llm/LLMRouter');
 const StreamingRuntime = require('../lib/llm/StreamingRuntime');
 const { buildMemoryContext, searchWorkspace } = require('./workspaceSearchService');
+const WorkspaceContextManager = require('./WorkspaceContextManager');
+const TaskPlanner = require('./TaskPlanner');
+const ToolRecoveryManager = require('./ToolRecoveryManager');
 const { upsertTextVector } = require('./workspaceIndexService');
+const { buildProviderContinuationMessages } = require('../lib/llm/utils');
 
 const SCHEDULE_KEYWORDS = [
     'schedule',
@@ -157,6 +161,32 @@ const parseTimeOnDate = (text, baseDate) => {
     // Default to next full hour when no explicit time is given.
     date.setHours(date.getHours() + 1, 0, 0, 0);
     return date;
+};
+
+const plannerTriggerKeywords = ['research', 'compare', 'analysis', 'architect', 'architecture', 'recommend', 'plan', 'strategy', 'summarize'];
+
+const shouldUsePlanner = (toolCalls, assistantText) => {
+    if (!toolCalls || toolCalls.length === 0) return false;
+    // If multiple tools are required, prefer planner
+    if (toolCalls.length > 1) return true;
+
+    // If the single tool is a heavy research or orchestration tool, and assistant prompt hints at research/plan, use planner
+    const heavyTools = new Set(['deepResearchSwarm', 'webSearch', 'scrapeWebsite', 'memoryRecall', 'memorize', 'deep_research']);
+    const name = (toolCalls[0]?.function?.name || '').toString();
+    if (heavyTools.has(name)) {
+        const text = String(assistantText || '').toLowerCase();
+        if (plannerTriggerKeywords.some((k) => text.includes(k))) return true;
+        // also trigger if explicit 'plan' or 'compare' in tool args
+        try {
+            const args = typeof toolCalls[0].function.arguments === 'string'
+                ? JSON.parse(toolCalls[0].function.arguments)
+                : toolCalls[0].function.arguments || {};
+            const argText = JSON.stringify(args).toLowerCase();
+            if (plannerTriggerKeywords.some((k) => argText.includes(k))) return true;
+        } catch (e) {}
+    }
+
+    return false;
 };
 
 const buildEmptyToolResponse = ({ calendarIntent, toolCalls = [], fallbackToolResults = [] } = {}) => {
@@ -434,12 +464,18 @@ class AIService {
 
             const baseMessageContent = text || (document ? `Please analyze the attached document: ${document.name}` : 'Hello');
 
-            const userFacts = isGuest ? [] : await UserFact.find({ userId }).sort({ pinned: -1, createdAt: -1 }).limit(12).lean();
-            const retrievalItems = isGuest ? [] : await buildMemoryContext({
-                userId,
-                query: baseMessageContent,
-                limit: 10
-            });
+                        const userFacts = isGuest ? [] : await UserFact.find({ userId }).sort({ pinned: -1, createdAt: -1 }).limit(12).lean();
+
+                        let retrievalItems = [];
+                        if (!isGuest) {
+                            try {
+                                const ctx = await WorkspaceContextManager.getActiveContext({ userId, conversationId, query: baseMessageContent, limit: 10 });
+                                retrievalItems = ctx?.items || [];
+                            } catch (err) {
+                                console.warn('[AIService] WorkspaceContextManager failed, falling back to buildMemoryContext', err?.message || err);
+                                retrievalItems = await buildMemoryContext({ userId, query: baseMessageContent, limit: 10 });
+                            }
+                        }
 
             const recentMemoryTurnsText = recentMemories.length > 0
                 ? `\n\nRECENT MEMORY TURNS:\n${recentMemories.map((message, index) => `${index + 1}. ${String(message.content || '').slice(0, 180)}`).join('\n')}`
@@ -589,96 +625,35 @@ class AIService {
 
             let finalOutputText = response?.text || "";
             const toolCalls = response?.toolCalls || [];
-
-            if (toolCalls && toolCalls.length > 0) {
-                console.log(`[Agent Router] AI requested ${toolCalls.length} tool(s). Executing...`);
-                messages.push({
-                    role: 'assistant',
-                    content: finalOutputText || '',
-                    toolCalls: toolCalls.map((toolCall) => ({
-                        id: toolCall?.id,
-                        function: {
-                            name: toolCall?.function?.name,
-                            arguments: toolCall?.function?.arguments || {}
-                        }
-                    }))
-                });
-                const plannedTools = toolCalls.map((toolCall) => this.mapCalendarToolName(toolCall.function.name, calendarIntent));
-                console.log(`[Planner] Chosen tools (in order): ${plannedTools.join(' -> ')}`);
-
-                for (const toolCall of toolCalls) {
-                    if (socket && socket.isInterrupted) {
-                        break;
+            const assistantToolMessage = {
+                role: 'assistant',
+                content: finalOutputText || '',
+                toolCalls: toolCalls.map((toolCall) => ({
+                    id: toolCall?.id,
+                    function: {
+                        name: toolCall?.function?.name,
+                        arguments: toolCall?.function?.arguments || {}
                     }
+                }))
+            };
 
-                    const functionName = this.mapCalendarToolName(toolCall.function.name, calendarIntent);
-                    if (functionName !== toolCall.function.name) {
-                        console.log(
-                            `[Planner] Tool override applied: ${toolCall.function.name} -> ${functionName}`
-                        );
-                    } else {
-                        console.log(`[Planner] Selected tool: ${functionName}`);
-                    }
-
-                    const args = typeof toolCall.function.arguments === 'string' 
-                        ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
-
-                    console.log('[Planner] Before tool execution:', { tool: functionName, args });
-
-                    const toolResult = await TaskExecutor.executeTool(functionName, args, userId, socket, { signal: controller.signal });
-                    console.log('[Planner] After tool execution payload:', { tool: functionName, payload: toolResult });
-
-                    if (toolResult.clientAction && socket) {
-                        socket.emit('ai:client:action', toolResult.clientAction);
-                    }
-
-                    messages.push({
-                        role: 'tool',
-                        name: functionName,
-                        content: JSON.stringify(toolResult),
-                        toolCallId: toolCall.id
-                    });
-
-                    if (functionName === 'scheduleMeeting' && toolResult?.success) {
-                        console.log('[Planner] scheduleMeeting succeeded; running optional checkCalendar confirmation.');
-                        const createdStart = toolResult?.event?.start;
-                        const createdEnd = toolResult?.event?.end;
-                        let confirmationArgs = { maxResults: 5 };
-
-                        if (createdStart && createdEnd) {
-                            const start = new Date(createdStart);
-                            const end = new Date(createdEnd);
-                            if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
-                                const timeMin = new Date(start.getTime() - (60 * 60 * 1000));
-                                const timeMax = new Date(end.getTime() + (60 * 60 * 1000));
-                                confirmationArgs = {
-                                    timeMin: timeMin.toISOString(),
-                                    timeMax: timeMax.toISOString(),
-                                    maxResults: 10
-                                };
-                            }
-                        }
-
-                        const confirmationResult = await TaskExecutor.executeTool('checkCalendar', confirmationArgs, userId, socket, { signal: controller.signal });
-                        messages.push({
-                            role: 'tool',
-                            name: 'checkCalendar',
-                            content: JSON.stringify(confirmationResult),
-                            toolCallId: `${toolCall.id}-confirmation`
-                        });
-                    }
-                }
-                
-                const malformedContinuationMessages = messages.filter((message) => message.role === 'tool' && (!message.toolCallId || !message.name || typeof message.content !== 'string'));
-                if (malformedContinuationMessages.length > 0) {
-                    console.warn('[AIService] Malformed tool continuation payload detected.', {
-                        count: malformedContinuationMessages.length,
-                        sample: malformedContinuationMessages[0]
-                    });
-                }
-
-                const finalGeneration = await this.llmRouter.generate({
+            const makeContinuationGeneration = async ({ assistantMessage, toolResults }) => {
+                const continuationMessages = buildProviderContinuationMessages({
                     messages,
+                    assistantMessage,
+                    toolResults,
+                    provider: response?.provider || 'mistral'
+                });
+
+                console.log('[AIService] provider continuation payload', continuationMessages.map((message) => ({
+                    role: message.role,
+                    toolCallIds: Array.isArray(message.toolCalls)
+                      ? message.toolCalls.map((toolCall) => toolCall?.id).filter(Boolean)
+                      : message.toolCallId || message.tool_call_id || null
+                })));
+
+                return this.llmRouter.generate({
+                    messages: continuationMessages,
                     systemPrompt,
                     tools: [],
                     stream: true,
@@ -693,8 +668,172 @@ class AIService {
                     attachments: [],
                     signal: controller.signal
                 });
+            };
 
-                finalOutputText = await this.streamingRuntime.consume(finalGeneration.stream, socket, controller.signal);
+            if (toolCalls && toolCalls.length > 0) {
+                console.log(`[Agent Router] AI requested ${toolCalls.length} tool(s).`);
+                messages.push({
+                    role: 'assistant',
+                    content: finalOutputText || '',
+                    toolCalls: toolCalls.map((toolCall) => ({
+                        id: toolCall?.id,
+                        function: {
+                            name: toolCall?.function?.name,
+                            arguments: toolCall?.function?.arguments || {}
+                        }
+                    }))
+                });
+
+                const usePlanner = shouldUsePlanner(toolCalls, finalOutputText);
+                if (usePlanner) {
+                    // Build plan steps from toolCalls
+                    const steps = toolCalls.map((toolCall) => {
+                        const fname = this.mapCalendarToolName(toolCall.function.name, calendarIntent);
+                        let args = {};
+                        try { args = typeof toolCall.function.arguments === 'string' ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments || {}; } catch (e) { args = {}; }
+                        return { toolCallId: toolCall.id, tool: fname, args };
+                    });
+
+                    // Persist plan
+                    const planTitle = (text || '').slice(0, 120) || 'Autonomous Plan';
+                    const exec = await TaskPlanner.createPlan({ userId, title: planTitle, prompt: text, steps });
+                    if (socket) socket.emit('execution.created', { executionId: exec._id.toString(), title: exec.title });
+
+                    // Execute plan (TaskPlanner emits progress events)
+                    const execResult = await TaskPlanner.executePlan(exec._id, socket, { controller });
+
+                    const plannerToolResults = (execResult.steps || [])
+                        .filter((step) => step.toolCallId)
+                        .map((step) => ({
+                            toolCallId: step.toolCallId,
+                            name: step.tool,
+                            content: step.result || {}
+                        }));
+
+                        if (execResult.status === 'CANCELLED' || (controller.signal && controller.signal.aborted)) {
+                            finalOutputText = 'Execution cancelled.';
+                            if (socket) await this.streamingRuntime.emitText(socket, finalOutputText, controller.signal);
+                        } else {
+                            if (execResult.status === 'FAILED' && socket) {
+                                socket.emit('ai:agent:status', {
+                                    status: 'synthesizing',
+                                    detail: 'Synthesizing a partial answer from recovered and failed steps.'
+                                });
+                            }
+
+                            const finalGeneration = await makeContinuationGeneration({
+                                assistantMessage: assistantToolMessage,
+                                toolResults: plannerToolResults
+                            });
+
+                            finalOutputText = await this.streamingRuntime.consume(finalGeneration.stream, socket, controller.signal);
+                        }
+                } else {
+                    console.log('[Planner] Delegating execution inline (quick tool path)');
+                    const plannedTools = toolCalls.map((toolCall) => this.mapCalendarToolName(toolCall.function.name, calendarIntent));
+                    console.log(`[Planner] Chosen tools (in order): ${plannedTools.join(' -> ')}`);
+
+                    for (const toolCall of toolCalls) {
+                        if (socket && socket.isInterrupted) {
+                            break;
+                        }
+
+                        const functionName = this.mapCalendarToolName(toolCall.function.name, calendarIntent);
+                        if (functionName !== toolCall.function.name) {
+                            console.log(
+                                `[Planner] Tool override applied: ${toolCall.function.name} -> ${functionName}`
+                            );
+                        } else {
+                            console.log(`[Planner] Selected tool: ${functionName}`);
+                        }
+
+                        const args = typeof toolCall.function.arguments === 'string' 
+                            ? JSON.parse(toolCall.function.arguments) : toolCall.function.arguments;
+
+                        console.log('[Planner] Before tool execution:', { tool: functionName, args });
+
+                        const toolResult = await TaskExecutor.executeTool(functionName, args, userId, socket, { signal: controller.signal });
+                        let finalToolResult = toolResult;
+
+                        if (!toolResult?.success) {
+                            const recovery = await ToolRecoveryManager.recoverToolResult({
+                                toolName: functionName,
+                                args,
+                                result: toolResult,
+                                userId,
+                                socket,
+                                signal: controller.signal,
+                                retryCount: 0
+                            });
+
+                            if (recovery?.recovered) {
+                                finalToolResult = recovery.result;
+                            }
+
+                            if (recovery?.shouldReplan && socket) {
+                                socket.emit('execution.replan.suggested', {
+                                    executionId: null,
+                                    tool: functionName,
+                                    reason: recovery.failureReason || 'inline tool failure'
+                                });
+                            }
+                        }
+
+                        console.log('[Planner] After tool execution payload:', { tool: functionName, payload: finalToolResult });
+
+                        if (finalToolResult.clientAction && socket) {
+                            socket.emit('ai:client:action', finalToolResult.clientAction);
+                        }
+
+                        messages.push({
+                            role: 'tool',
+                            name: functionName,
+                            content: JSON.stringify(finalToolResult),
+                            toolCallId: toolCall.id
+                        });
+
+                        if (functionName === 'scheduleMeeting' && finalToolResult?.success) {
+                            console.log('[Planner] scheduleMeeting succeeded; running optional checkCalendar confirmation.');
+                            const createdStart = finalToolResult?.event?.start;
+                            const createdEnd = finalToolResult?.event?.end;
+                            let confirmationArgs = { maxResults: 5 };
+
+                            if (createdStart && createdEnd) {
+                                const start = new Date(createdStart);
+                                const end = new Date(createdEnd);
+                                if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+                                    const timeMin = new Date(start.getTime() - (60 * 60 * 1000));
+                                    const timeMax = new Date(end.getTime() + (60 * 60 * 1000));
+                                    confirmationArgs = {
+                                        timeMin: timeMin.toISOString(),
+                                        timeMax: timeMax.toISOString(),
+                                        maxResults: 10
+                                    };
+                                }
+                            }
+
+                            const confirmationResult = await TaskExecutor.executeTool('checkCalendar', confirmationArgs, userId, socket, { signal: controller.signal });
+                            // Keep the confirmation for internal reasoning only; do not feed a synthetic tool_call_id back to the provider.
+                            finalToolResult.internalConfirmation = confirmationResult;
+                        }
+                    }
+
+                    const providerToolResults = toolCalls.map((toolCall) => {
+                        const matchedResult = messages.find((message) => message.role === 'tool' && message.toolCallId === toolCall.id);
+                        return matchedResult ? {
+                            toolCallId: toolCall.id,
+                            name: matchedResult.name,
+                            content: matchedResult.content
+                        } : null;
+                    }).filter(Boolean);
+
+                    const finalGeneration = await makeContinuationGeneration({
+                        assistantMessage: assistantToolMessage,
+                        toolResults: providerToolResults
+                    });
+
+                    finalOutputText = await this.streamingRuntime.consume(finalGeneration.stream, socket, controller.signal);
+                }
             } else {
                 finalOutputText = response?.text || '';
                 if (socket) {
