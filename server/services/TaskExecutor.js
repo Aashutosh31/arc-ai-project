@@ -32,17 +32,19 @@ class TaskExecutor {
                 return { success: false, error: `Tool ${toolName} not found in system registry.` };
             }
 
-            const creditCost = TOOL_CREDIT_COSTS[toolName] || 1;
-            const creditResult = await consumeCredits(userId, creditCost, toolName);
-            if (!creditResult.success) {
-                return { success: false, error: creditResult.error, creditsRemaining: creditResult.creditsRemaining ?? 0 };
-            }
+            if (!executionOptions?.skipCreditCharge) {
+                const creditCost = TOOL_CREDIT_COSTS[toolName] || 1;
+                const creditResult = await consumeCredits(userId, creditCost, toolName);
+                if (!creditResult.success) {
+                    return { success: false, error: creditResult.error, creditsRemaining: creditResult.creditsRemaining ?? 0 };
+                }
 
-            if (socket) {
-                socket.emit('ai:credits:update', {
-                    creditsRemaining: creditResult.creditsRemaining,
-                    reason: toolName
-                });
+                if (socket) {
+                    socket.emit('ai:credits:update', {
+                        creditsRemaining: creditResult.creditsRemaining,
+                        reason: toolName
+                    });
+                }
             }
 
             // Package the context (e.g., who is requesting this)

@@ -8,6 +8,7 @@ import { useWorkspaceViewport } from '../hooks/useWorkspaceViewport';
 import { Sidebar } from '../components/Sidebar';
 import AdvancedVoiceButton from '../components/AdvancedVoiceButton.jsx';
 import ChatInterface from '../components/ChatInterface.jsx';
+import ExecutionPanel from '../components/ExecutionPanel.jsx';
 import TestUserAccessModal from '../components/TestUserAccessModal';
 import WhatsAppModal from '../components/WhatsAppModal.jsx';
 import WhatsAppConnectModal from '../components/WhatsAppConnectModal.jsx';
@@ -824,6 +825,8 @@ const DashboardPageContent = () => {
           </ChatBox>
 
           <SidePanel>
+            <ExecutionPanel />
+
             <Card>
               <CardTitle>Voice Control</CardTitle>
               <CardSubtitle>Hands-free interaction</CardSubtitle>
