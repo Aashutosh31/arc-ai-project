@@ -27,9 +27,13 @@ const toFallbackTitle = (rawText) => {
 exports.getConversations = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?.userId;
+    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const conversations = await Conversation.find({ userId, archived: false })
+    const query = { userId, archived: false };
+    if (workspaceId) query.workspaceId = workspaceId;
+
+    const conversations = await Conversation.find(query)
       .sort({ updatedAt: -1 })
       .select('_id title createdAt updatedAt lastMessage pinned messageCount')
       .lean();
@@ -45,12 +49,14 @@ exports.getConversations = async (req, res) => {
 exports.createConversation = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?.userId;
+    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     const { title = 'New Conversation' } = req.body;
 
     const conversation = new Conversation({
       userId,
+      workspaceId,
       title
     });
 
@@ -67,19 +73,23 @@ exports.getConversation = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?.userId;
     const { conversationId } = req.params;
+    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
 
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const conversation = await Conversation.findOne({
-      _id: conversationId,
-      userId
-    });
+    const convQuery = { _id: conversationId, userId };
+    if (workspaceId) convQuery.workspaceId = workspaceId;
+
+    const conversation = await Conversation.findOne(convQuery);
 
     if (!conversation) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
-    const messages = await Message.find({ conversationId })
+    const msgQuery = { conversationId };
+    if (workspaceId) msgQuery.workspaceId = workspaceId;
+
+    const messages = await Message.find(msgQuery)
       .sort({ createdAt: 1 })
       .lean();
 
@@ -98,27 +108,31 @@ exports.getMessages = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?.userId;
     const { conversationId } = req.params;
+    const workspaceId = req.query?.workspaceId || null;
     const { limit = 50, skip = 0 } = req.query;
 
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     // Verify user owns this conversation
-    const conversation = await Conversation.findOne({
-      _id: conversationId,
-      userId
-    });
+    const convQuery = { _id: conversationId, userId };
+    if (workspaceId) convQuery.workspaceId = workspaceId;
+
+    const conversation = await Conversation.findOne(convQuery);
 
     if (!conversation) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
-    const messages = await Message.find({ conversationId })
+    const msgQuery = { conversationId };
+    if (workspaceId) msgQuery.workspaceId = workspaceId;
+
+    const messages = await Message.find(msgQuery)
       .sort({ createdAt: 1 })
       .skip(parseInt(skip))
       .limit(parseInt(limit))
       .lean();
 
-    const total = await Message.countDocuments({ conversationId });
+    const total = await Message.countDocuments(msgQuery);
 
     res.json({
       messages,
@@ -136,14 +150,15 @@ exports.updateConversation = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?.userId;
     const { conversationId } = req.params;
+    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
     const { title, pinned } = req.body;
 
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const conversation = await Conversation.findOne({
-      _id: conversationId,
-      userId
-    });
+    const convQuery = { _id: conversationId, userId };
+    if (workspaceId) convQuery.workspaceId = workspaceId;
+
+    const conversation = await Conversation.findOne(convQuery);
 
     if (!conversation) {
       return res.status(404).json({ error: 'Conversation not found' });
@@ -165,13 +180,14 @@ exports.deleteConversation = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?.userId;
     const { conversationId } = req.params;
+    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
 
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const conversation = await Conversation.findOne({
-      _id: conversationId,
-      userId
-    });
+    const convQuery = { _id: conversationId, userId };
+    if (workspaceId) convQuery.workspaceId = workspaceId;
+
+    const conversation = await Conversation.findOne(convQuery);
 
     if (!conversation) {
       return res.status(404).json({ error: 'Conversation not found' });
@@ -189,10 +205,11 @@ exports.deleteConversation = async (req, res) => {
 };
 
 // Add a message to a conversation (used by AIService)
-exports.addMessage = async (conversationId, role, content, metadata = {}) => {
+exports.addMessage = async (conversationId, role, content, metadata = {}, workspaceId = null) => {
   try {
     const message = new Message({
       conversationId,
+      workspaceId,
       role,
       content,
       provider: metadata.provider || null,

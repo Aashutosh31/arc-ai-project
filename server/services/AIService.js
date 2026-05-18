@@ -15,6 +15,8 @@ const TaskPlanner = require('./TaskPlanner');
 const ToolRecoveryManager = require('./ToolRecoveryManager');
 const { upsertTextVector } = require('./workspaceIndexService');
 const { buildProviderContinuationMessages } = require('../lib/llm/utils');
+const WorkspaceRuntimeManager = require('./WorkspaceRuntimeManager');
+const WorkspaceLogger = require('../lib/WorkspaceLogger');
 
 const SCHEDULE_KEYWORDS = [
     'schedule',
@@ -219,6 +221,8 @@ class AIService {
         this.llmRouter = new LLMRouter();
         this.streamingRuntime = new StreamingRuntime();
         this.activeRequests = new Map();
+        this.workspaceRuntime = new WorkspaceRuntimeManager({ logger: console });
+        this.wsLog = new WorkspaceLogger('AIService');
     }
 
     getRequestKey(socket, userId) {
@@ -351,7 +355,7 @@ class AIService {
         return `Meeting "${scheduleResult.title}" successfully scheduled for ${scheduleResult.start} to ${scheduleResult.end}.`;
     }
 
-    async processQuery(userId, text, socket = null, imageBase64 = null, document = null, conversationId = null) {
+    async processQuery(userId, text, socket = null, imageBase64 = null, document = null, conversationId = null, workspaceId = null) {
         const creditCharge = await consumeCredits(userId, 1, 'ai request');
         if (!creditCharge.success) {
             if (socket) {
@@ -368,6 +372,16 @@ class AIService {
             });
         }
 
+        // Resolve active workspace early so conversation/messages can be attributed
+        let resolvedWorkspace = null;
+        try {
+            resolvedWorkspace = await this.workspaceRuntime.resolveWorkspace({ userId, workspaceId });
+            console.info('[AIService] workspace resolved for incoming request:', resolvedWorkspace?._id || null, 'namespace:', resolvedWorkspace?.vectorNamespace || null);
+        } catch (err) {
+            console.warn('[AIService] workspace resolution failed (pre-conversation):', err?.message || err);
+        }
+        const workspaceContext = this.workspaceRuntime.injectWorkspaceContext(resolvedWorkspace);
+
         // Handle conversation lifecycle
         if (!isGuestActorId(userId)) {
             try {
@@ -375,6 +389,7 @@ class AIService {
                     // Create a new conversation
                     const newConversation = new Conversation({
                         userId,
+                        workspaceId: workspaceContext.workspaceId || null,
                         title: 'New Conversation'
                     });
                     await newConversation.save();
@@ -389,6 +404,7 @@ class AIService {
                 // Save user message
                 await Message.create({
                     conversationId,
+                    workspaceId: workspaceContext.workspaceId || null,
                     role: 'user',
                     content: text || (document ? `Attached document: ${document.name}` : ''),
                     attachments: imageBase64 ? [{ type: 'image' }] : (document ? [{ type: 'document', name: document.name }] : []),
@@ -401,7 +417,6 @@ class AIService {
                 // Don't block query on conversation error
             }
         }
-
         const { key, controller } = this.beginRequest(socket, userId);
         try {
             console.log(`[Planner] Incoming user command: ${String(text || '').trim()}`);
@@ -454,7 +469,7 @@ class AIService {
                 });
             }
 
-            const recentMemories = isGuest ? [] : await AIMemory.find({ userId }).sort({ pinned: -1, timestamp: -1 }).limit(8)
+            const recentMemories = isGuest ? [] : await AIMemory.find({ userId, workspaceId: workspaceContext.workspaceId || null }).sort({ pinned: -1, timestamp: -1 }).limit(8)
                 .then((items) => items.reverse()
                     .filter(mem => mem.query && mem.response)
                     .map(mem => [
@@ -464,16 +479,18 @@ class AIService {
 
             const baseMessageContent = text || (document ? `Please analyze the attached document: ${document.name}` : 'Hello');
 
-                        const userFacts = isGuest ? [] : await UserFact.find({ userId }).sort({ pinned: -1, createdAt: -1 }).limit(12).lean();
+                        const userFacts = isGuest ? [] : await UserFact.find({ userId, workspaceId: workspaceContext.workspaceId || null }).sort({ pinned: -1, createdAt: -1 }).limit(12).lean();
 
                         let retrievalItems = [];
                         if (!isGuest) {
                             try {
-                                const ctx = await WorkspaceContextManager.getActiveContext({ userId, conversationId, query: baseMessageContent, limit: 10 });
+                                const ctx = await WorkspaceContextManager.getActiveContext({ userId, conversationId, query: baseMessageContent, limit: 10, workspaceId });
                                 retrievalItems = ctx?.items || [];
+                                this.wsLog.retrievalExecuted(userId, workspaceId, 'WorkspaceContextManager', retrievalItems.length);
                             } catch (err) {
                                 console.warn('[AIService] WorkspaceContextManager failed, falling back to buildMemoryContext', err?.message || err);
-                                retrievalItems = await buildMemoryContext({ userId, query: baseMessageContent, limit: 10 });
+                                retrievalItems = await buildMemoryContext({ userId, query: baseMessageContent, limit: 10, workspaceId });
+                                this.wsLog.retrievalExecuted(userId, workspaceId, 'buildMemoryContext', retrievalItems.length);
                             }
                         }
 
@@ -696,11 +713,11 @@ class AIService {
 
                     // Persist plan
                     const planTitle = (text || '').slice(0, 120) || 'Autonomous Plan';
-                    const exec = await TaskPlanner.createPlan({ userId, title: planTitle, prompt: text, steps });
+                    const exec = await TaskPlanner.createPlan({ userId, workspaceId: workspaceContext.workspaceId, title: planTitle, prompt: text, steps });
                     if (socket) socket.emit('execution.created', { executionId: exec._id.toString(), title: exec.title });
 
                     // Execute plan (TaskPlanner emits progress events)
-                    const execResult = await TaskPlanner.executePlan(exec._id, socket, { controller });
+                    const execResult = await TaskPlanner.executePlan(exec._id, socket, { controller, workspaceId: workspaceContext.workspaceId });
 
                     const plannerToolResults = (execResult.steps || [])
                         .filter((step) => step.toolCallId)
@@ -854,7 +871,7 @@ class AIService {
                 const shouldSaveMemory = memoryLearningEnabled;
 
                 if (shouldSaveMemory) {
-                    const newMemory = new AIMemory({ userId, query: memoryQuery, response: finalOutputText, source: 'conversation' });
+                    const newMemory = new AIMemory({ userId, workspaceId: workspaceContext.workspaceId, query: memoryQuery, response: finalOutputText, source: 'conversation' });
                     await newMemory.save();
                 }
 
@@ -877,6 +894,7 @@ class AIService {
 
                         const savedMessage = await Message.create({
                             conversationId,
+                            workspaceId: workspaceContext.workspaceId || null,
                             role: 'ai',
                             content: storedOutput,
                             provider: response?.provider || null,
@@ -892,6 +910,7 @@ class AIService {
                             setImmediate(() => {
                                 upsertTextVector({
                                     userId,
+                                    workspaceId: workspaceContext.workspaceId,
                                     kind: 'message',
                                     entityId: savedMessage._id,
                                     text: `${text || ''} ${finalOutputText}`,

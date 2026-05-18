@@ -8,7 +8,7 @@ const { getEmbedding, normalizeText, cacheKeyFor } = require('./embeddingService
 const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
 const index = pinecone.index(process.env.PINECONE_INDEX || 'arc-brain');
 
-const getNamespace = (userId) => `user_${String(userId)}`;
+const getNamespace = (userId, workspaceId) => (workspaceId ? `workspace_${String(workspaceId)}` : `user_${String(userId)}`);
 
 const stopWords = new Set(['the', 'and', 'for', 'with', 'what', 'did', 'about', 'that', 'this', 'from', 'been', 'have', 'does', 'doesn', 'didn', 'what', 'when', 'where', 'how', 'why']);
 
@@ -47,10 +47,11 @@ const toSnippet = (text, query) => {
   return content.slice(0, 180) + (content.length > 180 ? '…' : '');
 };
 
-const searchConversations = async (userId, query, limit = 5) => {
+const searchConversations = async (userId, query, limit = 5, workspaceId = null) => {
   const textRegex = buildSearchRegex(query);
   const results = [];
   const conversationQuery = { userId: String(userId), archived: false };
+  if (workspaceId) conversationQuery.workspaceId = String(workspaceId);
 
   if (textRegex) {
     conversationQuery.$or = [{ title: textRegex }, { 'lastMessage.content': textRegex }];
@@ -82,11 +83,13 @@ const searchConversations = async (userId, query, limit = 5) => {
   return results;
 };
 
-const searchMessages = async (userId, query, limit = 10) => {
+const searchMessages = async (userId, query, limit = 10, workspaceId = null) => {
   const regex = buildSearchRegex(query);
   if (!regex) return [];
 
-  const conversations = await Conversation.find({ userId: String(userId), archived: false }).select('_id').lean();
+  const convQuery = { userId: String(userId), archived: false };
+  if (workspaceId) convQuery.workspaceId = String(workspaceId);
+  const conversations = await Conversation.find(convQuery).select('_id').lean();
   const conversationIds = conversations.map((conversation) => conversation._id);
   if (conversationIds.length === 0) return [];
 
@@ -111,11 +114,11 @@ const searchMessages = async (userId, query, limit = 10) => {
   }));
 };
 
-const searchStructuredMemory = async (userId, query, limit = 8) => {
+const searchStructuredMemory = async (userId, query, limit = 8, workspaceId = null) => {
   const regex = buildSearchRegex(query);
   const [facts, memories] = await Promise.all([
-    UserFact.find({ userId: String(userId), ...(regex ? { fact: regex } : {}) }).sort({ pinned: -1, createdAt: -1 }).limit(limit).lean(),
-    AIMemory.find({ userId: String(userId), ...(regex ? { $or: [{ query: regex }, { response: regex }, { tags: regex }] } : {}) })
+    UserFact.find({ userId: String(userId), ...(regex ? { fact: regex } : {}), ...(workspaceId ? { workspaceId: String(workspaceId) } : {}) }).sort({ pinned: -1, createdAt: -1 }).limit(limit).lean(),
+    AIMemory.find({ userId: String(userId), ...(regex ? { $or: [{ query: regex }, { response: regex }, { tags: regex }] } : {}), ...(workspaceId ? { workspaceId: String(workspaceId) } : {}) })
       .sort({ pinned: -1, timestamp: -1 })
       .limit(limit)
       .lean()
@@ -149,11 +152,10 @@ const searchStructuredMemory = async (userId, query, limit = 8) => {
   return [...factResults, ...memoryResults];
 };
 
-const searchSemanticVectors = async (userId, query, signal = null, limit = 8) => {
+const searchSemanticVectors = async (userId, query, signal = null, limit = 8, workspaceId = null) => {
   const vector = await getEmbedding(query, { signal });
   if (!vector) return [];
-
-  const namespace = getNamespace(userId);
+  const namespace = getNamespace(userId, workspaceId);
   const response = await index.query({
     namespace,
     vector,
@@ -213,17 +215,17 @@ const buildRetrievalContext = (items, query) => {
   return grouped;
 };
 
-const searchWorkspace = async ({ userId, query, signal = null, limit = 10 }) => {
+const searchWorkspace = async ({ userId, query, signal = null, limit = 10, workspaceId = null }) => {
   const normalizedQuery = normalizeText(query);
   if (!normalizedQuery) {
     return { query: normalizedQuery, items: [], grouped: buildRetrievalContext([], normalizedQuery), stats: { total: 0 } };
   }
 
   const [conversationResults, messageResults, memoryResults, semanticResults] = await Promise.all([
-    searchConversations(userId, normalizedQuery, Math.min(limit, 5)),
-    searchMessages(userId, normalizedQuery, Math.min(limit, 8)),
-    searchStructuredMemory(userId, normalizedQuery, Math.min(limit, 8)),
-    searchSemanticVectors(userId, normalizedQuery, signal, Math.min(limit, 8)).catch((error) => {
+    searchConversations(userId, normalizedQuery, Math.min(limit, 5), workspaceId),
+    searchMessages(userId, normalizedQuery, Math.min(limit, 8), workspaceId),
+    searchStructuredMemory(userId, normalizedQuery, Math.min(limit, 8), workspaceId),
+    searchSemanticVectors(userId, normalizedQuery, signal, Math.min(limit, 8), workspaceId).catch((error) => {
       console.warn('[WorkspaceSearch] semantic search failed:', error?.message || error);
       return [];
     })
@@ -249,8 +251,8 @@ const searchWorkspace = async ({ userId, query, signal = null, limit = 10 }) => 
   };
 };
 
-const buildMemoryContext = async ({ userId, query, signal = null, limit = 12 }) => {
-  const results = await searchWorkspace({ userId, query, signal, limit });
+const buildMemoryContext = async ({ userId, query, signal = null, limit = 12, workspaceId = null }) => {
+  const results = await searchWorkspace({ userId, query, signal, limit, workspaceId });
   return results.items
     .slice(0, limit)
     .map((item, index) => ({

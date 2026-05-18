@@ -50,7 +50,8 @@ class TaskExecutor {
             // Package the context (e.g., who is requesting this)
             const context = {
                 userId,
-                signal: executionOptions?.signal || null
+                signal: executionOptions?.signal || null,
+                workspaceId: executionOptions?.workspaceId || null
             };
             
             // Execute the tool's modular logic

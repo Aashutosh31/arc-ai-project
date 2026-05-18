@@ -6,6 +6,7 @@ const ConversationSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+  workspaceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Workspace', default: null, index: true },
   title: {
     type: String,
     default: 'New Conversation'

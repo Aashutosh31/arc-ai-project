@@ -7,6 +7,7 @@ const MessageSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+  workspaceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Workspace', default: null, index: true },
   role: {
     type: String,
     enum: ['user', 'ai'],

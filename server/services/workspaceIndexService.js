@@ -5,7 +5,7 @@ const { getEmbedding, normalizeText, cacheKeyFor } = require('./embeddingService
 const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
 const index = pinecone.index(process.env.PINECONE_INDEX || 'arc-brain');
 
-const getNamespace = (userId) => `user_${String(userId)}`;
+const getNamespace = (userId, workspaceId = null) => (workspaceId ? `workspace_${String(workspaceId)}` : `user_${String(userId)}`);
 
 const makeVectorId = (kind, entityId, text) => {
   const suffix = crypto.createHash('sha1').update(normalizeText(text)).digest('hex').slice(0, 12);
@@ -19,13 +19,13 @@ const shouldIndexText = (text) => {
   return true;
 };
 
-const upsertTextVector = async ({ userId, kind, entityId, text, metadata = {}, signal = null }) => {
+const upsertTextVector = async ({ userId, kind, entityId, text, metadata = {}, signal = null, workspaceId = null }) => {
   if (!shouldIndexText(text)) return { skipped: true };
 
   const vector = await getEmbedding(text, { signal });
   if (!vector) return { skipped: true };
 
-  const namespace = getNamespace(userId);
+  const namespace = getNamespace(userId, workspaceId);
   const id = makeVectorId(kind, entityId, text);
 
   await index.upsert({
@@ -50,8 +50,8 @@ const upsertTextVector = async ({ userId, kind, entityId, text, metadata = {}, s
   return { success: true, id, namespace };
 };
 
-const removeVectorsByEntity = async ({ userId, kind, entityId }) => {
-  const namespace = getNamespace(userId);
+const removeVectorsByEntity = async ({ userId, kind, entityId, workspaceId = null }) => {
+  const namespace = getNamespace(userId, workspaceId);
   const prefix = `${kind}_${String(entityId)}_`;
 
   try {

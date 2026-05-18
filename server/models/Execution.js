@@ -17,6 +17,7 @@ const StepSchema = new mongoose.Schema({
 
 const ExecutionSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  workspaceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Workspace', default: null },
   title: { type: String, required: true },
   prompt: { type: String },
   status: { type: String, enum: ['PLANNED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'], default: 'PLANNED' },

@@ -30,6 +30,7 @@ module.exports = {
         try {
             const newFact = new UserFact({
                 userId: context.userId,
+                workspaceId: context.workspaceId || null,
                 fact: args.fact,
                 category: args.category || 'general',
                 pinned: false
@@ -38,6 +39,7 @@ module.exports = {
             await newFact.save();
             await upsertTextVector({
                 userId: context.userId,
+                workspaceId: context.workspaceId || null,
                 kind: 'userFact',
                 entityId: newFact._id,
                 text: args.fact,

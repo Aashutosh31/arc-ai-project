@@ -107,7 +107,7 @@ class ToolRecoveryManager {
     return { type: 'unknown', shouldRetry: false, shouldFallback: false, shouldReplan: true, strategy: 'replan', reason: text };
   }
 
-  async recoverToolResult({ toolName, args = {}, result = null, error = null, userId, socket = null, signal = null, retryCount = 0 }) {
+  async recoverToolResult({ toolName, args = {}, result = null, error = null, userId, socket = null, signal = null, retryCount = 0, workspaceId = null }) {
     const classification = this.classifyFailure({ toolName, args, result, error });
     const update = {
       retryCount,
@@ -126,7 +126,7 @@ class ToolRecoveryManager {
         });
       }
 
-      const retryResult = await TaskExecutor.executeTool(toolName, args, userId, socket, { signal, skipCreditCharge: true });
+      const retryResult = await TaskExecutor.executeTool(toolName, args, userId, socket, { signal, skipCreditCharge: true, workspaceId });
       if (retryResult?.success) {
         return {
           ...update,
@@ -159,7 +159,7 @@ class ToolRecoveryManager {
           { ...args, url: candidateUrl },
           userId,
           socket,
-          { signal, skipCreditCharge: true }
+          { signal, skipCreditCharge: true, workspaceId }
         );
 
         if (scrapeResult?.success) {
@@ -187,7 +187,7 @@ class ToolRecoveryManager {
           { query: searchQuery },
           userId,
           socket,
-          { signal, skipCreditCharge: true }
+          { signal, skipCreditCharge: true, workspaceId }
         );
 
         if (searchResult?.success) {

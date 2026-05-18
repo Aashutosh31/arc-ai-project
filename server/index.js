@@ -11,6 +11,7 @@ const googleAuthRoutes = require('./routes/googleAuth.js');
 const conversationRoutes = require('./routes/conversations.js');
 const searchRoutes = require('./routes/search.js');
 const memoryRoutes = require('./routes/memory.js');
+const workspaceRoutes = require('./routes/workspaces.js');
 const AIService = require('./services/AIService.js'); 
 
 const app = express();
@@ -18,7 +19,8 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 5000;
 
 global.connectedSockets = new Map(); // 🚀 NOW HOLDS SETS OF SOCKETS
-global.userCronJobs = new Map(); 
+global.userCronJobs = new Map();
+global.userWorkspaceContext = new Map(); // Track active workspace per user (per tab) 
 
 const frontendOrigins = (process.env.FRONTEND_URL || '').split(',').map(origin => origin.trim()).filter(Boolean);
 
@@ -80,21 +82,64 @@ io.on('connection', (socket) => {
     }
     global.connectedSockets.get(socket.userId).add(socket);
 
+    // Initialize workspace context for this socket (will be overridden by client)
+    socket.activeWorkspaceId = null;
+
     socket.on('ai:stream:stop', () => {
         socket.isInterrupted = true; 
         AIService.abortForSocket(socket.id);
     });
 
+    socket.on('workspace:switch', async (data) => {
+        const { workspaceId } = data || {};
+        const userId = socket.userId;
+        if (!workspaceId) {
+            return socket.emit('workspace:error', { error: 'workspaceId required' });
+        }
+
+        try {
+            const Workspace = require('./models/Workspace');
+            const ws = await Workspace.findOne({ _id: workspaceId, owner: userId }).lean();
+            if (!ws) {
+                return socket.emit('workspace:error', { error: 'Workspace not found or unauthorized' });
+            }
+
+            // Update this socket's workspace context
+            socket.activeWorkspaceId = workspaceId;
+            
+            // Broadcast to all sockets for this user that workspace changed
+            const userSockets = global.connectedSockets.get(userId);
+            if (userSockets && typeof userSockets.forEach === 'function') {
+                userSockets.forEach((s) => {
+                    s.activeWorkspaceId = workspaceId;
+                    s.emit('workspace:switched', {
+                        workspaceId: String(workspaceId),
+                        name: ws.name,
+                        vectorNamespace: ws.vectorNamespace
+                    });
+                });
+            }
+
+            console.info('[Workspace:Switch] user', userId, 'switched to', workspaceId);
+        } catch (err) {
+            console.error('[Workspace:Switch] error:', err);
+            socket.emit('workspace:error', { error: 'Failed to switch workspace' });
+        }
+    });
+
     socket.on('ai:stt:final', async (data) => {
-        const { command, image, document, conversationId } = data; 
-        const userId = socket.userId; 
+        const { command, image, document, conversationId, workspaceId: incomingWorkspaceId } = data; 
+        const userId = socket.userId;
         socket.isInterrupted = false; 
 
         // Preempt any prior in-flight generation for this socket.
         AIService.abortForSocket(socket.id);
 
-        console.log(`🧠 Processing command from user ${userId}: "${command}"`);
-        await AIService.processQuery(userId, command, socket, image, document, conversationId);
+        // Use socket's active workspace or incoming workspace ID or null
+        const effectiveWorkspaceId = incomingWorkspaceId || socket.activeWorkspaceId || null;
+
+        console.log(`🧠 Processing command from user ${userId} (workspace: ${effectiveWorkspaceId}): "${command}"`);
+        await AIService.processQuery(userId, command, socket, image, document, conversationId, effectiveWorkspaceId);
     });
 
     socket.on('disconnect', () => {
@@ -117,5 +162,6 @@ app.use('/api/google', googleAuthRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/memory', memoryRoutes);
+app.use('/api/workspaces', workspaceRoutes);
 
 server.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));

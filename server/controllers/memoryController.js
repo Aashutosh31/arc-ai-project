@@ -32,11 +32,19 @@ const toFactResponse = (fact) => ({
 exports.getMemoryDashboard = async (req, res) => {
   try {
     const userId = getUserId(req);
+    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
+    const factQuery = { userId };
+    const memoryQuery = { userId };
+    if (workspaceId) {
+      factQuery.workspaceId = workspaceId;
+      memoryQuery.workspaceId = workspaceId;
+    }
+
     const [facts, memories, user] = await Promise.all([
-      UserFact.find({ userId }).sort({ pinned: -1, createdAt: -1 }).lean(),
-      AIMemory.find({ userId }).sort({ pinned: -1, timestamp: -1 }).limit(100).lean(),
+      UserFact.find(factQuery).sort({ pinned: -1, createdAt: -1 }).lean(),
+      AIMemory.find(memoryQuery).sort({ pinned: -1, timestamp: -1 }).limit(100).lean(),
       User.findById(userId).select('preferences.memoryLearningEnabled preferences.voice preferences.accentColor').lean()
     ]);
 
@@ -84,10 +92,14 @@ exports.updatePreferences = async (req, res) => {
 exports.updateFact = async (req, res) => {
   try {
     const userId = getUserId(req);
+    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
     const { memoryId } = req.params;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const fact = await UserFact.findOne({ _id: memoryId, userId });
+    const factQuery = { _id: memoryId, userId };
+    if (workspaceId) factQuery.workspaceId = workspaceId;
+
+    const fact = await UserFact.findOne(factQuery);
     if (!fact) return res.status(404).json({ error: 'Memory not found' });
 
     const { fact: factText, category, pinned } = req.body || {};
@@ -106,10 +118,14 @@ exports.updateFact = async (req, res) => {
 exports.deleteFact = async (req, res) => {
   try {
     const userId = getUserId(req);
+    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
     const { memoryId } = req.params;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const result = await UserFact.deleteOne({ _id: memoryId, userId });
+    const factQuery = { _id: memoryId, userId };
+    if (workspaceId) factQuery.workspaceId = workspaceId;
+
+    const result = await UserFact.deleteOne(factQuery);
     return res.json({ success: true, deletedCount: result.deletedCount || 0 });
   } catch (error) {
     console.error('[Memory] delete fact failed:', error?.stack || error);
@@ -120,10 +136,14 @@ exports.deleteFact = async (req, res) => {
 exports.updateSemanticMemory = async (req, res) => {
   try {
     const userId = getUserId(req);
+    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
     const { memoryId } = req.params;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const memory = await AIMemory.findOne({ _id: memoryId, userId });
+    const memoryQuery = { _id: memoryId, userId };
+    if (workspaceId) memoryQuery.workspaceId = workspaceId;
+
+    const memory = await AIMemory.findOne(memoryQuery);
     if (!memory) return res.status(404).json({ error: 'Memory not found' });
 
     const { query, response, tags, pinned } = req.body || {};
@@ -143,10 +163,14 @@ exports.updateSemanticMemory = async (req, res) => {
 exports.deleteSemanticMemory = async (req, res) => {
   try {
     const userId = getUserId(req);
+    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
     const { memoryId } = req.params;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const result = await AIMemory.deleteOne({ _id: memoryId, userId });
+    const memoryQuery = { _id: memoryId, userId };
+    if (workspaceId) memoryQuery.workspaceId = workspaceId;
+
+    const result = await AIMemory.deleteOne(memoryQuery);
     return res.json({ success: true, deletedCount: result.deletedCount || 0 });
   } catch (error) {
     console.error('[Memory] delete semantic memory failed:', error?.stack || error);
