@@ -24,6 +24,7 @@ module.exports = {
         console.log(`[Tool: recallMemory] Searching Pinecone vector brain for: "${args.searchQuery}"`);
         
         let uid = typeof passedUserId === 'object' && passedUserId !== null ? (passedUserId.userId || passedUserId.id || passedUserId._id) : passedUserId;
+        const workspaceId = typeof passedUserId === 'object' && passedUserId !== null ? (passedUserId.workspaceId || null) : null;
         uid = String(uid);
 
         try {
@@ -46,7 +47,7 @@ module.exports = {
             // 2. Search Pinecone for the 3 most semantically similar memories
             const pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
             const index = pc.index('arc-brain');
-            const namespace = getNamespace(uid);
+            const namespace = getNamespace(uid, workspaceId);
 
             const queryResponse = await index.query({
                 namespace,

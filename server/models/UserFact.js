@@ -7,6 +7,7 @@ const userFactSchema = new mongoose.Schema({
         ref: 'User',
         required: true
     },
+    workspaceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Workspace', default: null },
     fact: {
         type: String,
         required: true

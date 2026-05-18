@@ -28,6 +28,7 @@ module.exports = {
         console.log(`[Tool: memorize] Encoding new memory into Vector Database...`);
         
         let uid = typeof passedUserId === 'object' && passedUserId !== null ? (passedUserId.userId || passedUserId.id || passedUserId._id) : passedUserId;
+        const workspaceId = typeof passedUserId === 'object' && passedUserId !== null ? (passedUserId.workspaceId || null) : null;
         uid = String(uid);
 
         try {
@@ -54,7 +55,7 @@ module.exports = {
 
             // Generate a unique ID for this memory
             const memoryId = `mem_${Date.now()}`;
-            const namespace = getNamespace(uid);
+            const namespace = getNamespace(uid, workspaceId);
             const tagList = String(args.tags || '')
                 .split(',')
                 .map((tag) => tag.trim())

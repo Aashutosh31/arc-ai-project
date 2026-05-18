@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const Execution = require('../models/Execution');
 const TaskExecutor = require('./TaskExecutor');
 const ToolRecoveryManager = require('./ToolRecoveryManager');
+const WorkspaceLogger = require('../lib/WorkspaceLogger');
 
 /**
  * TaskPlanner
@@ -14,7 +15,11 @@ const ToolRecoveryManager = require('./ToolRecoveryManager');
  * Design goals: non-invasive, uses existing TaskExecutor and tools, preserves streaming and socket behaviour.
  */
 class TaskPlanner {
-  async createPlan({ userId, title, prompt, steps = [] }) {
+  constructor() {
+    this.wsLog = new WorkspaceLogger('TaskPlanner');
+  }
+
+  async createPlan({ userId, title, prompt, steps = [], workspaceId = null }) {
     // Steps is array of { tool, args }
     const prepared = steps.map((s) => ({
       id: uuidv4(),
@@ -23,18 +28,27 @@ class TaskPlanner {
       args: s.args || {},
       status: 'PENDING'
     }));
-    const exec = new Execution({ userId, title: title || (prompt ? String(prompt).slice(0, 80) : 'Plan'), prompt, steps: prepared });
+    const exec = new Execution({ userId, workspaceId: workspaceId || null, title: title || (prompt ? String(prompt).slice(0, 80) : 'Plan'), prompt, steps: prepared });
     await exec.save();
+    this.wsLog.executionCreated(userId, exec._id.toString(), workspaceId, exec.title);
     return exec;
   }
 
   async executePlan(executionId, socket = null, options = {}) {
     const exec = await Execution.findById(executionId);
     if (!exec) throw new Error('Execution not found');
+    
+    // Verify execution belongs to the requesting user (workspace isolation)
+    const requestWorkspaceId = options.workspaceId || null;
+    if (requestWorkspaceId && String(exec.workspaceId || '') !== String(requestWorkspaceId)) {
+      throw new Error('Execution not found in this workspace');
+    }
+    
     if (exec.status === 'RUNNING') throw new Error('Execution already running');
 
     exec.status = 'RUNNING';
     await exec.save();
+    this.wsLog.executionStarted(exec.userId, executionId, exec.workspaceId, exec.steps.length);
 
     const controller = options.controller || null;
     const signal = controller ? controller.signal : null;
@@ -64,7 +78,7 @@ class TaskPlanner {
       }
 
       try {
-        const result = await TaskExecutor.executeTool(step.tool, step.args || {}, exec.userId, socket, { signal });
+        const result = await TaskExecutor.executeTool(step.tool, step.args || {}, exec.userId, socket, { signal, workspaceId: exec.workspaceId });
         if (result && result.success) {
           step.result = result;
           step.status = 'SUCCEEDED';
@@ -79,7 +93,8 @@ class TaskPlanner {
             userId: exec.userId,
             socket,
             signal,
-            retryCount: step.retryCount || 0
+            retryCount: step.retryCount || 0,
+            workspaceId: exec.workspaceId
           });
 
           step.retryCount = recovery.retryCount || 0;
@@ -105,6 +120,7 @@ class TaskPlanner {
 
         step.finishedAt = new Date();
         await exec.save();
+        this.wsLog.executionStepCompleted(exec.userId, executionId, exec.workspaceId, i, step.tool, step.status);
 
         if (socket) {
           socket.emit('ai:plan:step', { executionId, stepId: step.id, status: step.status, result });
@@ -118,7 +134,8 @@ class TaskPlanner {
           userId: exec.userId,
           socket,
           signal,
-          retryCount: step.retryCount || 0
+          retryCount: step.retryCount || 0,
+          workspaceId: exec.workspaceId
         });
 
         step.retryCount = recovery.retryCount || 0;
@@ -129,6 +146,7 @@ class TaskPlanner {
         step.status = recovery.recovered ? 'SUCCEEDED' : 'FAILED';
         step.finishedAt = new Date();
         await exec.save();
+        this.wsLog.executionStepCompleted(exec.userId, executionId, exec.workspaceId, i, step.tool, step.status);
 
         if (!recovery.recovered && recovery.shouldReplan && socket) {
           socket.emit('execution.replan.suggested', {
@@ -154,6 +172,7 @@ class TaskPlanner {
     const hasHardFailures = exec.steps.some((step) => step.status === 'FAILED' && !step.recovered);
     exec.status = hasHardFailures ? 'FAILED' : 'COMPLETED';
     await exec.save();
+    this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
     if (socket) {
       socket.emit('ai:plan:status', { executionId, status: exec.status });
       socket.emit(hasHardFailures ? 'execution.failed' : 'execution.completed', { executionId, status: exec.status });
@@ -164,6 +183,13 @@ class TaskPlanner {
   async resumePlan(executionId, socket = null, options = {}) {
     const exec = await Execution.findById(executionId);
     if (!exec) throw new Error('Execution not found');
+    
+    // Verify execution belongs to the requesting user (workspace isolation)
+    const requestWorkspaceId = options.workspaceId || null;
+    if (requestWorkspaceId && String(exec.workspaceId || '') !== String(requestWorkspaceId)) {
+      throw new Error('Execution not found in this workspace');
+    }
+    
     if (exec.status !== 'PLANNED' && exec.status !== 'RUNNING') throw new Error('Execution cannot be resumed');
 
     // Find first non-terminal step
