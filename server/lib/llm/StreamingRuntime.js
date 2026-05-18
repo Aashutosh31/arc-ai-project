@@ -5,7 +5,7 @@ class StreamingRuntime {
     this.chunkDelayMs = Number(options.chunkDelayMs || process.env.LLM_STREAM_CHUNK_DELAY_MS || 20);
   }
 
-  async emitText(socket, text, signal = null) {
+  async emitText(socket, text, signal = null, onChunk = null) {
     if (!socket) return '';
 
     const safeText = String(text || '').trim();
@@ -26,6 +26,10 @@ class StreamingRuntime {
         const chunk = `${word} `;
         emittedText += chunk;
         socket.emit('ai:tts:response:chunk', { chunk, displayText: chunk, isFinal: false });
+
+        if (typeof onChunk === 'function') {
+          await onChunk(chunk, { text: chunk, isFinal: false });
+        }
 
         if (this.chunkDelayMs > 0) {
           await delay(this.chunkDelayMs);
@@ -67,7 +71,7 @@ class StreamingRuntime {
         }
 
         if (typeof onChunk === 'function') {
-          onChunk(text, chunk);
+          await onChunk(text, chunk);
         }
       }
     } finally {

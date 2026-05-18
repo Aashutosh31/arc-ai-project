@@ -70,8 +70,8 @@ const StatusPill = styled.span`
   padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid rgba(125, 247, 255, 0.24);
-  color: ${({ $status }) => ($status === 'FAILED' ? '#ff7070' : $status === 'COMPLETED' ? '#4dffb0' : '#d7faff')};
-  background: ${({ $status }) => ($status === 'FAILED' ? 'rgba(255, 80, 80, 0.1)' : $status === 'COMPLETED' ? 'rgba(0, 255, 120, 0.08)' : 'rgba(255,255,255,0.04)')};
+  color: ${({ $status }) => ($status === 'FAILED' ? '#ff7070' : $status === 'BLOCKED' ? '#ffcf70' : $status === 'COMPLETED' ? '#4dffb0' : '#d7faff')};
+  background: ${({ $status }) => ($status === 'FAILED' ? 'rgba(255, 80, 80, 0.1)' : $status === 'BLOCKED' ? 'rgba(255, 190, 64, 0.12)' : $status === 'COMPLETED' ? 'rgba(0, 255, 120, 0.08)' : 'rgba(255,255,255,0.04)')};
   font-size: 10px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -131,7 +131,7 @@ const StepItem = styled.div`
   padding: 10px 12px;
   border-radius: 12px;
   background: rgba(255,255,255,0.03);
-  border: 1px solid ${({ $state }) => ($state === 'FAILED' ? 'rgba(255,112,112,0.32)' : $state === 'COMPLETED' ? 'rgba(77,255,176,0.28)' : $state === 'RUNNING' ? 'rgba(0,255,255,0.3)' : 'rgba(255,255,255,0.08)')};
+  border: 1px solid ${({ $state }) => ($state === 'FAILED' ? 'rgba(255,112,112,0.32)' : $state === 'BLOCKED' ? 'rgba(255, 190, 64, 0.34)' : $state === 'COMPLETED' ? 'rgba(77,255,176,0.28)' : $state === 'RUNNING' ? 'rgba(0,255,255,0.3)' : 'rgba(255,255,255,0.08)')};
 `;
 
 const Dot = styled.span`
@@ -139,7 +139,7 @@ const Dot = styled.span`
   height: 10px;
   margin-top: 4px;
   border-radius: 50%;
-  background: ${({ $state }) => ($state === 'FAILED' ? '#ff7070' : $state === 'COMPLETED' ? '#4dffb0' : $state === 'RUNNING' ? '#00ffff' : 'rgba(255,255,255,0.4)')};
+  background: ${({ $state }) => ($state === 'FAILED' ? '#ff7070' : $state === 'BLOCKED' ? '#ffcf70' : $state === 'COMPLETED' ? '#4dffb0' : $state === 'RUNNING' ? '#00ffff' : 'rgba(255,255,255,0.4)')};
   box-shadow: ${({ $state }) => ($state === 'RUNNING' ? '0 0 12px rgba(0,255,255,0.5)' : 'none')};
 `;
 
@@ -217,12 +217,14 @@ const ExecutionPanel = () => {
     if (!steps.length) return 0;
     const completed = steps.filter((step) => step.status === 'COMPLETED').length;
     const failed = steps.filter((step) => step.status === 'FAILED').length;
+    const blocked = steps.filter((step) => step.status === 'BLOCKED').length;
     return Math.round(((completed + failed * 0.5) / steps.length) * 100);
   }, [activeExecution]);
 
   const totalExecutions = executions?.length || 0;
   const activeSteps = activeExecution?.steps || [];
-  const currentState = String(activeExecution?.status || 'PLANNED');
+  const currentState = String(activeExecution?.status || 'PLANNED').toUpperCase();
+  const currentStatusLabel = currentState === 'BLOCKED' ? 'Blocked — insufficient credits' : presence;
 
   return (
     <Panel>
@@ -232,7 +234,7 @@ const ExecutionPanel = () => {
           <Title>{activeExecution?.title || 'No active execution'}</Title>
         </TitleGroup>
         <Meta>
-          <StatusPill $status={currentState}>{presence}</StatusPill>
+          <StatusPill $status={currentState}>{currentStatusLabel}</StatusPill>
           <ToggleArrow>{isCollapsed ? '▸' : '▾'}</ToggleArrow>
         </Meta>
       </Header>
@@ -242,7 +244,7 @@ const ExecutionPanel = () => {
           <LiveLine>
             {activeExecution ? (
               <>
-                {presence} <span style={{ opacity: 0.8 }}>•</span> {activeSteps.length} step{activeSteps.length === 1 ? '' : 's'} in this run
+                {currentStatusLabel} <span style={{ opacity: 0.8 }}>•</span> {activeSteps.length} step{activeSteps.length === 1 ? '' : 's'} in this run
               </>
             ) : (
               'Awaiting a multi-step request.'
@@ -274,7 +276,7 @@ const ExecutionPanel = () => {
                   </StepMeta>
                   {buildPreview(step.result) ? <ResultPreview>{buildPreview(step.result)}</ResultPreview> : null}
                 </StepMain>
-                <StatusPill $status={step.status || 'PENDING'}>{step.status || 'PENDING'}</StatusPill>
+                <StatusPill $status={String(step.status || 'PENDING').toUpperCase()}>{step.status || 'PENDING'}</StatusPill>
               </StepItem>
             ))}
           </StepList>

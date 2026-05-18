@@ -430,6 +430,94 @@ class AIService {
             const isGuest = isGuestActorId(userId);
             const user = isGuest ? null : await User.findById(userId).select('preferences.memoryLearningEnabled preferences.voice preferences.accentColor').lean();
             const memoryLearningEnabled = user?.preferences?.memoryLearningEnabled !== false;
+            const assistantResponseMeta = {
+                provider: null,
+                model: null,
+                tokens: { input: 0, output: 0 }
+            };
+
+            let assistantDraftMessageId = null;
+            let assistantDraftContent = '';
+
+            const persistAssistantDraft = async (nextContent, { interrupted = false, state = 'streaming' } = {}) => {
+                if (isGuestActorId(userId) || !conversationId) return;
+
+                const normalizedContent = String(nextContent || '');
+                assistantDraftContent = normalizedContent;
+
+                console.log('[AIService] assistant draft persist requested', {
+                    conversationId: String(conversationId),
+                    hasDraftMessage: Boolean(assistantDraftMessageId),
+                    interrupted,
+                    state,
+                    contentLength: normalizedContent.length
+                });
+
+                if (!assistantDraftMessageId) {
+                    const draftMessage = await Message.create({
+                        conversationId,
+                        workspaceId: workspaceContext.workspaceId || null,
+                        role: 'ai',
+                        content: normalizedContent,
+                        provider: assistantResponseMeta.provider,
+                        model: assistantResponseMeta.model,
+                        metadata: {
+                            tokens: assistantResponseMeta.tokens || { input: 0, output: 0 },
+                            streaming: true,
+                            interrupted,
+                            partial: true,
+                            state
+                        }
+                    });
+                    assistantDraftMessageId = draftMessage._id;
+
+                    console.log('[AIService] assistant draft created', {
+                        conversationId: String(conversationId),
+                        messageId: String(draftMessage._id),
+                        interrupted,
+                        state,
+                        contentLength: normalizedContent.length
+                    });
+
+                    await Conversation.findByIdAndUpdate(conversationId, {
+                        lastMessage: {
+                            content: normalizedContent.substring(0, 100),
+                            role: 'ai',
+                            timestamp: new Date()
+                        }
+                    });
+                    return;
+                }
+
+                await Message.findByIdAndUpdate(assistantDraftMessageId, {
+                    content: normalizedContent,
+                    provider: assistantResponseMeta.provider,
+                    model: assistantResponseMeta.model,
+                    metadata: {
+                        tokens: assistantResponseMeta.tokens || { input: 0, output: 0 },
+                        streaming: !interrupted,
+                        interrupted,
+                        partial: true,
+                        state
+                    }
+                });
+
+                console.log('[AIService] assistant draft updated', {
+                    conversationId: String(conversationId),
+                    messageId: String(assistantDraftMessageId),
+                    interrupted,
+                    state,
+                    contentLength: normalizedContent.length
+                });
+
+                await Conversation.findByIdAndUpdate(conversationId, {
+                    lastMessage: {
+                        content: normalizedContent.substring(0, 100),
+                        role: 'ai',
+                        timestamp: new Date()
+                    }
+                });
+            };
 
             if (calendarIntent.type !== 'none') {
                 console.log(
@@ -640,6 +728,10 @@ class AIService {
                 });
             }
 
+            assistantResponseMeta.provider = response?.provider || null;
+            assistantResponseMeta.model = response?.model || null;
+            assistantResponseMeta.tokens = response?.tokens || { input: 0, output: 0 };
+
             let finalOutputText = response?.text || "";
             const toolCalls = response?.toolCalls || [];
             const assistantToolMessage = {
@@ -717,7 +809,7 @@ class AIService {
                     if (socket) socket.emit('execution.created', { executionId: exec._id.toString(), title: exec.title });
 
                     // Execute plan (TaskPlanner emits progress events)
-                    const execResult = await TaskPlanner.executePlan(exec._id, socket, { controller, workspaceId: workspaceContext.workspaceId });
+                    const execResult = await TaskPlanner.executePlan(exec._id, socket, { controller, workspaceId: workspaceContext.workspaceId, conversationId });
 
                     const plannerToolResults = (execResult.steps || [])
                         .filter((step) => step.toolCallId)
@@ -728,8 +820,26 @@ class AIService {
                         }));
 
                         if (execResult.status === 'CANCELLED' || (controller.signal && controller.signal.aborted)) {
-                            finalOutputText = 'Execution cancelled.';
-                            if (socket) await this.streamingRuntime.emitText(socket, finalOutputText, controller.signal);
+                            finalOutputText = assistantDraftContent || finalOutputText || '';
+                            if (assistantDraftMessageId && conversationId) {
+                                console.log('[AIService] finalizing interrupted assistant draft', {
+                                    conversationId: String(conversationId),
+                                    messageId: String(assistantDraftMessageId),
+                                    contentLength: String(finalOutputText || '').length
+                                });
+                                await Message.findByIdAndUpdate(assistantDraftMessageId, {
+                                    content: finalOutputText,
+                                    provider: assistantResponseMeta.provider,
+                                    model: assistantResponseMeta.model,
+                                    metadata: {
+                                        tokens: assistantResponseMeta.tokens || { input: 0, output: 0 },
+                                        streaming: false,
+                                        interrupted: true,
+                                        partial: true,
+                                        state: 'cancelled'
+                                    }
+                                });
+                            }
                         } else {
                             if (execResult.status === 'FAILED' && socket) {
                                 socket.emit('ai:agent:status', {
@@ -738,12 +848,30 @@ class AIService {
                                 });
                             }
 
+                            if (assistantDraftMessageId && assistantDraftContent) {
+                                await Message.findByIdAndUpdate(assistantDraftMessageId, {
+                                    content: assistantDraftContent,
+                                    provider: assistantResponseMeta.provider,
+                                    model: assistantResponseMeta.model,
+                                    metadata: {
+                                        tokens: assistantResponseMeta.tokens || { input: 0, output: 0 },
+                                        streaming: true,
+                                        interrupted: false,
+                                        partial: true,
+                                        state: 'streaming'
+                                    }
+                                });
+                            }
+
                             const finalGeneration = await makeContinuationGeneration({
                                 assistantMessage: assistantToolMessage,
                                 toolResults: plannerToolResults
                             });
 
-                            finalOutputText = await this.streamingRuntime.consume(finalGeneration.stream, socket, controller.signal);
+                            finalOutputText = await this.streamingRuntime.consume(finalGeneration.stream, socket, controller.signal, async (chunkText) => {
+                                assistantDraftContent += chunkText;
+                                await persistAssistantDraft(assistantDraftContent, { interrupted: false, state: 'streaming' });
+                            });
                         }
                 } else {
                     console.log('[Planner] Delegating execution inline (quick tool path)');
@@ -769,7 +897,7 @@ class AIService {
 
                         console.log('[Planner] Before tool execution:', { tool: functionName, args });
 
-                        const toolResult = await TaskExecutor.executeTool(functionName, args, userId, socket, { signal: controller.signal });
+                        const toolResult = await TaskExecutor.executeTool(functionName, args, userId, socket, { signal: controller.signal, conversationId, workspaceId: workspaceContext.workspaceId });
                         let finalToolResult = toolResult;
 
                         if (!toolResult?.success) {
@@ -854,7 +982,10 @@ class AIService {
             } else {
                 finalOutputText = response?.text || '';
                 if (socket) {
-                    await this.streamingRuntime.emitText(socket, finalOutputText, controller.signal);
+                    await this.streamingRuntime.emitText(socket, finalOutputText, controller.signal, async (chunkText) => {
+                        assistantDraftContent += chunkText;
+                        await persistAssistantDraft(assistantDraftContent, { interrupted: false, state: 'streaming' });
+                    });
                 }
             }
 
@@ -892,19 +1023,34 @@ class AIService {
 
                         const storedOutput = sanitizeForStorage(finalOutputText || '');
 
-                        const savedMessage = await Message.create({
-                            conversationId,
-                            workspaceId: workspaceContext.workspaceId || null,
-                            role: 'ai',
-                            content: storedOutput,
-                            provider: response?.provider || null,
-                            model: response?.model || null,
-                            metadata: {
-                                tokens: response?.tokens || { input: 0, output: 0 },
-                                streaming: true,
-                                interrupted: false
-                            }
-                        });
+                        let savedMessage = null;
+                        if (assistantDraftMessageId) {
+                            await Message.findByIdAndUpdate(assistantDraftMessageId, {
+                                content: storedOutput,
+                                provider: assistantResponseMeta.provider,
+                                model: assistantResponseMeta.model,
+                                metadata: {
+                                    tokens: assistantResponseMeta.tokens || { input: 0, output: 0 },
+                                    streaming: false,
+                                    interrupted: false
+                                }
+                            });
+                            savedMessage = await Message.findById(assistantDraftMessageId);
+                        } else {
+                            savedMessage = await Message.create({
+                                conversationId,
+                                workspaceId: workspaceContext.workspaceId || null,
+                                role: 'ai',
+                                content: storedOutput,
+                                provider: assistantResponseMeta.provider,
+                                model: assistantResponseMeta.model,
+                                metadata: {
+                                    tokens: assistantResponseMeta.tokens || { input: 0, output: 0 },
+                                    streaming: false,
+                                    interrupted: false
+                                }
+                            });
+                        }
 
                         if (shouldSaveMemory) {
                             setImmediate(() => {
@@ -945,6 +1091,17 @@ class AIService {
                 }
             }
 
+            if (conversationId && !isGuest && socket && socket.isInterrupted) {
+                const interruptedTitleSeed = String(assistantDraftContent || finalOutputText || '').trim();
+                if (interruptedTitleSeed.length >= 24) {
+                    const conversationCtrl = require('../controllers/conversationController');
+                    conversationCtrl.generateConversationTitle(
+                        conversationId,
+                        `${text || ''} ${interruptedTitleSeed}`.trim()
+                    );
+                }
+            }
+
             return finalOutputText;
 
         } catch (error) {
@@ -956,10 +1113,40 @@ class AIService {
                 errorText.includes('interrupted');
             if (isAbortError) {
                 console.log(`[AIService] Request aborted for user ${userId}.`);
+
+                if (assistantDraftMessageId && conversationId) {
+                    const partialContent = assistantDraftContent || finalOutputText || '';
+                    try {
+                        console.log('[AIService] abort persistence checkpoint', {
+                            conversationId: String(conversationId),
+                            messageId: String(assistantDraftMessageId),
+                            contentLength: String(partialContent || '').length
+                        });
+                        await Message.findByIdAndUpdate(assistantDraftMessageId, {
+                            content: partialContent,
+                            provider: assistantResponseMeta.provider,
+                            model: assistantResponseMeta.model,
+                            metadata: {
+                                tokens: assistantResponseMeta.tokens || { input: 0, output: 0 },
+                                streaming: false,
+                                interrupted: true,
+                                partial: true,
+                                state: 'cancelled'
+                            }
+                        });
+                    } catch (persistErr) {
+                        console.warn('[AIService] Failed to persist interrupted draft:', persistErr?.message || persistErr);
+                    }
+                }
+
                 if (socket) {
+                    socket.emit('ai:agent:status', {
+                        status: 'cancelled',
+                        detail: 'Execution cancelled by user.'
+                    });
                     socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
                 }
-                return "Interrupted";
+                return "Cancelled";
             }
 
             console.error("[AIService] Error processing query:", error);

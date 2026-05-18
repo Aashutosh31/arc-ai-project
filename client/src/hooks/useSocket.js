@@ -1,4 +1,5 @@
 import { useEffect, useContext } from 'react';
+import { useRef } from 'react';
 import { SocketContext } from '../contexts/SocketContext';
 import { useChat } from '../contexts/ChatContext';
 import { useTextToSpeech } from './useTextToSpeech';
@@ -10,6 +11,9 @@ export const useSocket = () => {
   const { socket, isConnected, authInfo, setAuthInfo } = useContext(SocketContext) || {}; 
   const { addMessage, appendBotChunk, finishBotStream, markBotInterrupted, setIsProcessing, setIsStreaming, isInterruptedRef, setIsInterrupted, setMediaData, setAgentStatus, setProviderInfo } = useChat();
   const { processStreamChunk, stop, stopSpeech } = useTextToSpeech();
+  const speechCharCountRef = useRef(0);
+  const suppressSpeechRef = useRef(false);
+  const SPEECH_THRESHOLD = 1800;
 
   useEffect(() => {
     if (!socket) return;
@@ -24,14 +28,30 @@ export const useSocket = () => {
       if (isInterruptedRef.current) return; 
 
       const { chunk, displayText, isFinal } = data;
+      const chunkText = String(displayText || chunk || '');
+
+      if (chunkText) {
+        speechCharCountRef.current += chunkText.length;
+      }
+
+      if (!suppressSpeechRef.current && speechCharCountRef.current >= SPEECH_THRESHOLD) {
+        suppressSpeechRef.current = true;
+        stopSpeech();
+      }
 
       if (!isFinal) {
         appendBotChunk(displayText || chunk);
-        processStreamChunk(displayText || chunk, false);
+        if (!suppressSpeechRef.current) {
+          processStreamChunk(displayText || chunk, false);
+        }
       } else {
         finishBotStream();
         setAgentStatus(null);
-        processStreamChunk('', true);
+        if (!suppressSpeechRef.current) {
+          processStreamChunk('', true);
+        }
+        speechCharCountRef.current = 0;
+        suppressSpeechRef.current = false;
       }
     });
 
@@ -134,6 +154,8 @@ export const useSocket = () => {
       setAgentStatus(null);
       if (setIsStreaming) setIsStreaming(true);
       stop();
+      speechCharCountRef.current = 0;
+      suppressSpeechRef.current = false;
       setIsProcessing(true);
       
       const displayImage = imageBase64 ? `data:image/jpeg;base64,${imageBase64}` : null;
@@ -160,6 +182,8 @@ export const useSocket = () => {
       } else {
         stop();
       }
+      speechCharCountRef.current = 0;
+      suppressSpeechRef.current = false;
       socket.emit('ai:stream:stop');   
       markBotInterrupted?.();          
     }
