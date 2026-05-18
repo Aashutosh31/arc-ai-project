@@ -1,4 +1,5 @@
 import React, { createContext, useState, useContext, useCallback, useEffect } from 'react';
+import { SocketContext } from './SocketContext';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -11,8 +12,10 @@ export const useConversation = () => {
 };
 
 export const ConversationProvider = ({ children }) => {
+  const { socket } = useContext(SocketContext) || {};
   const [conversations, setConversations] = useState([]);
   const [activeConversationId, setActiveConversationId] = useState(null);
+  const [activeConversationRevision, setActiveConversationRevision] = useState(0);
   const [focusedMessageId, setFocusedMessageId] = useState(null);
   const [loadingConversations, setLoadingConversations] = useState(false);
   const [conversationError, setConversationError] = useState(null);
@@ -58,6 +61,7 @@ export const ConversationProvider = ({ children }) => {
       const newConv = await response.json();
       setConversations((prev) => [newConv, ...prev.filter((conv) => conv._id !== newConv._id)]);
       setActiveConversationId(newConv._id);
+      setActiveConversationRevision((value) => value + 1);
       return newConv;
     } catch (err) {
       console.error('Error creating conversation:', err);
@@ -77,8 +81,14 @@ export const ConversationProvider = ({ children }) => {
 
   // Switch to a conversation
   const switchConversation = useCallback((conversationId) => {
+    console.log('[ConversationContext] switchConversation', {
+      from: activeConversationId,
+      to: conversationId
+    });
     setActiveConversationId(conversationId);
-  }, []);
+    setActiveConversationRevision((value) => value + 1);
+    setFocusedMessageId(null);
+  }, [activeConversationId]);
 
   // Update conversation (title, pinned status)
   const updateConversation = useCallback(async (conversationId, updates) => {
@@ -204,6 +214,7 @@ export const ConversationProvider = ({ children }) => {
         const next = prev.filter((conv) => conv._id !== conversationId);
         if (activeConversationId === conversationId) {
           setActiveConversationId(next.length > 0 ? next[0]._id : null);
+          setActiveConversationRevision((value) => value + 1);
         }
         return next;
       });
@@ -219,6 +230,12 @@ export const ConversationProvider = ({ children }) => {
     const limit = Number(options.limit || 200);
     const skip = Number(options.skip || 0);
 
+    console.log('[ConversationContext] fetchConversationMessages:start', {
+      conversationId,
+      limit,
+      skip
+    });
+
     const response = await fetch(
       `${API_URL}/api/conversations/${conversationId}/messages?limit=${limit}&skip=${skip}`,
       { headers: getAuthHeaders() }
@@ -226,6 +243,20 @@ export const ConversationProvider = ({ children }) => {
 
     if (!response.ok) throw new Error('Failed to fetch conversation messages');
     const data = await response.json();
+    console.log('[ConversationContext] fetchConversationMessages:done', {
+      conversationId,
+      count: Array.isArray(data?.messages) ? data.messages.length : 0,
+      statuses: Array.isArray(data?.messages)
+        ? data.messages.map((message) => ({
+            role: message?.role,
+            interrupted: Boolean(message?.metadata?.interrupted),
+            streaming: Boolean(message?.metadata?.streaming),
+            partial: Boolean(message?.metadata?.partial),
+            state: message?.metadata?.state || null,
+            contentLength: String(message?.content || '').length
+          }))
+        : []
+    });
     return Array.isArray(data?.messages) ? data.messages : [];
   }, []);
 
@@ -234,16 +265,35 @@ export const ConversationProvider = ({ children }) => {
     if (!conversation?._id) return;
     setConversations((prev) => [conversation, ...prev.filter((conv) => conv._id !== conversation._id)]);
     setActiveConversationId(conversation._id);
+    setActiveConversationRevision((value) => value + 1);
   }, []);
 
   // Update conversation title from auto-generation
   const updateConversationTitle = useCallback((conversationId, title) => {
+    console.log('[ConversationContext] updateConversationTitle', { conversationId, title });
     setConversations((prev) =>
       prev.map((conv) =>
         conv._id === conversationId ? { ...conv, title } : conv
       )
     );
   }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleConversationTitle = (data) => {
+      if (!data?.conversationId || !data?.title) return;
+      updateConversationTitle(data.conversationId, data.title);
+      console.log('[ConversationContext] title event received', {
+        conversationId: data.conversationId,
+        title: data.title
+      });
+      fetchConversations().catch(() => {});
+    };
+
+    socket.on('ai:conversation:title', handleConversationTitle);
+    return () => socket.off('ai:conversation:title', handleConversationTitle);
+  }, [socket, updateConversationTitle, fetchConversations]);
 
   // Load conversations on mount
   useEffect(() => {
@@ -253,6 +303,7 @@ export const ConversationProvider = ({ children }) => {
   const value = {
     conversations,
     activeConversationId,
+    activeConversationRevision,
     focusedMessageId,
     setFocusedMessageId,
     loadingConversations,

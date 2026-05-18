@@ -34,6 +34,9 @@ const consumeCredits = async (actorId, amount = 1, reason = 'usage') => {
     if (current < normalizedAmount) {
         return {
             success: false,
+            blocked: true,
+            status: 'BLOCKED',
+            reason: 'insufficient_credits',
             error: `You are out of credits. ${reason ? `This action requires ${normalizedAmount} credit(s) for ${reason}. ` : ''}Please sign in or upgrade your account to continue.`,
             creditsRemaining: current
         };

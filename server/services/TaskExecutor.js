@@ -25,6 +25,10 @@ class TaskExecutor {
         console.log(`[TaskExecutor] Before tool execution: ${toolName}`, args || {});
         
         try {
+            if (executionOptions?.signal?.aborted) {
+                return { success: false, cancelled: true, error: 'Execution aborted before tool start.' };
+            }
+
             const tool = toolRegistry.getTool(toolName);
             
             if (!tool) {
@@ -32,11 +36,22 @@ class TaskExecutor {
                 return { success: false, error: `Tool ${toolName} not found in system registry.` };
             }
 
+            if (executionOptions?.signal?.aborted) {
+                return { success: false, cancelled: true, error: 'Execution aborted before credit charge.' };
+            }
+
             if (!executionOptions?.skipCreditCharge) {
                 const creditCost = TOOL_CREDIT_COSTS[toolName] || 1;
                 const creditResult = await consumeCredits(userId, creditCost, toolName);
                 if (!creditResult.success) {
-                    return { success: false, error: creditResult.error, creditsRemaining: creditResult.creditsRemaining ?? 0 };
+                    return {
+                        success: false,
+                        blocked: Boolean(creditResult.blocked),
+                        status: creditResult.status || (creditResult.blocked ? 'BLOCKED' : 'FAILED'),
+                        reason: creditResult.reason || null,
+                        error: creditResult.error,
+                        creditsRemaining: creditResult.creditsRemaining ?? 0
+                    };
                 }
 
                 if (socket) {
@@ -51,13 +66,27 @@ class TaskExecutor {
             const context = {
                 userId,
                 signal: executionOptions?.signal || null,
-                workspaceId: executionOptions?.workspaceId || null
+                workspaceId: executionOptions?.workspaceId || null,
+                conversationId: executionOptions?.conversationId || null
             };
+
+            if (executionOptions?.signal?.aborted) {
+                return { success: false, cancelled: true, error: 'Execution aborted before tool invocation.' };
+            }
             
             // Execute the tool's modular logic
             const result = await tool.execute(args, context, socket);
 
             console.log(`[TaskExecutor] After tool execution: ${toolName}`, result);
+            if (!result?.success) {
+                console.warn('[TaskExecutor] Tool returned failure payload:', {
+                    toolName,
+                    error: result?.error || result?.message || null,
+                    diagnostic: result?.diagnostic || null,
+                    cancelled: Boolean(result?.cancelled),
+                    payloadPreview: JSON.stringify(result).slice(0, 500)
+                });
+            }
             return result;
             
         } catch (error) {

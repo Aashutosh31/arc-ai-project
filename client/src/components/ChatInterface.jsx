@@ -606,7 +606,7 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
   const { messages, replaceMessages, clearMessages, isProcessing, isStreaming, isSpeaking, mediaData, setMediaData, getLiveVisionFrame } = useChat();
   const { interruptStream, sendCommand, socket } = useSocket();
   const { activeExecution, presence, cancelActiveExecution } = useExecution();
-  const { activeConversationId, switchConversation, fetchConversations, fetchConversationMessages, updateConversationTitle, ensureConversationReady } = useConversation();
+  const { activeConversationId, activeConversationRevision, switchConversation, fetchConversations, fetchConversationMessages, updateConversationTitle, ensureConversationReady } = useConversation();
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState(null); 
   const [selectedDocument, setSelectedDocument] = useState(null);
@@ -653,19 +653,49 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
 
     const loadConversationMessages = async () => {
       if (!activeConversationId) {
+        console.log('[ChatInterface] loadConversationMessages:clear');
         clearMessages();
         return;
       }
 
+      console.log('[ChatInterface] loadConversationMessages:start', {
+        activeConversationId,
+        activeConversationRevision
+      });
+
       try {
         const dbMessages = await fetchConversationMessages(activeConversationId, { limit: 500, skip: 0 });
         if (isCancelled) return;
+
+        console.log('[ChatInterface] loadConversationMessages:fetched', {
+          activeConversationId,
+          count: Array.isArray(dbMessages) ? dbMessages.length : 0,
+          messages: Array.isArray(dbMessages)
+            ? dbMessages.map((message) => ({
+                role: message?.role,
+                interrupted: Boolean(message?.metadata?.interrupted),
+                streaming: Boolean(message?.metadata?.streaming),
+                partial: Boolean(message?.metadata?.partial),
+                state: message?.metadata?.state || null,
+                contentLength: String(message?.content || '').length
+              }))
+            : []
+        });
 
         const mappedMessages = dbMessages.map((message) => ({
           sender: message.role === 'user' ? 'user' : 'ai',
           text: sanitizeForDisplay(String(message.content || '')),
           isStreaming: false
         }));
+
+        console.log('[ChatInterface] loadConversationMessages:replace', {
+          activeConversationId,
+          mappedCount: mappedMessages.length,
+          hasInterruptedDraft: mappedMessages.some((message, index) => {
+            const original = dbMessages[index];
+            return message.sender === 'ai' && Boolean(original?.metadata?.interrupted);
+          })
+        });
 
         replaceMessages(mappedMessages);
       } catch (error) {
@@ -678,7 +708,7 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
     return () => {
       isCancelled = true;
     };
-  }, [activeConversationId, fetchConversationMessages, replaceMessages, clearMessages]);
+  }, [activeConversationId, activeConversationRevision, fetchConversationMessages, replaceMessages, clearMessages]);
 
   useEffect(() => {
     setVisibleMessageCount((currentCount) => {

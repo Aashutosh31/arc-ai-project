@@ -70,6 +70,17 @@ class ToolRecoveryManager {
     const text = failureText(result, error);
     const lower = text.toLowerCase();
 
+    if (result?.blocked || result?.status === 'BLOCKED' || lower.includes('out of credits') || lower.includes('insufficient credits')) {
+      return {
+        type: 'blocked',
+        shouldRetry: false,
+        shouldFallback: false,
+        shouldReplan: false,
+        strategy: 'blocked',
+        reason: text || 'insufficient credits'
+      };
+    }
+
     if (!text) {
       return {
         type: 'unknown',
@@ -109,6 +120,14 @@ class ToolRecoveryManager {
 
   async recoverToolResult({ toolName, args = {}, result = null, error = null, userId, socket = null, signal = null, retryCount = 0, workspaceId = null }) {
     const classification = this.classifyFailure({ toolName, args, result, error });
+    console.log('[ToolRecoveryManager] decision', {
+      toolName,
+      retryCount,
+      classification,
+      hasError: Boolean(error),
+      hasResult: Boolean(result),
+      cancelled: Boolean(signal?.aborted)
+    });
     const update = {
       retryCount,
       failureReason: classification.reason,
@@ -117,6 +136,20 @@ class ToolRecoveryManager {
     };
 
     const canRetry = classification.shouldRetry && retryCount < 2;
+
+    if (classification.type === 'blocked') {
+      console.log('[ToolRecoveryManager] blocked without recovery', {
+        toolName,
+        reason: classification.reason
+      });
+      return {
+        ...update,
+        shouldReplan: false,
+        classification,
+        result: result || error || null,
+        blocked: true
+      };
+    }
 
     if (canRetry) {
       if (socket) {
@@ -128,6 +161,11 @@ class ToolRecoveryManager {
 
       const retryResult = await TaskExecutor.executeTool(toolName, args, userId, socket, { signal, skipCreditCharge: true, workspaceId });
       if (retryResult?.success) {
+        console.log('[ToolRecoveryManager] retry success', {
+          toolName,
+          retryCount: retryCount + 1,
+          strategy: 'retry'
+        });
         return {
           ...update,
           retryCount: retryCount + 1,
@@ -163,6 +201,11 @@ class ToolRecoveryManager {
         );
 
         if (scrapeResult?.success) {
+          console.log('[ToolRecoveryManager] fallback success', {
+            toolName,
+            strategy: 'scrape-fallback',
+            candidateUrl
+          });
           return {
             ...update,
             recovered: true,
@@ -191,6 +234,11 @@ class ToolRecoveryManager {
         );
 
         if (searchResult?.success) {
+          console.log('[ToolRecoveryManager] fallback success', {
+            toolName,
+            strategy: 'fallback:webSearch',
+            query: searchQuery
+          });
           return {
             ...update,
             recovered: true,
@@ -201,6 +249,13 @@ class ToolRecoveryManager {
         }
       }
     }
+
+    console.log('[ToolRecoveryManager] recovery exhausted', {
+      toolName,
+      classification,
+      retryCount,
+      shouldReplan: classification.shouldReplan
+    });
 
     return {
       ...update,

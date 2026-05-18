@@ -57,6 +57,14 @@ const MessageSchema = new mongoose.Schema({
     interrupted: {
       type: Boolean,
       default: false
+    },
+    partial: {
+      type: Boolean,
+      default: false
+    },
+    state: {
+      type: String,
+      default: 'final'
     }
   },
   createdAt: {

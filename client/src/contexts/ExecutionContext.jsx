@@ -11,6 +11,9 @@ const presenceFromStatus = (status) => {
       return 'Completed';
     case 'failed':
       return 'Failed';
+    case 'blocked':
+    case 'insufficient_credits':
+      return 'Blocked — insufficient credits';
     case 'cancelled':
       return 'Cancelled';
     case 'planning':
@@ -87,12 +90,13 @@ export const ExecutionProvider = ({ children }) => {
       const executionId = data?.executionId;
       const stepId = data?.stepId;
       if (!executionId || !stepId) return;
+      const normalizedStatus = String(data?.status || '').toUpperCase();
       setExecutions((prev) => prev.map((execution) => {
         if (execution.executionId !== executionId) return execution;
-        const nextSteps = (execution.steps || []).map((step) => step.id === stepId ? { ...step, status: data?.status === 'FAILED' ? 'FAILED' : 'COMPLETED', result: data?.result || step.result, finishedAt: Date.now() } : step);
-        return { ...execution, status: data?.status === 'FAILED' ? 'FAILED' : execution.status, steps: nextSteps, updatedAt: Date.now() };
+        const nextSteps = (execution.steps || []).map((step) => step.id === stepId ? { ...step, status: normalizedStatus || 'COMPLETED', result: data?.result || step.result, finishedAt: Date.now() } : step);
+        return { ...execution, status: normalizedStatus === 'FAILED' ? 'FAILED' : normalizedStatus === 'BLOCKED' ? 'BLOCKED' : execution.status, steps: nextSteps, updatedAt: Date.now() };
       }));
-      setPresence(data?.status === 'FAILED' ? 'Failed' : 'Synthesizing...');
+      setPresence(normalizedStatus === 'FAILED' ? 'Failed' : normalizedStatus === 'BLOCKED' ? 'Blocked — insufficient credits' : 'Synthesizing...');
     };
 
     const onStepFailed = (data) => {
@@ -110,8 +114,9 @@ export const ExecutionProvider = ({ children }) => {
     const onCompleted = (data) => {
       const executionId = data?.executionId;
       if (!executionId) return;
-      setExecutions((prev) => prev.map((execution) => execution.executionId === executionId ? { ...execution, status: 'COMPLETED', updatedAt: Date.now() } : execution));
-      setPresence('Completed');
+      const normalizedStatus = String(data?.status || 'COMPLETED').toUpperCase();
+      setExecutions((prev) => prev.map((execution) => execution.executionId === executionId ? { ...execution, status: normalizedStatus, updatedAt: Date.now() } : execution));
+      setPresence(normalizedStatus === 'BLOCKED' ? 'Blocked — insufficient credits' : 'Completed');
     };
 
     const onFailed = (data) => {
@@ -121,11 +126,19 @@ export const ExecutionProvider = ({ children }) => {
       setPresence('Failed');
     };
 
+    const onBlocked = (data) => {
+      const executionId = data?.executionId;
+      if (!executionId) return;
+      setExecutions((prev) => prev.map((execution) => execution.executionId === executionId ? { ...execution, status: 'BLOCKED', updatedAt: Date.now() } : execution));
+      setPresence('Blocked — insufficient credits');
+    };
+
     socket.on('execution.created', onCreated);
     socket.on('execution.started', onStarted);
     socket.on('execution.step.started', onStepStarted);
     socket.on('execution.step.completed', onStepCompleted);
     socket.on('execution.step.failed', onStepFailed);
+    socket.on('execution.blocked', onBlocked);
     socket.on('execution.completed', onCompleted);
     socket.on('execution.failed', onFailed);
 
@@ -135,6 +148,7 @@ export const ExecutionProvider = ({ children }) => {
       socket.off('execution.step.started', onStepStarted);
       socket.off('execution.step.completed', onStepCompleted);
       socket.off('execution.step.failed', onStepFailed);
+      socket.off('execution.blocked', onBlocked);
       socket.off('execution.completed', onCompleted);
       socket.off('execution.failed', onFailed);
     };

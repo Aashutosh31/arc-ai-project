@@ -52,6 +52,7 @@ class TaskPlanner {
 
     const controller = options.controller || null;
     const signal = controller ? controller.signal : null;
+    const isCancelled = () => Boolean(signal?.aborted || socket?.isInterrupted);
 
     if (socket) {
       socket.emit('ai:plan:status', { executionId, status: 'RUNNING' });
@@ -60,7 +61,7 @@ class TaskPlanner {
 
     for (let i = 0; i < exec.steps.length; i++) {
       const step = exec.steps[i];
-      if (signal && signal.aborted) {
+      if (isCancelled()) {
         step.status = 'CANCELLED';
         await exec.save();
         exec.status = 'CANCELLED';
@@ -78,7 +79,78 @@ class TaskPlanner {
       }
 
       try {
-        const result = await TaskExecutor.executeTool(step.tool, step.args || {}, exec.userId, socket, { signal, workspaceId: exec.workspaceId });
+        if (isCancelled()) {
+          step.status = 'CANCELLED';
+          step.failureReason = 'Execution cancelled by user.';
+          step.recovered = false;
+          step.recoveryStrategy = 'cancelled';
+          step.finishedAt = new Date();
+          await exec.save();
+          this.wsLog.executionStepCompleted(exec.userId, executionId, exec.workspaceId, i, step.tool, step.status);
+          if (socket) {
+            socket.emit('ai:plan:step', { executionId, stepId: step.id, status: 'CANCELLED', error: step.failureReason });
+            socket.emit('execution.step.completed', { executionId, stepId: step.id, status: 'CANCELLED', result: { cancelled: true } });
+          }
+          exec.status = 'CANCELLED';
+          await exec.save();
+          this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
+          if (socket) {
+            socket.emit('ai:plan:status', { executionId, status: 'CANCELLED' });
+            socket.emit('execution.completed', { executionId, status: 'CANCELLED' });
+          }
+          return exec;
+        }
+
+        const result = await TaskExecutor.executeTool(step.tool, step.args || {}, exec.userId, socket, { signal, workspaceId: exec.workspaceId, conversationId: options.conversationId || null });
+        if (result?.cancelled || signal?.aborted) {
+          step.status = 'CANCELLED';
+          step.failureReason = result?.error || 'Execution cancelled by user.';
+          step.recovered = false;
+          step.recoveryStrategy = 'cancelled';
+          step.result = { cancelled: true };
+          step.finishedAt = new Date();
+          await exec.save();
+          this.wsLog.executionStepCompleted(exec.userId, executionId, exec.workspaceId, i, step.tool, step.status);
+          if (socket) {
+            socket.emit('ai:plan:step', { executionId, stepId: step.id, status: 'CANCELLED', error: step.failureReason });
+            socket.emit('execution.step.completed', { executionId, stepId: step.id, status: 'CANCELLED', result: step.result });
+            socket.emit('ai:plan:status', { executionId, status: 'CANCELLED' });
+            socket.emit('execution.completed', { executionId, status: 'CANCELLED' });
+          }
+          exec.status = 'CANCELLED';
+          await exec.save();
+          this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
+          return exec;
+        }
+        if (result?.blocked || result?.status === 'BLOCKED') {
+          const blockedReason = result?.error || result?.reason || 'insufficient credits';
+          step.status = 'BLOCKED';
+          step.failureReason = blockedReason;
+          step.recovered = false;
+          step.recoveryStrategy = 'blocked';
+          step.result = {
+            blocked: true,
+            reason: result?.reason || 'insufficient_credits',
+            error: blockedReason,
+            creditsRemaining: result?.creditsRemaining ?? null
+          };
+          step.finishedAt = new Date();
+          await exec.save();
+          this.wsLog.executionStepCompleted(exec.userId, executionId, exec.workspaceId, i, step.tool, step.status);
+          if (socket) {
+            socket.emit('ai:plan:step', { executionId, stepId: step.id, status: 'BLOCKED', error: blockedReason });
+            socket.emit('execution.step.completed', { executionId, stepId: step.id, status: 'BLOCKED', result: step.result });
+            socket.emit('execution.blocked', { executionId, stepId: step.id, status: 'BLOCKED', reason: blockedReason, creditsRemaining: result?.creditsRemaining ?? null });
+            socket.emit('ai:plan:status', { executionId, status: 'BLOCKED' });
+          }
+          exec.status = 'BLOCKED';
+          await exec.save();
+          this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
+          if (socket) {
+            socket.emit('execution.completed', { executionId, status: 'BLOCKED', reason: blockedReason });
+          }
+          return exec;
+        }
         if (result && result.success) {
           step.result = result;
           step.status = 'SUCCEEDED';
@@ -96,6 +168,55 @@ class TaskPlanner {
             retryCount: step.retryCount || 0,
             workspaceId: exec.workspaceId
           });
+
+          if (recovery?.classification?.type === 'blocked' || recovery?.blocked) {
+            const blockedReason = recovery?.failureReason || result?.error || 'insufficient credits';
+            step.status = 'BLOCKED';
+            step.failureReason = blockedReason;
+            step.recovered = false;
+            step.recoveryStrategy = 'blocked';
+            step.result = {
+              blocked: true,
+              reason: recovery?.classification?.reason || 'insufficient_credits',
+              error: blockedReason,
+              creditsRemaining: result?.creditsRemaining ?? null
+            };
+            step.finishedAt = new Date();
+            await exec.save();
+            this.wsLog.executionStepCompleted(exec.userId, executionId, exec.workspaceId, i, step.tool, step.status);
+            if (socket) {
+              socket.emit('ai:plan:step', { executionId, stepId: step.id, status: 'BLOCKED', error: blockedReason });
+              socket.emit('execution.step.completed', { executionId, stepId: step.id, status: 'BLOCKED', result: step.result });
+              socket.emit('execution.blocked', { executionId, stepId: step.id, status: 'BLOCKED', reason: blockedReason, creditsRemaining: result?.creditsRemaining ?? null });
+              socket.emit('ai:plan:status', { executionId, status: 'BLOCKED' });
+              socket.emit('execution.completed', { executionId, status: 'BLOCKED', reason: blockedReason });
+            }
+            exec.status = 'BLOCKED';
+            await exec.save();
+            this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
+            return exec;
+          }
+
+          if (isCancelled()) {
+            step.status = 'CANCELLED';
+            step.failureReason = 'Execution cancelled by user.';
+            step.recovered = false;
+            step.recoveryStrategy = 'cancelled';
+            step.result = { cancelled: true };
+            step.finishedAt = new Date();
+            await exec.save();
+            this.wsLog.executionStepCompleted(exec.userId, executionId, exec.workspaceId, i, step.tool, step.status);
+            if (socket) {
+              socket.emit('ai:plan:step', { executionId, stepId: step.id, status: 'CANCELLED', error: step.failureReason });
+              socket.emit('execution.step.completed', { executionId, stepId: step.id, status: 'CANCELLED', result: step.result });
+              socket.emit('ai:plan:status', { executionId, status: 'CANCELLED' });
+              socket.emit('execution.completed', { executionId, status: 'CANCELLED' });
+            }
+            exec.status = 'CANCELLED';
+            await exec.save();
+            this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
+            return exec;
+          }
 
           step.retryCount = recovery.retryCount || 0;
           step.failureReason = recovery.failureReason || null;
@@ -127,6 +248,34 @@ class TaskPlanner {
           socket.emit('execution.step.completed', { executionId, stepId: step.id, status: step.status, result: step.result });
         }
       } catch (err) {
+        const errorText = String(err?.message || err || '').toLowerCase();
+        const isAbortError =
+          err?.name === 'AbortError' ||
+          errorText.includes('aborted') ||
+          errorText.includes('cancelled') ||
+          errorText.includes('user_interrupted');
+
+        if (isAbortError || signal?.aborted) {
+          step.status = 'CANCELLED';
+          step.failureReason = 'Execution cancelled by user.';
+          step.recovered = false;
+          step.recoveryStrategy = 'cancelled';
+          step.result = { cancelled: true };
+          step.finishedAt = new Date();
+          await exec.save();
+          this.wsLog.executionStepCompleted(exec.userId, executionId, exec.workspaceId, i, step.tool, step.status);
+          if (socket) {
+            socket.emit('ai:plan:step', { executionId, stepId: step.id, status: 'CANCELLED', error: step.failureReason });
+            socket.emit('execution.step.completed', { executionId, stepId: step.id, status: 'CANCELLED', result: step.result });
+            socket.emit('ai:plan:status', { executionId, status: 'CANCELLED' });
+            socket.emit('execution.completed', { executionId, status: 'CANCELLED' });
+          }
+          exec.status = 'CANCELLED';
+          await exec.save();
+          this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
+          return exec;
+        }
+
         const recovery = await ToolRecoveryManager.recoverToolResult({
           toolName: step.tool,
           args: step.args || {},
@@ -137,6 +286,27 @@ class TaskPlanner {
           retryCount: step.retryCount || 0,
           workspaceId: exec.workspaceId
         });
+
+        if (isCancelled()) {
+          step.status = 'CANCELLED';
+          step.failureReason = 'Execution cancelled by user.';
+          step.recovered = false;
+          step.recoveryStrategy = 'cancelled';
+          step.result = { cancelled: true };
+          step.finishedAt = new Date();
+          await exec.save();
+          this.wsLog.executionStepCompleted(exec.userId, executionId, exec.workspaceId, i, step.tool, step.status);
+          if (socket) {
+            socket.emit('ai:plan:step', { executionId, stepId: step.id, status: 'CANCELLED', error: step.failureReason });
+            socket.emit('execution.step.completed', { executionId, stepId: step.id, status: 'CANCELLED', result: step.result });
+            socket.emit('ai:plan:status', { executionId, status: 'CANCELLED' });
+            socket.emit('execution.completed', { executionId, status: 'CANCELLED' });
+          }
+          exec.status = 'CANCELLED';
+          await exec.save();
+          this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
+          return exec;
+        }
 
         step.retryCount = recovery.retryCount || 0;
         step.failureReason = recovery.failureReason || String(err?.message || err);
@@ -167,6 +337,28 @@ class TaskPlanner {
         }
         // Continue safely with the rest of the execution graph.
       }
+    }
+
+    if (isCancelled()) {
+      exec.status = 'CANCELLED';
+      await exec.save();
+      this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
+      if (socket) {
+        socket.emit('ai:plan:status', { executionId, status: 'CANCELLED' });
+        socket.emit('execution.completed', { executionId, status: 'CANCELLED' });
+      }
+      return exec;
+    }
+
+    if (exec.steps.some((step) => step.status === 'BLOCKED')) {
+      exec.status = 'BLOCKED';
+      await exec.save();
+      this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
+      if (socket) {
+        socket.emit('ai:plan:status', { executionId, status: 'BLOCKED' });
+        socket.emit('execution.completed', { executionId, status: 'BLOCKED' });
+      }
+      return exec;
     }
 
     const hasHardFailures = exec.steps.some((step) => step.status === 'FAILED' && !step.recovered);
