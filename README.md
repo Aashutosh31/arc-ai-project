@@ -33,6 +33,65 @@ It can:
 
 ---
 
+# v0.12.0-beta: Runtime Architecture Evolution — Update 1
+
+ARC-AI v0.12.0-beta
+
+Update 1 — Runtime Architecture Evolution
+
+ARC-AI is no longer operating as a simple:
+LLM → Tool → Response pipeline.
+Over the last few weeks, the system has been restructured into a more autonomous, execution-oriented runtime architecture with:
+
+* ⚡ execution orchestration
+* 🧠 planner/runtime separation
+* 🔄 autonomous recovery flows
+* 📊 execution metadata lifecycle
+* 🔒 provider-safe continuation chains
+* 🛠️ canonical tool reconstruction
+* 🌊 streaming-safe execution recovery
+
+The architecture now behaves closer to:
+
+LLM
+↓
+Planner
+↓
+Execution Runtime
+↓
+Recovery Layer
+↓
+Canonical Continuation Builder
+↓
+Provider
+↓
+Realtime Streaming Synthesis
+
+One of the most important changes:
+recovery logic now lives ABOVE the provider layer instead of mutating provider continuation chains directly.
+
+That separation preserves:
+
+* streaming continuity
+* provider compatibility
+* tool_call consistency
+* execution integrity
+
+ARC-AI is now gradually evolving from:
+
+“AI assistant”
+into:
+
+“execution-aware AI runtime infrastructure.”
+
+Still early. Still experimental.
+But the architecture is becoming genuinely exciting.
+
+🔗 Live: https://www.instagram.com/aashutosh_vaishnav.31/reel/DYfdVKmRQOf/
+
+This is Update 1 of this version; Update 2 will be provided soon.
+
+
 # v0.11.0-beta: Intelligent Workspace & Provider-Orchestrated Runtime
 
 This merge introduces PHASE 2 of ARC-AI, evolving the platform from a realtime conversational AI assistant into an intelligent, persistent AI workspace system with semantic retrieval, provider-aware orchestration, advanced memory management, and production-grade streaming/runtime hardening.
@@ -610,3 +669,5 @@ This project is licensed under the MIT License.
 ---
 
 ⭐ If you found this project interesting, consider starring the repo!
+
+
