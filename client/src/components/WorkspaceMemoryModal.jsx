@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { useConversation } from '../contexts/ConversationContext';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 
 const Overlay = styled.div`
   position: fixed;
@@ -164,6 +165,7 @@ const WorkspaceMemoryModal = ({ isOpen, onClose }) => {
     updateSemanticMemory,
     deleteSemanticMemory
   } = useConversation();
+  const { activeWorkspaceId, workspaceRevision } = useWorkspace();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -189,7 +191,7 @@ const WorkspaceMemoryModal = ({ isOpen, onClose }) => {
   useEffect(() => {
     if (!isOpen) return;
     loadDashboard();
-  }, [isOpen]);
+  }, [isOpen, activeWorkspaceId, workspaceRevision]);
 
   const sortedFacts = useMemo(() => [...memoryData.facts].sort((left, right) => Number(right.pinned) - Number(left.pinned)), [memoryData.facts]);
   const sortedMemories = useMemo(() => [...memoryData.memories].sort((left, right) => Number(right.pinned) - Number(left.pinned)), [memoryData.memories]);

@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { SocketProvider } from './components/SocketProvider';
+import { WorkspaceProvider } from './contexts/WorkspaceContext';
 import { ChatProvider } from './contexts/ChatContext';
 import { ExecutionProvider } from './contexts/ExecutionContext';
 import styled, { createGlobalStyle } from 'styled-components';
@@ -137,34 +138,36 @@ const App = () => {
   return (
     <Router>
       <SocketProvider>
-        <ChatProvider>
-          <ExecutionProvider>
-            <GlobalStyle />
-            <GlobalContainer>
-              <Suspense fallback={(
-                <LoadingScreen>
-                  <LoadingCard>
-                    <div>Loading ARC-AI...</div>
-                    <LoadingBar />
-                  </LoadingCard>
-                </LoadingScreen>
-              )}>
-                <Routes>
-                  <Route path="/" element={<Navigate to="/features" replace />} />
-                  <Route path="/features" element={<Features />} />
-                  <Route path="/features/rag-memory" element={<RAGMemory />} />
-                  <Route path="/features/web-research" element={<WebResearch />} />
-                  <Route path="/features/automation" element={<Automation />} />
-                  <Route path="/architecture" element={<Architecture />} />
-                  <Route path="/about" element={<About />} />
-                  <Route path="/login" element={<AuthPage isRegister={false} />} />
-                  <Route path="/register" element={<AuthPage isRegister={true} />} />
-                  <Route path="/dashboard" element={<DashboardPage />} />
-                </Routes>
-              </Suspense>
-            </GlobalContainer>
-          </ExecutionProvider>
-        </ChatProvider>
+        <WorkspaceProvider>
+          <ChatProvider>
+            <ExecutionProvider>
+              <GlobalStyle />
+              <GlobalContainer>
+                <Suspense fallback={(
+                  <LoadingScreen>
+                    <LoadingCard>
+                      <div>Loading ARC-AI...</div>
+                      <LoadingBar />
+                    </LoadingCard>
+                  </LoadingScreen>
+                )}>
+                  <Routes>
+                    <Route path="/" element={<Navigate to="/features" replace />} />
+                    <Route path="/features" element={<Features />} />
+                    <Route path="/features/rag-memory" element={<RAGMemory />} />
+                    <Route path="/features/web-research" element={<WebResearch />} />
+                    <Route path="/features/automation" element={<Automation />} />
+                    <Route path="/architecture" element={<Architecture />} />
+                    <Route path="/about" element={<About />} />
+                    <Route path="/login" element={<AuthPage isRegister={false} />} />
+                    <Route path="/register" element={<AuthPage isRegister={true} />} />
+                    <Route path="/dashboard" element={<DashboardPage />} />
+                  </Routes>
+                </Suspense>
+              </GlobalContainer>
+            </ExecutionProvider>
+          </ChatProvider>
+        </WorkspaceProvider>
       </SocketProvider>
     </Router>
   );

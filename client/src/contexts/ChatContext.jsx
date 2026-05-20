@@ -1,4 +1,5 @@
-import React, { createContext, useState, useContext, useRef } from 'react';
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState, useContext } from 'react';
+import { useWorkspace } from './WorkspaceContext';
 
 const ChatContext = createContext();
 
@@ -22,6 +23,7 @@ export const sanitizeForDisplay = (text) => {
 };
 
 export const ChatProvider = ({ children }) => {
+  const { activeWorkspaceId, workspaceRevision } = useWorkspace();
   const [messages, setMessages] = useState([]);
   const [isProcessing, setIsProcessingState] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -38,30 +40,30 @@ export const ChatProvider = ({ children }) => {
 
   const isInterruptedRef = useRef(false);
 
-  const setIsProcessing = (nextValue) => {
+  const setIsProcessing = useCallback((nextValue) => {
     const resolvedValue = typeof nextValue === 'function' ? nextValue(isProcessing) : nextValue;
     const nextBoolean = Boolean(resolvedValue);
     setIsProcessingState(nextBoolean);
     setIsStreaming(nextBoolean);
-  };
+  }, [isProcessing]);
 
-  const addMessage = (message) => {
+  const addMessage = useCallback((message) => {
     setMessages((prev) => [...prev, message]);
-  };
+  }, []);
 
-  const replaceMessages = (nextMessages = []) => {
+  const replaceMessages = useCallback((nextMessages = []) => {
     setMessages(Array.isArray(nextMessages) ? nextMessages : []);
     setIsProcessing(false);
     setIsStreaming(false);
-  };
+  }, []);
 
-  const clearMessages = () => {
+  const clearMessages = useCallback(() => {
     setMessages([]);
     setIsProcessing(false);
     setIsStreaming(false);
-  };
+  }, []);
 
-  const appendBotChunk = (chunk) => {
+  const appendBotChunk = useCallback((chunk) => {
     // Append-only streaming: do not sanitize, normalize, or mutate previous content.
     // This ensures stable rendering with no layout shifts while streaming.
     setMessages((prev) => {
@@ -74,9 +76,9 @@ export const ChatProvider = ({ children }) => {
         return [...prev, { sender: 'ai', text: chunk || '', isStreaming: true }];
       }
     });
-  };
+  }, []);
 
-  const finishBotStream = () => {
+  const finishBotStream = useCallback(() => {
     // Final normalization pass: use shared sanitizer (exported below)
     const normalizeFinalText = (text) => sanitizeForDisplay(text);
 
@@ -92,9 +94,9 @@ export const ChatProvider = ({ children }) => {
     setIsProcessing(false);
     setIsStreaming(false);
     setIsInterrupted(false);
-  };
+  }, []);
 
-  const markBotInterrupted = () => {
+  const markBotInterrupted = useCallback(() => {
     setMessages((prev) => {
       const updated = [...prev];
       const lastMsg = updated[updated.length - 1];
@@ -107,52 +109,78 @@ export const ChatProvider = ({ children }) => {
     setIsProcessing(false);
     setIsStreaming(false);
     setIsInterrupted(true);
-  };
+  }, []);
 
   
 
-  const setLiveVisionCapture = (captureFn) => {
+  const setLiveVisionCapture = useCallback((captureFn) => {
     liveVisionCaptureRef.current = typeof captureFn === 'function' ? captureFn : () => null;
-  };
+  }, []);
 
-  const getLiveVisionFrame = () => {
+  const getLiveVisionFrame = useCallback(() => {
     try {
       return liveVisionCaptureRef.current?.() || null;
     } catch {
       return null;
     }
-  };
+  }, []);
 
-  return (
-    <ChatContext.Provider value={{ 
-        messages, 
-        addMessage, 
-        replaceMessages,
-        clearMessages,
-        appendBotChunk, 
-        finishBotStream,
-        markBotInterrupted,
-        isProcessing, 
-        setIsProcessing,
-        isStreaming,
-        setIsStreaming,
-        isSpeaking,
-        setIsSpeaking,
-        isVoiceListening,
-        setIsVoiceListening,
-        isInterrupted,
-        setIsInterrupted,
-        agentStatus,
-        setAgentStatus,
-        providerInfo,
-        setProviderInfo,
-        isInterruptedRef,
-        mediaData,
-        setMediaData,
-        setLiveVisionCapture,
-        getLiveVisionFrame
-    }}>
-      {children}
-    </ChatContext.Provider>
-  );
+  useEffect(() => {
+    clearMessages();
+    setAgentStatus(null);
+    setProviderInfo(null);
+    setMediaData(null);
+    setIsInterrupted(false);
+    isInterruptedRef.current = false;
+  }, [activeWorkspaceId, workspaceRevision]);
+
+  const value = useMemo(() => ({
+      messages,
+      addMessage,
+      replaceMessages,
+      clearMessages,
+      appendBotChunk,
+      finishBotStream,
+      markBotInterrupted,
+      isProcessing,
+      setIsProcessing,
+      isStreaming,
+      setIsStreaming,
+      isSpeaking,
+      setIsSpeaking,
+      isVoiceListening,
+      setIsVoiceListening,
+      isInterrupted,
+      setIsInterrupted,
+      agentStatus,
+      setAgentStatus,
+      providerInfo,
+      setProviderInfo,
+      isInterruptedRef,
+      mediaData,
+      setMediaData,
+      setLiveVisionCapture,
+      getLiveVisionFrame
+  }), [
+      messages,
+      addMessage,
+      replaceMessages,
+      clearMessages,
+      appendBotChunk,
+      finishBotStream,
+      markBotInterrupted,
+      isProcessing,
+      setIsProcessing,
+      isStreaming,
+      isSpeaking,
+      isVoiceListening,
+      isInterrupted,
+      agentStatus,
+      providerInfo,
+      mediaData,
+      setLiveVisionCapture,
+      getLiveVisionFrame
+  ]);
+
+  return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 };

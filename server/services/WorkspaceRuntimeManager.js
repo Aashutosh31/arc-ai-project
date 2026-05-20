@@ -11,7 +11,10 @@ class WorkspaceRuntimeManager {
   async getWorkspaceById(workspaceId) {
     if (!workspaceId) return null;
     if (!mongoose.Types.ObjectId.isValid(workspaceId)) return null;
-    const ws = await Workspace.findById(workspaceId).lean();
+    const ws = await Workspace.findOne({
+      _id: workspaceId,
+      $or: [{ 'metadata.archived': { $exists: false } }, { 'metadata.archived': { $ne: true } }]
+    }).lean();
     if (!ws) this.logger.info('[WorkspaceRuntimeManager] workspace not found:', workspaceId);
     return ws;
   }
@@ -60,7 +63,10 @@ class WorkspaceRuntimeManager {
       }
     }
 
-    const defaultWs = await Workspace.findOne({ owner: userId }).sort({ createdAt: 1 }).lean();
+    const defaultWs = await Workspace.findOne({
+      owner: userId,
+      $or: [{ 'metadata.archived': { $exists: false } }, { 'metadata.archived': { $ne: true } }]
+    }).sort({ createdAt: 1 }).lean();
     if (defaultWs) {
       if (!defaultWs.vectorNamespace) {
         defaultWs.vectorNamespace = `workspace_${defaultWs._id}`;

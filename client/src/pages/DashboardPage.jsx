@@ -4,6 +4,7 @@ import styled from 'styled-components';
 import { useSocket } from '../hooks/useSocket';
 import { useChat } from '../contexts/ChatContext';
 import { ConversationProvider, useConversation } from '../contexts/ConversationContext';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useWorkspaceViewport } from '../hooks/useWorkspaceViewport';
 import { Sidebar } from '../components/Sidebar';
 import AdvancedVoiceButton from '../components/AdvancedVoiceButton.jsx';
@@ -84,6 +85,8 @@ const SidebarOverlay = styled.div`
 
 const DesktopSidebarWrapper = styled.div`
   display: ${({ $visible }) => ($visible ? 'block' : 'none')};
+  height: 100%;
+  align-self: stretch;
 `;
 
 const MobileSidebarWrapper = styled.div`
@@ -517,6 +520,7 @@ const DashboardPageContent = () => {
   const { isConnected, authInfo, setAuthInfo, socket } = useSocket();
   const { providerInfo } = useChat();
   const { createNewConversation } = useConversation();
+  const { activeWorkspace } = useWorkspace();
   const { workspaceMode, isDesktopWide, isDesktopCompact, isTablet, isMobile } = useWorkspaceViewport();
   const [googleConnected, setGoogleConnected] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -622,7 +626,8 @@ const DashboardPageContent = () => {
       const token = authInfo?.token || localStorage.getItem('token');
       if (!authInfo?.ready || !token) return;
       try {
-        const response = await fetch(`${apiUrl}/api/memory`, {
+        const workspaceId = activeWorkspace?._id || null;
+        const response = await fetch(`${apiUrl}/api/memory${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ''}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (!response.ok) return;
@@ -634,7 +639,7 @@ const DashboardPageContent = () => {
     };
 
     loadMemoryStatus();
-  }, [authInfo?.ready, authInfo?.token, apiUrl]);
+  }, [authInfo?.ready, authInfo?.token, apiUrl, activeWorkspace?._id]);
 
   useEffect(() => {
     const loadGoogleStatus = async () => {
@@ -976,7 +981,7 @@ const DashboardPageContent = () => {
                   'Authorization': `Bearer ${token}`,
                   'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ memoryLearningEnabled: !memoryLearningEnabled })
+                body: JSON.stringify({ memoryLearningEnabled: !memoryLearningEnabled, workspaceId: activeWorkspace?._id || null })
               }).catch(() => {});
             }
           }}

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { useConversation } from '../contexts/ConversationContext';
+import WorkspaceSwitcher from './WorkspaceSwitcher';
 
 const SIDEBAR_RAIL_WIDTH = 84;
 const SIDEBAR_FULL_WIDTH = 280;
@@ -10,6 +11,7 @@ const SidebarWrapper = styled.div`
   flex-direction: column;
   width: ${({ $collapsed }) => ($collapsed ? `${SIDEBAR_RAIL_WIDTH}px` : `${SIDEBAR_FULL_WIDTH}px`)};
   height: 100%;
+  min-height: 0;
   background: linear-gradient(180deg, rgba(10, 10, 20, 0.95) 0%, rgba(15, 15, 30, 0.95) 100%);
   border-right: 2px solid rgba(var(--primary-rgb), 0.2);
   backdrop-filter: blur(10px);
@@ -38,6 +40,7 @@ const SidebarCore = styled.div`
   flex: 1;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
   opacity: ${({ $collapsed }) => ($collapsed ? 0.98 : 1)};
 `;
 
@@ -301,6 +304,7 @@ const ActionButtonsContainer = styled.div`
   gap: 10px;
   padding: 16px 12px 14px 12px;
   border-bottom: 1px solid rgba(var(--primary-rgb), 0.15);
+  flex-shrink: 0;
 
   ${({ $collapsed }) => $collapsed && `
     align-items: stretch;
@@ -316,6 +320,12 @@ const ActionButtonsContainer = styled.div`
     gap: 8px;
     padding: 12px 8px 10px 8px;
   }
+`;
+
+const SearchSection = styled.div`
+  flex-shrink: 0;
+  padding: 12px 12px 0;
+  position: relative;
 `;
 
 const CommandPaletteIcon = styled.div`
@@ -360,6 +370,8 @@ const CloseButton = styled.button`
 
 const ConversationListWrapper = styled.div`
   flex: 1;
+  min-height: 0;
+  flex-shrink: 1;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 12px 8px;
@@ -836,6 +848,8 @@ export const Sidebar = ({
           <CloseButton onClick={onClose}>×</CloseButton>
         </SidebarHeader>
 
+        <WorkspaceSwitcher />
+
         <ActionButtonsContainer>
           <NewChatButton onClick={handleNewChat} aria-label="Start a new chat">
             + New Chat
@@ -847,7 +861,7 @@ export const Sidebar = ({
           </CommandPaletteButton>
         </ActionButtonsContainer>
 
-        <div style={{ padding: '12px 12px 0', position: 'relative' }}>
+        <SearchSection>
         <input
           type="search"
           value={searchQuery}
@@ -898,7 +912,7 @@ export const Sidebar = ({
             ))}
           </div>
         )}
-      </div>
+      </SearchSection>
 
       <ConversationListWrapper>
         {loadingConversations && (
