@@ -89,7 +89,238 @@ But the architecture is becoming genuinely exciting.
 
 🔗 Live: https://www.instagram.com/aashutosh_vaishnav.31/reel/DYfdVKmRQOf/
 
-This is Update 1 of this version; Update 2 will be provided soon.
+This is Update 1 of this version; below is Update 2 with the next major runtime evolution.
+
+## Update 2 — MULTI-WORKSPACE RUNTIME ARCHITECTURE
+
+We are now beginning the NEXT MAJOR EVOLUTION of ARC-AI.
+
+This is NOT a UI-only feature.
+
+This phase introduces:
+
+- isolated workspaces
+- scoped memory
+- scoped executions
+- workspace-aware retrieval
+- runtime partitioning
+- active workspace cognition
+
+ARC-AI must evolve from:
+"single global AI session"
+
+into:
+
+"a true multi-workspace intelligent operating environment."
+
+---
+
+## CRITICAL ARCHITECTURAL RULES
+
+DO NOT:
+- break provider continuity
+- break streaming
+- break existing conversations
+- break execution runtime
+- mutate existing execution protocols
+- tightly couple workspace logic into providers
+
+Workspace isolation MUST remain:
+- deterministic
+- provider-agnostic
+- execution-safe
+- recovery-safe
+- streaming-safe
+
+---
+
+## PRIMARY GOAL
+
+Introduce a complete Workspace Runtime Layer.
+
+Every major runtime entity must become workspace-aware.
+
+---
+
+## REQUIRED ARCHITECTURE
+
+Create: `server/models/Workspace.js`
+
+Workspace schema should support:
+- name
+- description
+- owner
+- visibility
+- settings
+- activeProject
+- vectorNamespace
+- metadata
+- timestamps
+
+---
+
+## STEP 1 — WORKSPACE PARTITIONING
+
+Every major runtime entity must support:
+
+`workspaceId`
+
+INCLUDING:
+- conversations
+- memories
+- executions
+- tasks
+- retrievals
+- vector indexing
+- tool state
+
+Workspace isolation MUST be enforced server-side.
+
+No cross-workspace leakage.
+
+---
+
+## STEP 2 — ACTIVE WORKSPACE CONTEXT
+
+Create: `server/services/WorkspaceRuntimeManager.js`
+
+Responsibilities:
+- resolve active workspace
+- inject workspace context
+- manage workspace-scoped retrieval
+- manage workspace-scoped execution state
+- provide workspace runtime metadata
+
+This manager becomes: THE ENTRY POINT for runtime workspace orchestration.
+
+---
+
+## STEP 3 — MEMORY ISOLATION
+
+Current memory retrieval is globally scoped. That MUST change.
+
+Update:
+- WorkspaceContextManager
+- memoryRecall
+- memoryWriter
+- retrieval pipeline
+
+So all memory operations become workspace-aware.
+
+Memory from one workspace MUST NEVER appear in another workspace.
+
+---
+
+## STEP 4 — EXECUTION ISOLATION
+
+Execution runtime MUST become workspace-scoped.
+
+Update:
+- TaskPlanner
+- TaskExecutor
+- Execution model
+- ToolRecoveryManager
+
+Requirements:
+- executions belong to workspaces
+- retries stay inside workspace boundaries
+- recovery never leaks context
+- replanning stays workspace-scoped
+
+---
+
+## STEP 5 — VECTOR NAMESPACE ISOLATION
+
+Workspace retrieval MUST support isolated vector namespaces.
+
+Update:
+- workspaceIndexService
+- workspaceSearchService
+
+Requirements:
+- each workspace gets its own namespace
+- indexing remains scoped
+- semantic search remains scoped
+- future background indexing remains compatible
+
+---
+
+## STEP 6 — ACTIVE WORKSPACE SWITCHING
+
+Add runtime-safe workspace switching.
+
+Requirements:
+- switching workspaces updates runtime context
+- retrieval updates immediately
+- memory updates immediately
+- active executions remain scoped
+- no socket corruption
+- no stale context bleed
+
+---
+
+## STEP 7 — PROVIDER SAFETY
+
+Workspace logic MUST NOT:
+- alter provider continuation chains
+- alter tool_call_ids
+- mutate canonical reconstruction logic
+
+Workspace runtime exists ABOVE provider layer.
+
+Provider continuity protections MUST remain untouched.
+
+---
+
+## STEP 8 — BACKWARD COMPATIBILITY
+
+Existing users MUST continue working.
+
+Requirements:
+- automatically create default workspace
+- migrate old conversations safely
+- migrate old memories safely
+- preserve history
+
+NO destructive migrations.
+
+---
+
+## STEP 9 — OBSERVABILITY
+
+Add runtime logging:
+
+Examples:
+- workspace activation
+- workspace retrieval source
+- execution workspace binding
+- workspace vector namespace
+- workspace switching
+
+Logs should help debug future agent orchestration.
+
+---
+
+## STEP 10 — VALIDATION
+
+After implementation:
+- run static validation
+- test workspace switching
+- test retrieval isolation
+- test execution isolation
+- test streaming continuity
+- test provider continuity
+
+The architecture MUST remain:
+stable, modular, future-agent compatible, and production-safe.
+
+DO NOT RUSH IMPLEMENTATION.
+
+Think like a systems architect, not a feature generator.
+
+---
+
+Live Demo: https://www.instagram.com/aashutosh_vaishnav.31/reel/DYiHRfKRnqU/
 
 
 # v0.11.0-beta: Intelligent Workspace & Provider-Orchestrated Runtime
