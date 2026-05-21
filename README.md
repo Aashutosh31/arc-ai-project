@@ -16,7 +16,6 @@
 </p>
 
 </div>
-
 ---
 
 ## 🚀 Overview
@@ -31,31 +30,43 @@ Evolving rapidly into a persistent AI workspace platform (similar to ChatGPT, Cl
 
 ---
 
-## 🔥 LATEST MAJOR RELEASE: v0.12.0-beta
+## 🔥 LATEST MAJOR RELEASE: v0.13.0-beta
 
-### *Runtime Architecture Evolution & Multi-Workspace System*
+### *Isolated Multi-Workspace Execution & Runtime Orchestration*
 
-ARC-AI is no longer operating as a simple `LLM → Tool → Response` pipeline. Over the last few weeks, the system has been restructured into a more autonomous, execution-oriented runtime architecture. ARC-AI has officially evolved from an "AI assistant" into an **"execution-aware AI runtime infrastructure."**
+ARC-AI has officially evolved beyond a single persistent AI workspace into a **true multi-workspace autonomous runtime environment**. This release introduces isolated execution environments, workspace-aware frontend orchestration, and runtime-safe synchronization while strictly preserving realtime streaming, provider continuity, and execution integrity.
 
-#### Update 1 — Execution & Provider Safety
+#### 🧠 Multi-Workspace Runtime System & Scoped Conversations
 
-Recovery logic now lives ABOVE the provider layer instead of mutating provider continuation chains directly. This preserves streaming continuity, provider compatibility, `tool_call` consistency, and execution integrity.
+Each workspace now behaves as an isolated intelligent runtime environment.
 
-* ⚡ Execution orchestration & Planner/runtime separation
-* 🔄 Autonomous recovery flows & Execution metadata lifecycle
-* 🔒 Provider-safe continuation chains & Canonical tool reconstruction
-* 🌊 Streaming-safe execution recovery
-* 🔗 **[Watch Architecture Update 1 Demo](https://www.instagram.com/aashutosh_vaishnav.31/reel/DYfdVKmRQOf/)**
+* **Global Active Workspace State:** Workspace-aware frontend orchestration and scoped retrieval synchronization.
+* **Isolated Conversations:** Features scoped real-time conversation synchronization and runtime-safe switching. Conversation state now safely resets/rebinds during workspace transitions without stale context leakage.
 
-#### Update 2 — Multi-Workspace Runtime Architecture
+#### ⚡ Workspace-Aware Execution & Socket Synchronization
 
-The next major evolution transforms ARC-AI from a "single global AI session" into a **"true multi-workspace intelligent operating environment."**
+The execution and socket runtime cleanly separate workspace logic, provider orchestration, and streaming internals.
 
-* **Workspace Partitioning:** Every major runtime entity (conversations, memories, executions, tasks, retrievals, tool state) now requires a `workspaceId`. No cross-workspace leakage is permitted.
-* **Active Workspace Context:** Governed by `WorkspaceRuntimeManager.js` to dynamically inject workspace context and orchestrate runtime metadata.
-* **Memory & Vector Isolation:** Memory recall and semantic search are strictly workspace-aware. Each workspace maintains its own isolated Pinecone vector namespace.
-* **Execution Isolation:** Task planners, executors, and recovery managers operate strictly within workspace boundaries.
-* 🔗 **[Watch Workspace Orchestration Update 2 Demo](https://www.instagram.com/aashutosh_vaishnav.31/reel/DYiHRfKRnqU/)**
+* **Execution Runtime:** Supports isolated execution buckets, scoped execution tracking, and runtime-safe rendering/rebinding. Executions remain correctly scoped during workspace switches and autonomous lifecycles.
+* **Socket Safety:** Implemented workspace-safe socket synchronization and isolated real-time event routing. Prevents socket duplication, stale listeners, and cross-workspace execution contamination.
+
+#### 🏗️ Production-Grade Lifecycle & UX Integration
+
+Browser prompt flows have been completely replaced with a polished, execution-aware UX.
+
+* **Workspace Management:** Native modal-based management UI (Create, Rename, Archive/Delete) with inline validation and responsive interaction flows.
+* **Platform Direction:** ARC-AI now visually and behaviorally acts as an enterprise-ready, execution-aware operating environment rather than a single conversational thread.
+* 🔗 **[Watch v0.13.0 Workspace Orchestration Demo](https://www.instagram.com/aashutosh_vaishnav.31/reel/DYmluEPxOhf/)**
+
+---
+
+## 🏗️ v0.12.0-beta: Runtime Architecture Evolution
+
+ARC-AI was restructured into a more autonomous, execution-oriented runtime architecture.
+
+* **Execution & Provider Safety:** Recovery logic lives ABOVE the provider layer instead of mutating continuation chains. This preserves streaming continuity, `tool_call` consistency, and execution integrity.
+* **Multi-Workspace Foundation:** Introduced `WorkspaceRuntimeManager.js` to dynamically inject context. Every major runtime entity (conversations, memories, executions) became workspace-aware with isolated Pinecone vector namespaces.
+* 🔗 **[Watch Architecture Update 1 Demo](https://www.instagram.com/aashutosh_vaishnav.31/reel/DYfdVKmRQOf/)** | 🔗 **[Watch Architecture Update 2 Demo](https://www.instagram.com/aashutosh_vaishnav.31/reel/DYiHRfKRnqU/)**
 
 ---
 
@@ -63,11 +74,10 @@ The next major evolution transforms ARC-AI from a "single global AI session" int
 
 This phase established the intelligence layer on top of the persistent workspace foundation, introducing advanced memory governance and a scalable backend.
 
-* **Intelligent Provider Routing:** Dynamically selects Gemini (reasoning, multimodal, planning) or Mistral (fast, cost-effective, summarization). Prepared for future OpenAI, Claude, and Groq adapters.
-* **Semantic Workspace Search:** Keyword and semantic retrieval across conversation titles, historical messages, and contextual discussions (e.g., *"mongodb architecture discussion"*).
-* **Advanced Memory Lifecycle:** Clear separation of Conversation History, Working Context, Semantic Memory, and Long-Term User Facts. Includes pinned memories and editable long-term facts.
-* **Intelligent Retrieval Layer:** Utilizes relevance scoring, recency weighting, and duplicate suppression to fetch prioritized, low-noise context instead of naive context dumping.
-* **Production Runtime Hardening:** Interruption-safe streaming, guaranteed stream finalization, capability-aware multimodal fallbacks, and normalized tool orchestration.
+* **Intelligent Provider Routing:** Dynamically selects Gemini (reasoning, multimodal, planning) or Mistral (fast, cost-effective, summarization).
+* **Semantic Workspace Search:** Keyword and semantic retrieval across conversation titles, historical messages, and contextual discussions.
+* **Advanced Memory Lifecycle:** Clear separation of Conversation History, Working Context, Semantic Memory, and Long-Term User Facts.
+* **Intelligent Retrieval Layer:** Utilizes relevance scoring, recency weighting, and duplicate suppression to fetch prioritized, low-noise context.
 * 🔗 **[Watch Provider Routing Demo](https://www.instagram.com/aashutosh_vaishnav.31/reel/DYNhWsDxFG1/)** | 🔗 **[Watch Runtime Demo](https://www.instagram.com/aashutosh_vaishnav.31/reel/DYXqoNMtwjL/)**
 
 ---
@@ -201,8 +211,8 @@ This project is licensed under the MIT License.
 * 🐦 **Twitter/X:** [@Aashutosh_dev31](https://x.com/Aashutosh_dev31)
 
 > *If you are viewing this project elsewhere, verify the original source here.*
+
 ---
 
 ⭐ If you found this project interesting, consider starring the repo!
-
 
