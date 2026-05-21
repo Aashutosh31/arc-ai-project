@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useCallback, useEffect } from 'react';
 import { SocketContext } from './SocketContext';
+import { useWorkspace } from './WorkspaceContext';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -13,30 +14,39 @@ export const useConversation = () => {
 
 export const ConversationProvider = ({ children }) => {
   const { socket } = useContext(SocketContext) || {};
+  const { activeWorkspaceId, workspaceRevision } = useWorkspace();
   const [conversations, setConversations] = useState([]);
   const [activeConversationId, setActiveConversationId] = useState(null);
   const [activeConversationRevision, setActiveConversationRevision] = useState(0);
   const [focusedMessageId, setFocusedMessageId] = useState(null);
   const [loadingConversations, setLoadingConversations] = useState(false);
   const [conversationError, setConversationError] = useState(null);
+  const activeConversationIdRef = React.useRef(null);
 
   const getAuthHeaders = () => ({
     Authorization: `Bearer ${localStorage.getItem('token')}`
   });
+
+  const getWorkspaceParam = useCallback((workspaceId = activeWorkspaceId) => {
+    if (!workspaceId) return '';
+    return `workspaceId=${encodeURIComponent(workspaceId)}`;
+  }, [activeWorkspaceId]);
 
   // Fetch conversations from API
   const fetchConversations = useCallback(async () => {
     setLoadingConversations(true);
     setConversationError(null);
     try {
-      const response = await fetch(`${API_URL}/api/conversations`, {
+      const workspaceQuery = getWorkspaceParam();
+      const response = await fetch(`${API_URL}/api/conversations${workspaceQuery ? `?${workspaceQuery}` : ''}`, {
         headers: getAuthHeaders()
       });
       if (!response.ok) throw new Error('Failed to fetch conversations');
       const data = await response.json();
       setConversations(Array.isArray(data) ? data : []);
-      if (!activeConversationId && Array.isArray(data) && data.length > 0) {
+      if (!activeConversationIdRef.current && Array.isArray(data) && data.length > 0) {
         setActiveConversationId(data[0]._id);
+        activeConversationIdRef.current = data[0]._id;
       }
     } catch (err) {
       console.error('Error fetching conversations:', err);
@@ -44,7 +54,7 @@ export const ConversationProvider = ({ children }) => {
     } finally {
       setLoadingConversations(false);
     }
-  }, [activeConversationId]);
+  }, [getWorkspaceParam, activeWorkspaceId]);
 
   // Create new conversation
   const createNewConversation = useCallback(async (title = 'New Conversation') => {
@@ -55,12 +65,13 @@ export const ConversationProvider = ({ children }) => {
           'Content-Type': 'application/json',
           ...getAuthHeaders()
         },
-        body: JSON.stringify({ title })
+        body: JSON.stringify({ title, workspaceId: activeWorkspaceId })
       });
       if (!response.ok) throw new Error('Failed to create conversation');
       const newConv = await response.json();
       setConversations((prev) => [newConv, ...prev.filter((conv) => conv._id !== newConv._id)]);
       setActiveConversationId(newConv._id);
+      activeConversationIdRef.current = newConv._id;
       setActiveConversationRevision((value) => value + 1);
       return newConv;
     } catch (err) {
@@ -68,7 +79,7 @@ export const ConversationProvider = ({ children }) => {
       setConversationError(err.message);
       throw err;
     }
-  }, []);
+  }, [activeWorkspaceId]);
 
   const ensureConversationReady = useCallback(async (title = 'New Conversation') => {
     if (activeConversationId) {
@@ -86,6 +97,7 @@ export const ConversationProvider = ({ children }) => {
       to: conversationId
     });
     setActiveConversationId(conversationId);
+    activeConversationIdRef.current = conversationId;
     setActiveConversationRevision((value) => value + 1);
     setFocusedMessageId(null);
   }, [activeConversationId]);
@@ -99,7 +111,7 @@ export const ConversationProvider = ({ children }) => {
           'Content-Type': 'application/json',
           ...getAuthHeaders()
         },
-        body: JSON.stringify(updates)
+        body: JSON.stringify({ ...updates, workspaceId: activeWorkspaceId })
       });
       if (!response.ok) throw new Error('Failed to update conversation');
       const updated = await response.json();
@@ -112,7 +124,7 @@ export const ConversationProvider = ({ children }) => {
       setConversationError(err.message);
       throw err;
     }
-  }, []);
+  }, [activeWorkspaceId]);
 
   const searchWorkspace = useCallback(async (query, options = {}) => {
     const normalizedQuery = String(query || '').trim();
@@ -122,23 +134,23 @@ export const ConversationProvider = ({ children }) => {
 
     const controller = options.signal ? null : new AbortController();
     const signal = options.signal || controller?.signal;
-    const response = await fetch(`${API_URL}/api/search?q=${encodeURIComponent(normalizedQuery)}&limit=${Number(options.limit || 10)}`, {
+    const response = await fetch(`${API_URL}/api/search?q=${encodeURIComponent(normalizedQuery)}&limit=${Number(options.limit || 10)}${activeWorkspaceId ? `&workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ''}`, {
       headers: getAuthHeaders(),
       signal
     });
 
     if (!response.ok) throw new Error('Failed to search workspace');
     return response.json();
-  }, []);
+  }, [activeWorkspaceId]);
 
   const fetchMemoryDashboard = useCallback(async () => {
-    const response = await fetch(`${API_URL}/api/memory`, {
+    const response = await fetch(`${API_URL}/api/memory${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ''}`, {
       headers: getAuthHeaders()
     });
 
     if (!response.ok) throw new Error('Failed to load memory dashboard');
     return response.json();
-  }, []);
+  }, [activeWorkspaceId]);
 
   const updateMemoryPreferences = useCallback(async (memoryLearningEnabled) => {
     const response = await fetch(`${API_URL}/api/memory/preferences`, {
@@ -147,12 +159,12 @@ export const ConversationProvider = ({ children }) => {
         'Content-Type': 'application/json',
         ...getAuthHeaders()
       },
-      body: JSON.stringify({ memoryLearningEnabled })
+      body: JSON.stringify({ memoryLearningEnabled, workspaceId: activeWorkspaceId })
     });
 
     if (!response.ok) throw new Error('Failed to update memory preferences');
     return response.json();
-  }, []);
+  }, [activeWorkspaceId]);
 
   const updateMemoryFact = useCallback(async (memoryId, updates) => {
     const response = await fetch(`${API_URL}/api/memory/facts/${memoryId}`, {
@@ -161,12 +173,12 @@ export const ConversationProvider = ({ children }) => {
         'Content-Type': 'application/json',
         ...getAuthHeaders()
       },
-      body: JSON.stringify(updates)
+      body: JSON.stringify({ ...updates, workspaceId: activeWorkspaceId })
     });
 
     if (!response.ok) throw new Error('Failed to update memory fact');
     return response.json();
-  }, []);
+  }, [activeWorkspaceId]);
 
   const deleteMemoryFact = useCallback(async (memoryId) => {
     const response = await fetch(`${API_URL}/api/memory/facts/${memoryId}`, {
@@ -176,7 +188,7 @@ export const ConversationProvider = ({ children }) => {
 
     if (!response.ok) throw new Error('Failed to delete memory fact');
     return response.json();
-  }, []);
+  }, [activeWorkspaceId]);
 
   const updateSemanticMemory = useCallback(async (memoryId, updates) => {
     const response = await fetch(`${API_URL}/api/memory/semantic/${memoryId}`, {
@@ -185,12 +197,12 @@ export const ConversationProvider = ({ children }) => {
         'Content-Type': 'application/json',
         ...getAuthHeaders()
       },
-      body: JSON.stringify(updates)
+      body: JSON.stringify({ ...updates, workspaceId: activeWorkspaceId })
     });
 
     if (!response.ok) throw new Error('Failed to update semantic memory');
     return response.json();
-  }, []);
+  }, [activeWorkspaceId]);
 
   const deleteSemanticMemory = useCallback(async (memoryId) => {
     const response = await fetch(`${API_URL}/api/memory/semantic/${memoryId}`, {
@@ -214,6 +226,7 @@ export const ConversationProvider = ({ children }) => {
         const next = prev.filter((conv) => conv._id !== conversationId);
         if (activeConversationId === conversationId) {
           setActiveConversationId(next.length > 0 ? next[0]._id : null);
+          activeConversationIdRef.current = next.length > 0 ? next[0]._id : null;
           setActiveConversationRevision((value) => value + 1);
         }
         return next;
@@ -223,12 +236,13 @@ export const ConversationProvider = ({ children }) => {
       setConversationError(err.message);
       throw err;
     }
-  }, [activeConversationId]);
+  }, [activeConversationId, activeWorkspaceId]);
 
   const fetchConversationMessages = useCallback(async (conversationId, options = {}) => {
     if (!conversationId) return [];
     const limit = Number(options.limit || 200);
     const skip = Number(options.skip || 0);
+    const useWorkspaceFilter = Boolean(activeWorkspaceId);
 
     console.log('[ConversationContext] fetchConversationMessages:start', {
       conversationId,
@@ -236,13 +250,28 @@ export const ConversationProvider = ({ children }) => {
       skip
     });
 
-    const response = await fetch(
-      `${API_URL}/api/conversations/${conversationId}/messages?limit=${limit}&skip=${skip}`,
-      { headers: getAuthHeaders() }
-    );
+    const loadMessages = async (workspaceId) => {
+      const response = await fetch(
+        `${API_URL}/api/conversations/${conversationId}/messages?limit=${limit}&skip=${skip}${workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ''}`,
+        { headers: getAuthHeaders() }
+      );
 
-    if (!response.ok) throw new Error('Failed to fetch conversation messages');
-    const data = await response.json();
+      if (!response.ok) throw new Error('Failed to fetch conversation messages');
+      return response.json();
+    };
+
+    let data = await loadMessages(useWorkspaceFilter ? activeWorkspaceId : null);
+    if (useWorkspaceFilter && Array.isArray(data?.messages) && data.messages.length === 0) {
+      try {
+        const legacyData = await loadMessages(null);
+        if (Array.isArray(legacyData?.messages) && legacyData.messages.length > 0) {
+          data = legacyData;
+        }
+      } catch (legacyErr) {
+        console.warn('[ConversationContext] legacy fallback failed:', legacyErr?.message || legacyErr);
+      }
+    }
+
     console.log('[ConversationContext] fetchConversationMessages:done', {
       conversationId,
       count: Array.isArray(data?.messages) ? data.messages.length : 0,
@@ -258,35 +287,38 @@ export const ConversationProvider = ({ children }) => {
         : []
     });
     return Array.isArray(data?.messages) ? data.messages : [];
-  }, []);
+  }, [activeWorkspaceId]);
 
   // Register new conversation from socket event
   const addConversationFromSocket = useCallback((conversation) => {
     if (!conversation?._id) return;
+    if (conversation?.workspaceId && activeWorkspaceId && String(conversation.workspaceId) !== String(activeWorkspaceId)) return;
     setConversations((prev) => [conversation, ...prev.filter((conv) => conv._id !== conversation._id)]);
     setActiveConversationId(conversation._id);
     setActiveConversationRevision((value) => value + 1);
-  }, []);
+  }, [activeWorkspaceId]);
 
   // Update conversation title from auto-generation
-  const updateConversationTitle = useCallback((conversationId, title) => {
+  const updateConversationTitle = useCallback((conversationId, title, workspaceId = null) => {
     console.log('[ConversationContext] updateConversationTitle', { conversationId, title });
+    if (workspaceId && activeWorkspaceId && String(workspaceId) !== String(activeWorkspaceId)) return;
     setConversations((prev) =>
       prev.map((conv) =>
         conv._id === conversationId ? { ...conv, title } : conv
       )
     );
-  }, []);
+  }, [activeWorkspaceId]);
 
   useEffect(() => {
     if (!socket) return;
 
     const handleConversationTitle = (data) => {
       if (!data?.conversationId || !data?.title) return;
-      updateConversationTitle(data.conversationId, data.title);
+      updateConversationTitle(data.conversationId, data.title, data.workspaceId || null);
       console.log('[ConversationContext] title event received', {
         conversationId: data.conversationId,
-        title: data.title
+        title: data.title,
+        workspaceId: data.workspaceId || null
       });
       fetchConversations().catch(() => {});
     };
@@ -295,10 +327,15 @@ export const ConversationProvider = ({ children }) => {
     return () => socket.off('ai:conversation:title', handleConversationTitle);
   }, [socket, updateConversationTitle, fetchConversations]);
 
-  // Load conversations on mount
+  // Reset and reload whenever the active workspace changes.
   useEffect(() => {
+    setConversations([]);
+    setActiveConversationId(null);
+    activeConversationIdRef.current = null;
+    setFocusedMessageId(null);
+    setActiveConversationRevision((value) => value + 1);
     fetchConversations();
-  }, [fetchConversations]);
+  }, [activeWorkspaceId, workspaceRevision]);
 
   const value = {
     conversations,

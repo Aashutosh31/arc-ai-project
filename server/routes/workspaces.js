@@ -3,8 +3,11 @@ const router = express.Router();
 const Workspace = require('../models/Workspace');
 const WorkspaceRuntimeManager = require('../services/WorkspaceRuntimeManager');
 const mongoose = require('mongoose');
+const { protect } = require('../middleware/authMiddleware');
 
 const workspaceRuntime = new WorkspaceRuntimeManager({ logger: console });
+
+router.use(protect);
 
 // Get current user's workspaces
 router.get('/', async (req, res) => {
@@ -12,7 +15,10 @@ router.get('/', async (req, res) => {
     const userId = req.user?.id || req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const workspaces = await Workspace.find({ owner: userId })
+    const workspaces = await Workspace.find({
+      owner: userId,
+      $or: [{ 'metadata.archived': { $exists: false } }, { 'metadata.archived': { $ne: true } }]
+    })
       .select('_id name description visibility activeProject vectorNamespace createdAt updatedAt')
       .sort({ createdAt: -1 })
       .lean();
@@ -61,7 +67,11 @@ router.get('/:workspaceId', async (req, res) => {
       return res.status(400).json({ error: 'Invalid workspace ID' });
     }
 
-    const ws = await Workspace.findOne({ _id: workspaceId, owner: userId }).lean();
+    const ws = await Workspace.findOne({
+      _id: workspaceId,
+      owner: userId,
+      $or: [{ 'metadata.archived': { $exists: false } }, { 'metadata.archived': { $ne: true } }]
+    }).lean();
     if (!ws) return res.status(404).json({ error: 'Workspace not found' });
 
     res.json({ workspace: ws });

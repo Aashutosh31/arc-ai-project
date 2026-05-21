@@ -3,12 +3,14 @@ import { useRef } from 'react';
 import { SocketContext } from '../contexts/SocketContext';
 import { useChat } from '../contexts/ChatContext';
 import { useTextToSpeech } from './useTextToSpeech';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 
 // 🚀 FIX: Global deduplication timer shared across all tabs and reloads
 let lastReminderTime = 0;
 
 export const useSocket = () => {
   const { socket, isConnected, authInfo, setAuthInfo } = useContext(SocketContext) || {}; 
+  const { activeWorkspaceId } = useWorkspace();
   const { addMessage, appendBotChunk, finishBotStream, markBotInterrupted, setIsProcessing, setIsStreaming, isInterruptedRef, setIsInterrupted, setMediaData, setAgentStatus, setProviderInfo } = useChat();
   const { processStreamChunk, stop, stopSpeech } = useTextToSpeech();
   const speechCharCountRef = useRef(0);
@@ -167,7 +169,8 @@ export const useSocket = () => {
         command: text, 
         image: imageBase64,
         document: documentData,
-        conversationId
+        conversationId,
+        workspaceId: activeWorkspaceId || null
       }); 
     }
   };

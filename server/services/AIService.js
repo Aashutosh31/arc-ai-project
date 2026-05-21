@@ -397,7 +397,10 @@ class AIService {
                     
                     // Notify frontend of new conversation ID
                     if (socket) {
-                        socket.emit('ai:conversation:created', { conversationId: conversationId.toString() });
+                        socket.emit('ai:conversation:created', {
+                            conversationId: conversationId.toString(),
+                            workspaceId: workspaceContext.workspaceId ? String(workspaceContext.workspaceId) : null
+                        });
                     }
                 }
 
@@ -806,7 +809,11 @@ class AIService {
                     // Persist plan
                     const planTitle = (text || '').slice(0, 120) || 'Autonomous Plan';
                     const exec = await TaskPlanner.createPlan({ userId, workspaceId: workspaceContext.workspaceId, title: planTitle, prompt: text, steps });
-                    if (socket) socket.emit('execution.created', { executionId: exec._id.toString(), title: exec.title });
+                    if (socket) socket.emit('execution.created', {
+                        executionId: exec._id.toString(),
+                        title: exec.title,
+                        workspaceId: workspaceContext.workspaceId ? String(workspaceContext.workspaceId) : null
+                    });
 
                     // Execute plan (TaskPlanner emits progress events)
                     const execResult = await TaskPlanner.executePlan(exec._id, socket, { controller, workspaceId: workspaceContext.workspaceId, conversationId });

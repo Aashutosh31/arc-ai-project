@@ -294,7 +294,8 @@ Return ONLY the title, with no quotes and no punctuation at the end.`;
             userSockets.forEach((socket) => {
               socket.emit('ai:conversation:title', {
                 conversationId: String(conversation._id),
-                title: finalTitle
+                title: finalTitle,
+                workspaceId: conversation.workspaceId ? String(conversation.workspaceId) : null
               });
             });
           }

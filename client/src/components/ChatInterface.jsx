@@ -4,6 +4,7 @@ import { useChat, sanitizeForDisplay } from '../contexts/ChatContext';
 import { useSocket } from '../hooks/useSocket';
 import { useConversation } from '../contexts/ConversationContext';
 import { useExecution } from '../contexts/ExecutionContext';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 
 const Waveform = keyframes`
   0%, 100% { height: 10px; transform: translateY(0); }
@@ -607,6 +608,7 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
   const { interruptStream, sendCommand, socket } = useSocket();
   const { activeExecution, presence, cancelActiveExecution } = useExecution();
   const { activeConversationId, activeConversationRevision, switchConversation, fetchConversations, fetchConversationMessages, updateConversationTitle, ensureConversationReady } = useConversation();
+  const { activeWorkspaceId } = useWorkspace();
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState(null); 
   const [selectedDocument, setSelectedDocument] = useState(null);
@@ -628,25 +630,27 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
     if (!socket) return;
     const handleConversationCreated = (data) => {
       if (data?.conversationId) {
+        if (data?.workspaceId && activeWorkspaceId && String(data.workspaceId) !== String(activeWorkspaceId)) return;
         switchConversation(data.conversationId);
         fetchConversations().catch(() => {});
       }
     };
     socket.on('ai:conversation:created', handleConversationCreated);
     return () => socket.off('ai:conversation:created', handleConversationCreated);
-  }, [socket, switchConversation, fetchConversations]);
+  }, [socket, switchConversation, fetchConversations, activeWorkspaceId]);
 
   useEffect(() => {
     if (!socket) return;
 
     const handleConversationTitle = (data) => {
       if (!data?.conversationId || !data?.title) return;
-      updateConversationTitle(data.conversationId, data.title);
+      if (data?.workspaceId && activeWorkspaceId && String(data.workspaceId) !== String(activeWorkspaceId)) return;
+      updateConversationTitle(data.conversationId, data.title, data.workspaceId || null);
     };
 
     socket.on('ai:conversation:title', handleConversationTitle);
     return () => socket.off('ai:conversation:title', handleConversationTitle);
-  }, [socket, updateConversationTitle]);
+  }, [socket, updateConversationTitle, activeWorkspaceId]);
 
   useEffect(() => {
     let isCancelled = false;
