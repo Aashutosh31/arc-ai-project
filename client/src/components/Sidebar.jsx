@@ -326,6 +326,25 @@ const SearchSection = styled.div`
   flex-shrink: 0;
   padding: 12px 12px 0;
   position: relative;
+  z-index: 5;
+  overflow: visible;
+`;
+
+const SearchResultsDropdown = styled.div`
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 12px;
+  right: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 30;
+  background: rgba(7, 10, 24, 0.96);
+  border: 1px solid rgba(var(--primary-rgb), 0.18);
+  border-radius: 12px;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(8px);
+  -webkit-overflow-scrolling: touch;
 `;
 
 const CommandPaletteIcon = styled.div`
@@ -370,48 +389,68 @@ const CloseButton = styled.button`
 
 const ConversationListWrapper = styled.div`
   flex: 1;
-  min-height: 0;
-  flex-shrink: 1;
+  min-height: 0; /* IMPORTANT */
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 12px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+
+  padding: 12px 10px;
   display: ${({ $collapsed }) => ($collapsed ? 'none' : 'flex')};
+  flex-direction: column;
+  gap: 10px;
+
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+
+  /* smoother scrolling */
+  scroll-behavior: smooth;
 
   /* Custom scrollbar */
   &::-webkit-scrollbar {
     width: 6px;
   }
+
   &::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.2);
+    background: rgba(0, 0, 0, 0.15);
     border-radius: 10px;
   }
-  &::-webkit-scrollbar-thumb {
-    background: rgba(var(--primary-rgb), 0.3);
-    border-radius: 10px;
 
-    &:hover {
-      background: rgba(var(--primary-rgb), 0.5);
-    }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(var(--primary-rgb), 0.28);
+    border-radius: 10px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--primary-rgb), 0.5);
   }
 
   @media (max-width: 480px) {
-    padding: 10px 6px;
-    gap: 5px;
+    padding: 8px 6px;
+    gap: 6px;
   }
 `;
 
 const RailConversationList = styled.div`
   display: flex;
-  flex: 1;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 0 14px;
+
+  flex: 1;
+  min-height: 0; /* IMPORTANT */
+  min-width: 0;
+
   overflow-y: auto;
   overflow-x: hidden;
-  align-items: center;
+
+  align-items: stretch; /* better than center */
+  gap: 8px;
+
+  padding: 10px 0 12px;
+  padding-inline: 8px;
+
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 
   &::-webkit-scrollbar {
     width: 6px;
@@ -486,7 +525,8 @@ const getConversationGlyph = (conversation) => {
 };
 
 const ConversationItem = styled.div`
-  padding: 11px 12px;
+  padding: 9px 12px;
+  min-height: 58px;
   background: ${props =>
     props.$isActive
       ? 'linear-gradient(135deg, rgba(var(--primary-rgb), 0.2), rgba(var(--secondary-rgb), 0.1))'
@@ -503,6 +543,8 @@ const ConversationItem = styled.div`
   align-items: center;
   gap: 8px;
   overflow: hidden;
+  min-width: 0;
+  flex-shrink: 0;
 
   &:hover {
     background: rgba(255, 255, 255, 0.06);
@@ -544,11 +586,18 @@ const DeleteButton = styled.button`
   font-size: 12px;
   cursor: pointer;
   opacity: 0;
-  transition: all 0.2s ease;
+  pointer-events: none;
+  transition: opacity 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
   flex-shrink: 0;
 
   ${ConversationItem}:hover & {
     opacity: 1;
+    pointer-events: auto;
+  }
+
+  &:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   &:hover {
@@ -879,13 +928,7 @@ export const Sidebar = ({
           }}
         />
         {(searchLoading || searchError || searchResults.length > 0) && (
-          <div style={{
-            marginTop: '10px',
-            background: 'rgba(7, 10, 24, 0.96)',
-            border: '1px solid rgba(var(--primary-rgb), 0.18)',
-            borderRadius: '12px',
-            overflow: 'hidden'
-          }}>
+          <SearchResultsDropdown>
             {searchLoading && <div style={{ padding: '10px 12px', color: '#9ddcff', fontSize: '12px' }}>Searching workspace...</div>}
             {!searchLoading && searchError && <div style={{ padding: '10px 12px', color: '#ff9f9f', fontSize: '12px' }}>{searchError}</div>}
             {!searchLoading && !searchError && searchResults.length === 0 && searchQuery.trim() && <div style={{ padding: '10px 12px', color: '#8ca0c7', fontSize: '12px' }}>No workspace matches.</div>}
@@ -910,7 +953,7 @@ export const Sidebar = ({
                 <div style={{ fontSize: '12px', color: '#b5c4e4', marginTop: '4px' }}>{item.type === 'userFact' ? 'User fact' : 'Semantic memory'}</div>
               </button>
             ))}
-          </div>
+          </SearchResultsDropdown>
         )}
       </SearchSection>
 
@@ -947,14 +990,14 @@ export const Sidebar = ({
                 {formatDate(conv.updatedAt)}
               </ConversationMeta>
             </div>
-            {hoveredId === conv._id && (
-              <DeleteButton
-                onClick={(e) => handleDelete(e, conv._id)}
-                title="Delete"
-              >
-                ⊗
-              </DeleteButton>
-            )}
+            <DeleteButton
+              onClick={(e) => handleDelete(e, conv._id)}
+              title="Delete"
+              aria-hidden={hoveredId !== conv._id}
+              tabIndex={hoveredId === conv._id ? 0 : -1}
+            >
+              ⊗
+            </DeleteButton>
           </ConversationItem>
         ))}
       </ConversationListWrapper>
