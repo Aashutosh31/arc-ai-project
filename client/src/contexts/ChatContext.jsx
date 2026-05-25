@@ -18,7 +18,7 @@ export const sanitizeForDisplay = (text) => {
   t = t.replace(/(\S)([—–-])/g, '$1 $2');
   t = t.replace(/([—–-])(\S)/g, '$1 $2');
   t = t.replace(/\s{2,}/g, ' ');
-  t = t.replace(/([!?\.]){2,}/g, '$1');
+  t = t.replace(/([!?.]){2,}/g, '$1');
   return t.trim();
 };
 

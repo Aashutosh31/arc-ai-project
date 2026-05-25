@@ -2,7 +2,6 @@
 import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { useSocket } from '../hooks/useSocket';
-import { useChat } from '../contexts/ChatContext';
 import { ConversationProvider, useConversation } from '../contexts/ConversationContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useWorkspaceViewport } from '../hooks/useWorkspaceViewport';
@@ -518,7 +517,6 @@ const ListItem = styled.li`
 
 const DashboardPageContent = () => {
   const { isConnected, authInfo, setAuthInfo, socket } = useSocket();
-  const { providerInfo } = useChat();
   const { createNewConversation } = useConversation();
   const { activeWorkspace } = useWorkspace();
   const { workspaceMode, isDesktopWide, isDesktopCompact, isTablet, isMobile } = useWorkspaceViewport();
@@ -936,7 +934,7 @@ const DashboardPageContent = () => {
                       return;
                     }
                     setShowWhatsAppConnect(true);
-                    try { if (socket && socket.connected) socket.emit('whatsapp:connect'); } catch (e) {}
+                    try { if (socket && socket.connected) socket.emit('whatsapp:connect'); } catch (error) { console.warn('socket emit failed', error); }
                   }}>
                     {whatsappConnected ? 'Reconnect WhatsApp' : 'Connect WhatsApp'}
                   </CardButton>

@@ -100,7 +100,9 @@ export const useSocket = () => {
                 document.execCommand('copy');
                 textArea.remove();
             }
-        } catch (err) {}
+        } catch (error) {
+          console.debug('[Socket] clipboard copy fallback failed', error);
+        }
       }
       else if (action.type === 'CHANGE_THEME') {
         document.documentElement.setAttribute('data-theme', action.theme);

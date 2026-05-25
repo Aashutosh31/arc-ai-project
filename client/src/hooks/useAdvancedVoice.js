@@ -84,7 +84,9 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
       if (isVoiceModeActiveRef.current) {
         try {
           recognition.start();
-        } catch (e) {}
+        } catch (error) {
+          console.debug('[Advanced Voice] restart failed', error);
+        }
       }
     };
 
@@ -109,7 +111,9 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
       isVoiceModeActiveRef.current = false;
       try {
         recognitionRef.current?.stop();
-      } catch (e) {}
+      } catch (error) {
+        console.debug('[Advanced Voice] stop failed', error);
+      }
       setLiveTranscript('');
       clearTimeout(silenceTimerRef.current);
         setIsVoiceListening(false);

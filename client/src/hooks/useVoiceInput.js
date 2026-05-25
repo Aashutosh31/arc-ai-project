@@ -7,7 +7,7 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 
 export const useVoiceInput = () => {
     // 🚀 FIX 2: We extract 'sendCommand' to display your voice text in the UI
-    const { socket, isConnected, sendCommand } = useSocket();
+    const { isConnected, sendCommand } = useSocket();
     const { setIsVoiceListening } = useChat();
     
     const [isListening, setIsListening] = useState(false);
