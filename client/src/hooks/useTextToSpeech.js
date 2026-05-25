@@ -43,7 +43,7 @@ const cleanTextForSpeech = (text) => {
   cleaned = cleaned.replace(/[!?]{2,}/g, '!');
   cleaned = cleaned.replace(/\.{3,}/g, '.');
   cleaned = cleaned.replace(/,\s*,+/g, ', ');
-  cleaned = cleaned.replace(/\s*([,;:!?\.])\s*/g, '$1 ');
+  cleaned = cleaned.replace(/\s*([,;:!?.])\s*/g, '$1 ');
   cleaned = cleaned.replace(/\s{2,}/g, ' ');
   return cleaned.trim();
 };

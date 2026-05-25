@@ -217,7 +217,6 @@ const ExecutionPanel = () => {
     if (!steps.length) return 0;
     const completed = steps.filter((step) => step.status === 'COMPLETED').length;
     const failed = steps.filter((step) => step.status === 'FAILED').length;
-    const blocked = steps.filter((step) => step.status === 'BLOCKED').length;
     return Math.round(((completed + failed * 0.5) / steps.length) * 100);
   }, [activeExecution]);
 

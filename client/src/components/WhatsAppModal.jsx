@@ -120,7 +120,7 @@ export default function WhatsAppModal({ isOpen, onClose }) {
       setTimeout(() => onClose && onClose(), 800);
     };
 
-    const onDisconnected = (d) => {
+    const onDisconnected = () => {
       setStatus('disconnected');
       push('Disconnected');
     };

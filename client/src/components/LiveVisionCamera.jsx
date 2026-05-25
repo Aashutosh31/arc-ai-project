@@ -220,7 +220,7 @@ const LiveVisionCamera = ({ onCaptureReady }) => {
         if (!selectedDeviceId && !preferredFacing && videoInputs.length) {
           setSelectedDeviceId((prev) => prev || videoInputs[0].deviceId);
         }
-      } catch (err) {
+      } catch {
         // ignore enumerate errors
       }
     };
