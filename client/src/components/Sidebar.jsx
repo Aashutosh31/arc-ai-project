@@ -26,6 +26,8 @@ const SidebarWrapper = styled.div`
     z-index: 1000;
     width: 260px;
     height: 100vh;
+    height: 100dvh;
+    max-height: 100dvh;
     transform: translateX(${props => props.$isOpen ? '0' : '-100%'});
     box-shadow: 4px 0 32px rgba(0, 0, 0, 0.7);
   }
@@ -402,6 +404,7 @@ const ConversationListWrapper = styled.div`
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  scroll-padding-bottom: 20px;
 
   /* smoother scrolling */
   scroll-behavior: smooth;
@@ -426,8 +429,9 @@ const ConversationListWrapper = styled.div`
   }
 
   @media (max-width: 480px) {
-    padding: 8px 6px;
+    padding: 8px 6px 20px;
     gap: 6px;
+    scroll-padding-bottom: 28px;
   }
 `;
 
