@@ -110,6 +110,13 @@ const registerUser = async (req, res) => {
 const loginUser = async (req, res) => {
     const { email, password } = req.body;
 
+    //validate email and password
+    if(
+        typeof email !== 'string' || typeof password !== 'string' 
+    ){
+        return res.status(400).json({ message: 'Invalid email or password format' });
+    }
+
     try {
         // Check for user email
         const user = await User.findOne({ email });
