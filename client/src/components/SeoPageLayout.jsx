@@ -15,7 +15,8 @@ import styled, { createGlobalStyle, keyframes } from 'styled-components';
 /* ----------------------------------------------------------------------- */
 
 export const LINKS = {
-  live: 'https://arc-ai-project.vercel.app/',
+  live: 'https://arc-ai-project.vercel.app/dashboard',
+  signup: 'https://arc-ai-project.vercel.app/register',
   repo: 'https://github.com/Aashutosh31/arc-ai-project',
   github: 'https://github.com/Aashutosh31',
   linkedin: 'https://www.linkedin.com/in/aashutosh-bairagi-559aa530b/',
@@ -825,7 +826,10 @@ const SeoPageLayout = ({
             <span className="label">GitHub</span>
           </GhostLink>
           <SolidLink href={LINKS.live} target="_blank" rel="noopener noreferrer">
-            Live demo
+             ARC-AI Dashboard <ArrowIcon />
+          </SolidLink>
+          <SolidLink href={LINKS.signup} target="_blank" rel="noopener noreferrer">
+             Sign Up <ArrowIcon />
           </SolidLink>
           <MenuButton onClick={() => setMenuOpen((open) => !open)} aria-label="Toggle navigation" aria-expanded={menuOpen}>
             {menuOpen ? <XIcon width="18" height="18" /> : (
