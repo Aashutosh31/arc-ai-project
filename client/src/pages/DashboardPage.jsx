@@ -179,6 +179,36 @@ const Dot = styled.span`
       $connected ? 'rgba(0, 255, 120, 0.8)' : 'rgba(255, 80, 80, 0.8)'};
 `;
 
+const SignOutButton = styled.button`
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.7);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease-in-out;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.02);
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.5);
+    color: #ffffff;
+    box-shadow: 0 0 14px rgba(255, 255, 255, 0.15);
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+`;
+
 const Container = styled.main`
   flex: 1;
   min-height: 0;
@@ -596,6 +626,17 @@ const DashboardPageContent = () => {
     }
   };
 
+  const handleSignOut = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('userId');
+    localStorage.removeItem('authType');
+    localStorage.removeItem('authProvider');
+    localStorage.removeItem('username');
+    localStorage.removeItem('creditsRemaining');
+    localStorage.removeItem('googleLinked');
+    window.location.href = '/';
+  };
+
   useEffect(() => {
     if (!socket) return;
     const onReady = () => setWhatsappConnected(true);
@@ -819,6 +860,9 @@ const DashboardPageContent = () => {
               <Dot $connected={isConnected} />
               {isConnected ? 'ONLINE' : 'OFFLINE'}
             </StatusBadge>
+            <SignOutButton onClick={handleSignOut}>
+              Sign Out
+            </SignOutButton>
           </div>
         </Header>
 
