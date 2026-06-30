@@ -1,243 +1,781 @@
-import React, { useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import styled from 'styled-components';
+// client/src/components/SeoPageLayout.jsx
+//
+// Shared shell for every marketing / SEO page (Features, Architecture, RAG
+// Memory, Web Research, Automation, About). Keeps the same neon / glass
+// language already established in AuthPage.jsx and DashboardPage.jsx:
+// deep-space gradient background, cyan / violet / magenta accents, glass
+// panels with a soft glow, uppercase monospace labels.
 
-const Shell = styled.main`
-  min-height: 100vh;
-  background:
-    radial-gradient(circle at top, rgba(0, 255, 255, 0.12), transparent 28%),
-    radial-gradient(circle at 80% 0%, rgba(255, 0, 255, 0.1), transparent 24%),
-    linear-gradient(180deg, #050816 0%, #070b1b 42%, #02040c 100%);
-  color: #eef2ff;
+import React, { useEffect, useRef, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import styled, { createGlobalStyle, keyframes } from 'styled-components';
+
+/* ----------------------------------------------------------------------- */
+/* Links — single source of truth for everything that points off-site      */
+/* ----------------------------------------------------------------------- */
+
+export const LINKS = {
+  live: 'https://arc-ai-project.vercel.app/',
+  repo: 'https://github.com/Aashutosh31/arc-ai-project',
+  github: 'https://github.com/Aashutosh31',
+  linkedin: 'https://www.linkedin.com/in/aashutosh-bairagi-559aa530b/',
+  x: 'https://x.com/Aashutosh_dev31',
+  youtube: 'https://www.youtube.com/watch?v=jt7q8v5KsrU',
+};
+
+const NAV_LINKS = [
+  { to: '/features', label: 'Features' },
+  { to: '/architecture', label: 'Architecture' },
+  { to: '/features/rag-memory', label: 'Memory' },
+  { to: '/features/web-research', label: 'Research' },
+  { to: '/features/automation', label: 'Automation' },
+  { to: '/about', label: 'About' },
+];
+
+/* ----------------------------------------------------------------------- */
+/* Motion                                                                   */
+/* ----------------------------------------------------------------------- */
+
+const drift = keyframes`
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(2%, -3%, 0) scale(1.06); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
 `;
 
-const Inner = styled.div`
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 32px 20px 72px;
+const pulse = keyframes`
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(38, 255, 138, 0.5); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 5px rgba(38, 255, 138, 0); }
+`;
 
-  @media (min-width: 768px) {
-    padding: 44px 28px 88px;
+const blink = keyframes`
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+`;
+
+/* ----------------------------------------------------------------------- */
+/* Global reset for this shell (scoped via the wrapper, but html/body need  */
+/* the base color so unrendered edges never flash white)                   */
+/* ----------------------------------------------------------------------- */
+
+const GlobalSeoStyle = createGlobalStyle`
+  body {
+    background: #050511;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 `;
 
-const TopBar = styled.div`
+/* ----------------------------------------------------------------------- */
+/* Page shell + ambient background                                         */
+/* ----------------------------------------------------------------------- */
+
+const Page = styled.div`
+  position: relative;
+  min-height: 100dvh;
+  background: radial-gradient(circle at top, #1a1a3a 0%, #050511 55%, #020208 100%);
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  overflow-x: hidden;
+
+  *:focus-visible {
+    outline: 2px solid #00ffff;
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+`;
+
+const Mono = styled.span`
+  font-family: ui-monospace, SFMono-Regular, 'Fira Code', Menlo, Consolas, monospace;
+`;
+
+const Field = styled.div`
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: -10%;
+    background-image:
+      linear-gradient(rgba(0, 255, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 0%, transparent 75%);
+  }
+`;
+
+const Glow = styled.div`
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  border-radius: 50%;
+  filter: blur(110px);
+  opacity: 0.35;
+  animation: ${drift} 22s ease-in-out infinite;
+
+  &.cyan { background: #00ffff; top: -120px; left: -100px; }
+  &.violet { background: #8a2be2; top: 30%; right: -160px; animation-delay: -7s; }
+  &.magenta { background: #ff00ff; bottom: -160px; left: 30%; animation-delay: -14s; opacity: 0.18; }
+`;
+
+/* ----------------------------------------------------------------------- */
+/* Navigation                                                               */
+/* ----------------------------------------------------------------------- */
+
+const Nav = styled.header`
+  position: sticky;
+  top: 0;
+  z-index: 40;
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
   gap: 16px;
-  margin-bottom: 40px;
-  flex-wrap: wrap;
+  padding: 18px 32px;
+  background: rgba(5, 5, 17, 0.75);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border-bottom: 1px solid rgba(0, 255, 255, 0.12);
+
+  @media (max-width: 900px) {
+    padding: 14px 18px;
+  }
 `;
 
-const Brand = styled(Link)`
-  color: #ffffff;
-  text-decoration: none;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-`;
-
-const Nav = styled.nav`
+const Logo = styled(Link)`
   display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: #fff;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.04em;
+
+  span.mark {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #26ff8a;
+    box-shadow: 0 0 10px rgba(38, 255, 138, 0.8);
+    animation: ${pulse} 2.4s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+
+  span.text {
+    background: linear-gradient(135deg, #00ffff 0%, #8a2be2 60%, #ff00ff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
 `;
 
-const NavLink = styled(Link)`
-  color: rgba(238, 242, 255, 0.78);
+const NavLinks = styled.nav`
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  @media (max-width: 900px) {
+    display: none;
+  }
+`;
+
+const NavItem = styled(Link)`
+  position: relative;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-decoration: none;
-  font-size: 14px;
+  color: ${({ $active }) => ($active ? '#00ffff' : 'rgba(255,255,255,0.65)')};
+  background: ${({ $active }) => ($active ? 'rgba(0, 255, 255, 0.08)' : 'transparent')};
+  transition: color 0.2s ease, background 0.2s ease;
 
   &:hover {
-    color: #ffffff;
+    color: #00ffff;
+    background: rgba(0, 255, 255, 0.06);
   }
 `;
 
-const Hero = styled.section`
-  display: grid;
-  gap: 18px;
-  padding: 40px 0 28px;
-
-  @media (min-width: 900px) {
-    grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.9fr);
-    align-items: start;
-    gap: 36px;
-    padding-top: 54px;
-  }
-`;
-
-const Eyebrow = styled.p`
-  margin: 0;
-  color: #6ee7ff;
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
-  font-size: 12px;
-  font-weight: 700;
-`;
-
-const Title = styled.h1`
-  margin: 0;
-  font-size: clamp(2.5rem, 5vw, 4.8rem);
-  line-height: 0.95;
-  letter-spacing: -0.05em;
-  max-width: 11ch;
-`;
-
-const Lead = styled.p`
-  margin: 0;
-  max-width: 62ch;
-  color: rgba(226, 232, 240, 0.84);
-  font-size: 1.05rem;
-  line-height: 1.75;
-`;
-
-const Actions = styled.div`
+const NavActions = styled.div`
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 8px;
+  align-items: center;
+  gap: 10px;
 `;
 
-const Button = styled(Link)`
+const GhostLink = styled.a`
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 18px;
-  border-radius: 999px;
+  gap: 6px;
+  padding: 9px 14px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  font-weight: 600;
   text-decoration: none;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: rgba(0, 255, 255, 0.5);
+    color: #00ffff;
+  }
+
+  @media (max-width: 560px) {
+    span.label { display: none; }
+    padding: 9px 10px;
+  }
+`;
+
+const SolidLink = styled.a`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #00ffff, #8a2be2);
+  color: #04040f;
+  font-size: 13px;
   font-weight: 700;
-  transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
+  text-decoration: none;
+  box-shadow: 0 0 18px rgba(0, 255, 255, 0.25);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 
   &:hover {
     transform: translateY(-1px);
+    box-shadow: 0 0 26px rgba(0, 255, 255, 0.4);
   }
 `;
 
-const PrimaryButton = styled(Button)`
-  background: linear-gradient(135deg, #67e8f9 0%, #c084fc 100%);
-  color: #08111f;
-  box-shadow: 0 18px 40px rgba(103, 232, 249, 0.16);
-`;
+const MenuButton = styled.button`
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  cursor: pointer;
 
-const SecondaryButton = styled(Button)`
-  color: #e2e8f0;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  background: rgba(15, 23, 42, 0.4);
-`;
-
-const SideCard = styled.aside`
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 24px;
-  background: rgba(15, 23, 42, 0.68);
-  backdrop-filter: blur(14px);
-  padding: 22px;
-  box-shadow: 0 22px 60px rgba(2, 6, 23, 0.36);
-`;
-
-const SideStat = styled.div`
-  padding: 16px 0;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-
-  &:last-child {
-    border-bottom: 0;
-    padding-bottom: 0;
+  @media (max-width: 900px) {
+    display: inline-flex;
   }
+`;
+
+const MobileMenu = styled.div`
+  display: ${({ $open }) => ($open ? 'flex' : 'none')};
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px 16px;
+  background: rgba(5, 5, 17, 0.96);
+  border-bottom: 1px solid rgba(0, 255, 255, 0.12);
+  position: sticky;
+  top: 73px;
+  z-index: 39;
+
+  a {
+    padding: 12px 10px;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.8);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  a.active { color: #00ffff; background: rgba(0, 255, 255, 0.06); }
+`;
+
+/* ----------------------------------------------------------------------- */
+/* Hero                                                                     */
+/* ----------------------------------------------------------------------- */
+
+const HeroWrap = styled.section`
+  position: relative;
+  z-index: 1;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 90px 32px 50px;
+  text-align: center;
+
+  @media (max-width: 600px) {
+    padding: 56px 20px 36px;
+  }
+`;
+
+const EyebrowPill = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 255, 255, 0.3);
+  background: rgba(0, 255, 255, 0.05);
+  color: #7df7ff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-bottom: 22px;
+
+  &::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #00ffff;
+    box-shadow: 0 0 8px rgba(0, 255, 255, 0.9);
+  }
+`;
+
+const Cursor = styled.span`
+  display: inline-block;
+  width: 6px;
+  margin-left: 1px;
+  animation: ${blink} 1.1s steps(1) infinite;
+  &::after { content: '_'; }
+`;
+
+const HeroTitle = styled.h1`
+  font-size: 46px;
+  line-height: 1.12;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin: 0 0 18px;
+  background: linear-gradient(135deg, #ffffff 0%, #c9f9ff 35%, #b887ff 75%, #ff9bf0 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+
+  @media (max-width: 720px) {
+    font-size: 32px;
+  }
+`;
+
+const HeroLead = styled.p`
+  font-size: 17px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.68);
+  max-width: 680px;
+  margin: 0 auto;
+`;
+
+const StatRow = styled.div`
+  display: grid;
+  grid-template-columns: repeat(${({ $count }) => $count || 3}, minmax(0, 1fr));
+  gap: 14px;
+  max-width: 760px;
+  margin: 38px auto 0;
+
+  @media (max-width: 720px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const StatCard = styled.div`
+  padding: 18px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(0, 255, 255, 0.14);
+  text-align: left;
 `;
 
 const StatValue = styled.div`
-  font-size: 1.35rem;
-  font-weight: 800;
-  color: #ffffff;
+  font-family: ui-monospace, SFMono-Regular, 'Fira Code', Menlo, Consolas, monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: #00ffff;
+  margin-bottom: 6px;
+  letter-spacing: 0.01em;
 `;
 
 const StatLabel = styled.div`
-  margin-top: 4px;
-  color: rgba(226, 232, 240, 0.72);
+  font-size: 13px;
   line-height: 1.5;
+  color: rgba(255, 255, 255, 0.55);
 `;
 
-const Section = styled.section`
-  margin-top: 28px;
+/* ----------------------------------------------------------------------- */
+/* Body sections (exported for pages to compose with)                      */
+/* ----------------------------------------------------------------------- */
+
+const SectionEl = styled.section`
+  position: relative;
+  z-index: 1;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 46px 32px;
+  opacity: ${({ $visible }) => ($visible ? 1 : 0)};
+  transform: translateY(${({ $visible }) => ($visible ? '0' : '18px')});
+  transition: opacity 0.6s ease, transform 0.6s ease;
+
+  @media (max-width: 600px) {
+    padding: 32px 20px;
+  }
 `;
 
-const SectionHeading = styled.h2`
+export const Section = ({ children, ...rest }) => {
+  const ref = useRef(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setVisible(true);
+            observer.disconnect();
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <SectionEl ref={ref} $visible={visible} {...rest}>
+      {children}
+    </SectionEl>
+  );
+};
+
+export const SectionTag = styled.div`
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, 'Fira Code', Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #b887ff;
+  margin-bottom: 10px;
+`;
+
+export const SectionHeading = styled.h2`
+  font-size: 26px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
   margin: 0 0 14px;
-  font-size: clamp(1.5rem, 3vw, 2.2rem);
-  letter-spacing: -0.03em;
+  color: #fff;
+
+  @media (max-width: 600px) {
+    font-size: 22px;
+  }
 `;
 
-const SectionText = styled.p`
-  margin: 0 0 12px;
-  max-width: 72ch;
-  color: rgba(226, 232, 240, 0.82);
+export const SectionText = styled.p`
+  font-size: 15.5px;
   line-height: 1.75;
+  color: rgba(255, 255, 255, 0.66);
+  max-width: 720px;
+  margin: 0 0 18px;
 `;
 
-const BulletList = styled.ul`
-  margin: 14px 0 0;
-  padding-left: 20px;
-  color: rgba(241, 245, 249, 0.9);
-  line-height: 1.7;
+export const BulletList = styled.ul`
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 640px;
+
+  li {
+    position: relative;
+    padding-left: 26px;
+    font-size: 14.5px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 7px;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: linear-gradient(135deg, #00ffff, #8a2be2);
+    box-shadow: 0 0 8px rgba(0, 255, 255, 0.5);
+    transform: rotate(45deg);
+  }
 `;
 
-const CardGrid = styled.div`
+export const CardGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(${({ $min }) => $min || '230px'}, 1fr));
   gap: 16px;
+  margin-top: 22px;
 `;
 
-const Card = styled.article`
-  border-radius: 20px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(15, 23, 42, 0.58);
-  padding: 18px;
+export const Card = styled.div`
+  position: relative;
+  padding: 22px;
+  border-radius: 16px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  transition: border-color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+
+  &:hover {
+    border-color: rgba(0, 255, 255, 0.35);
+    transform: translateY(-3px);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35), 0 0 24px rgba(0, 255, 255, 0.08);
+  }
 `;
 
-const CardTitle = styled.h3`
+export const CardTitle = styled.h3`
+  font-size: 16px;
+  font-weight: 700;
+  color: #b887ff;
   margin: 0 0 8px;
-  font-size: 1.02rem;
 `;
 
-const CardText = styled.p`
+export const CardText = styled.p`
+  font-size: 14px;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.62);
   margin: 0;
-  color: rgba(226, 232, 240, 0.78);
-  line-height: 1.7;
 `;
 
-const CTA = styled.section`
-  margin-top: 44px;
-  border-radius: 28px;
-  padding: 28px;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.22), rgba(192, 132, 252, 0.18));
-  border: 1px solid rgba(148, 163, 184, 0.18);
+export const TechRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+`;
 
-  @media (min-width: 768px) {
-    padding: 34px 36px;
+export const TechChip = styled.span`
+  font-family: ui-monospace, SFMono-Regular, 'Fira Code', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 6px 10px;
+  border-radius: 7px;
+  color: #7df7ff;
+  background: rgba(0, 255, 255, 0.06);
+  border: 1px solid rgba(0, 255, 255, 0.18);
+`;
+
+export const Divider = styled.div`
+  height: 1px;
+  max-width: 980px;
+  margin: 0 auto;
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.18), transparent);
+`;
+
+/* ----------------------------------------------------------------------- */
+/* CTA band                                                                 */
+/* ----------------------------------------------------------------------- */
+
+const CtaWrap = styled.section`
+  position: relative;
+  z-index: 1;
+  max-width: 880px;
+  margin: 30px auto 80px;
+  padding: 42px 36px;
+  border-radius: 22px;
+  text-align: center;
+  background: rgba(10, 10, 26, 0.7);
+  border: 1px solid rgba(0, 255, 255, 0.22);
+  box-shadow: 0 0 60px rgba(0, 255, 255, 0.08), inset 0 0 30px rgba(138, 43, 226, 0.06);
+
+  @media (max-width: 600px) {
+    margin: 20px 16px 56px;
+    padding: 32px 22px;
   }
 `;
 
-const CTAInner = styled.div`
-  display: grid;
-  gap: 14px;
+const CtaTitle = styled.h2`
+  font-size: 24px;
+  font-weight: 750;
+  margin: 0 0 10px;
+  background: linear-gradient(135deg, #00ffff, #b887ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+`;
+
+const CtaText = styled.p`
+  font-size: 15px;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.62);
+  max-width: 540px;
+  margin: 0 auto 26px;
+`;
+
+const CtaButtons = styled.div`
+  display: flex;
   align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+`;
 
-  @media (min-width: 800px) {
-    grid-template-columns: minmax(0, 1fr) auto;
+/* ----------------------------------------------------------------------- */
+/* Footer                                                                   */
+/* ----------------------------------------------------------------------- */
+
+const FooterEl = styled.footer`
+  position: relative;
+  z-index: 1;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 48px 32px 28px;
+
+  @media (max-width: 600px) {
+    padding: 36px 20px 24px;
   }
 `;
 
-const CTATitle = styled.h2`
-  margin: 0;
-  font-size: clamp(1.7rem, 3vw, 2.4rem);
+const FooterInner = styled.div`
+  max-width: 1080px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 32px;
+
+  @media (max-width: 760px) {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
 `;
 
-const CTAText = styled.p`
-  margin: 0;
-  color: rgba(226, 232, 240, 0.84);
-  line-height: 1.7;
+const FooterBrand = styled.div`
+  h3 {
+    font-size: 17px;
+    margin: 0 0 8px;
+    background: linear-gradient(135deg, #00ffff, #8a2be2, #ff00ff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  p {
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.5);
+    max-width: 320px;
+    margin: 0;
+  }
 `;
+
+const FooterCol = styled.div`
+  h4 {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.4);
+    margin: 0 0 14px;
+    font-weight: 700;
+  }
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  a {
+    font-size: 13.5px;
+    color: rgba(255, 255, 255, 0.65);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    width: fit-content;
+  }
+  a:hover { color: #00ffff; }
+`;
+
+const FooterBottom = styled.div`
+  max-width: 1080px;
+  margin: 36px auto 0;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.4);
+
+  a { color: rgba(255, 255, 255, 0.55); text-decoration: none; }
+  a:hover { color: #00ffff; }
+`;
+
+/* ----------------------------------------------------------------------- */
+/* Tiny inline icons (no extra dependency)                                 */
+/* ----------------------------------------------------------------------- */
+
+const IconBase = (props) => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props} />
+);
+
+export const GithubIcon = (p) => (
+  <IconBase {...p}>
+    <path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.4c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.9 5.4 3.2 5.4 3.2a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.6c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.1-.5 2V21" />
+  </IconBase>
+);
+
+export const LinkedinIcon = (p) => (
+  <IconBase {...p}>
+    <rect x="3" y="3" width="18" height="18" rx="3" />
+    <line x1="7.5" y1="10" x2="7.5" y2="17" />
+    <circle cx="7.5" cy="6.8" r="0.9" fill="currentColor" stroke="none" />
+    <path d="M11.5 17v-4.2c0-1.6 1-2.6 2.4-2.6s2.2 1 2.2 2.6V17" />
+  </IconBase>
+);
+
+export const XIcon = (p) => (
+  <IconBase {...p}>
+    <path d="M4 4l16 16M20 4 4 20" />
+  </IconBase>
+);
+
+export const YoutubeIcon = (p) => (
+  <IconBase {...p}>
+    <rect x="2.5" y="5.5" width="19" height="13" rx="4" />
+    <path d="M10.5 9.5l5 2.5-5 2.5z" fill="currentColor" stroke="none" />
+  </IconBase>
+);
+
+export const ArrowIcon = (p) => (
+  <IconBase width="14" height="14" {...p}>
+    <path d="M7 17 17 7M9 7h8v8" />
+  </IconBase>
+);
+
+/* ----------------------------------------------------------------------- */
+/* Document head — no extra dependency, just direct DOM updates            */
+/* ----------------------------------------------------------------------- */
+
+const useDocumentHead = (title, description) => {
+  useEffect(() => {
+    if (title) document.title = title;
+    if (description) {
+      let tag = document.querySelector('meta[name="description"]');
+      if (!tag) {
+        tag = document.createElement('meta');
+        tag.setAttribute('name', 'description');
+        document.head.appendChild(tag);
+      }
+      tag.setAttribute('content', description);
+    }
+  }, [title, description]);
+};
+
+/* ----------------------------------------------------------------------- */
+/* Layout                                                                   */
+/* ----------------------------------------------------------------------- */
 
 const SeoPageLayout = ({
   title,
@@ -245,80 +783,145 @@ const SeoPageLayout = ({
   eyebrow,
   heroTitle,
   heroLead,
-  stats = [],
-  children,
+  stats,
   ctaTitle,
   ctaText,
-  ctaPrimaryHref = '/dashboard',
-  ctaPrimaryLabel = 'Open ARC AI',
-  ctaSecondaryHref = '/login',
-  ctaSecondaryLabel = 'Sign in',
+  ctaPrimaryLabel = 'Try ARC-AI live',
+  ctaPrimaryHref = LINKS.live,
+  ctaSecondaryLabel = 'View source on GitHub',
+  ctaSecondaryHref = LINKS.repo,
+  children,
 }) => {
-  useEffect(() => {
-    document.title = title;
-
-    const metaDescription = document.querySelector('meta[name="description"]') || document.createElement('meta');
-    metaDescription.setAttribute('name', 'description');
-    metaDescription.setAttribute('content', description);
-
-    if (!metaDescription.parentElement) {
-      document.head.appendChild(metaDescription);
-    }
-  }, [title, description]);
+  useDocumentHead(title, description);
+  const location = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <Shell>
-      <Inner>
-        <TopBar>
-          <Brand to="/features">ARC AI</Brand>
-          <Nav aria-label="Marketing pages">
-            <NavLink to="/features">Features</NavLink>
-            <NavLink to="/features/rag-memory">Memory</NavLink>
-            <NavLink to="/features/web-research">Research</NavLink>
-            <NavLink to="/features/automation">Automation</NavLink>
-            <NavLink to="/architecture">Architecture</NavLink>
-          </Nav>
-        </TopBar>
+    <Page>
+      <GlobalSeoStyle />
+      <Field>
+        <Glow className="cyan" />
+        <Glow className="violet" />
+        <Glow className="magenta" />
+      </Field>
 
-        <Hero>
-          <div>
-            <Eyebrow>{eyebrow}</Eyebrow>
-            <Title>{heroTitle}</Title>
-            <Lead>{heroLead}</Lead>
-            <Actions>
-              <PrimaryButton to={ctaPrimaryHref}>{ctaPrimaryLabel}</PrimaryButton>
-              <SecondaryButton to={ctaSecondaryHref}>{ctaSecondaryLabel}</SecondaryButton>
-            </Actions>
-          </div>
+      <Nav>
+        <Logo to="/">
+          <span className="mark" aria-hidden="true" />
+          <span className="text">ARC·AI</span>
+        </Logo>
 
-          <SideCard>
+        <NavLinks>
+          {NAV_LINKS.map((item) => (
+            <NavItem key={item.to} to={item.to} $active={location.pathname === item.to}>
+              {item.label}
+            </NavItem>
+          ))}
+        </NavLinks>
+
+        <NavActions>
+          <GhostLink href={LINKS.repo} target="_blank" rel="noopener noreferrer">
+            <GithubIcon />
+            <span className="label">GitHub</span>
+          </GhostLink>
+          <SolidLink href={LINKS.live} target="_blank" rel="noopener noreferrer">
+            Live demo
+          </SolidLink>
+          <MenuButton onClick={() => setMenuOpen((open) => !open)} aria-label="Toggle navigation" aria-expanded={menuOpen}>
+            {menuOpen ? <XIcon width="18" height="18" /> : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 7h16M4 12h16M4 17h16" />
+              </svg>
+            )}
+          </MenuButton>
+        </NavActions>
+      </Nav>
+
+      <MobileMenu $open={menuOpen}>
+        {NAV_LINKS.map((item) => (
+          <Link
+            key={item.to}
+            to={item.to}
+            className={location.pathname === item.to ? 'active' : ''}
+            onClick={() => setMenuOpen(false)}
+          >
+            {item.label}
+          </Link>
+        ))}
+      </MobileMenu>
+
+      <HeroWrap>
+        {eyebrow && (
+          <EyebrowPill>
+            <Mono>{eyebrow}</Mono>
+            <Cursor aria-hidden="true" />
+          </EyebrowPill>
+        )}
+        <HeroTitle>{heroTitle}</HeroTitle>
+        <HeroLead>{heroLead}</HeroLead>
+        {Array.isArray(stats) && stats.length > 0 && (
+          <StatRow $count={stats.length}>
             {stats.map((stat) => (
-              <SideStat key={stat.label}>
+              <StatCard key={stat.value}>
                 <StatValue>{stat.value}</StatValue>
                 <StatLabel>{stat.label}</StatLabel>
-              </SideStat>
+              </StatCard>
             ))}
-          </SideCard>
-        </Hero>
+          </StatRow>
+        )}
+      </HeroWrap>
 
-        {children}
+      {children}
 
-        <CTA>
-          <CTAInner>
-            <div>
-              <CTATitle>{ctaTitle}</CTATitle>
-              <CTAText>{ctaText}</CTAText>
-            </div>
-            <Actions>
-              <PrimaryButton to={ctaPrimaryHref}>{ctaPrimaryLabel}</PrimaryButton>
-              <SecondaryButton to={ctaSecondaryHref}>{ctaSecondaryLabel}</SecondaryButton>
-            </Actions>
-          </CTAInner>
-        </CTA>
-      </Inner>
-    </Shell>
+      {(ctaTitle || ctaText) && (
+        <CtaWrap>
+          {ctaTitle && <CtaTitle>{ctaTitle}</CtaTitle>}
+          {ctaText && <CtaText>{ctaText}</CtaText>}
+          <CtaButtons>
+            <SolidLink href={ctaPrimaryHref} target="_blank" rel="noopener noreferrer">
+              {ctaPrimaryLabel} <ArrowIcon />
+            </SolidLink>
+            <GhostLink href={ctaSecondaryHref} target="_blank" rel="noopener noreferrer">
+              <span className="label">{ctaSecondaryLabel}</span>
+            </GhostLink>
+          </CtaButtons>
+        </CtaWrap>
+      )}
+
+      <FooterEl>
+        <FooterInner>
+          <FooterBrand>
+            <h3>ARC·AI</h3>
+            <p>
+              An autonomous, real-time conversational agent with RAG memory, live web research,
+              proactive automation, and multi-workspace execution — built on the MERN stack.
+            </p>
+          </FooterBrand>
+
+          <FooterCol>
+            <h4>Product</h4>
+            {NAV_LINKS.map((item) => (
+              <Link key={item.to} to={item.to}>{item.label}</Link>
+            ))}
+          </FooterCol>
+
+          <FooterCol>
+            <h4>Connect</h4>
+            <a href={LINKS.repo} target="_blank" rel="noopener noreferrer"><GithubIcon /> Source code</a>
+            <a href={LINKS.github} target="_blank" rel="noopener noreferrer"><GithubIcon /> @Aashutosh31</a>
+            <a href={LINKS.linkedin} target="_blank" rel="noopener noreferrer"><LinkedinIcon /> LinkedIn</a>
+            <a href={LINKS.x} target="_blank" rel="noopener noreferrer"><XIcon /> @Aashutosh_dev31</a>
+            <a href={LINKS.youtube} target="_blank" rel="noopener noreferrer"><YoutubeIcon /> Full demo</a>
+          </FooterCol>
+        </FooterInner>
+
+        <FooterBottom>
+          <span>© {new Date().getFullYear()} ARC-AI · Built by Aashutosh Bairagi</span>
+          <a href={LINKS.repo} target="_blank" rel="noopener noreferrer">MIT Licensed — attribution required</a>
+        </FooterBottom>
+      </FooterEl>
+    </Page>
   );
 };
 
-export { Card, CardGrid, CardText, CardTitle, BulletList, Section, SectionHeading, SectionText };
 export default SeoPageLayout;

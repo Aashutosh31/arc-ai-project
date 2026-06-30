@@ -121,7 +121,7 @@ ARC-AI is equipped with a suite of autonomous tools for research, automation, co
 
 | Category | Technologies |
 | --- | --- |
-| **Frontend** | React 18, Vite, Tailwind CSS, Web Speech API |
+| **Frontend** | React, Vite, Tailwind CSS, Web Speech API |
 | **Backend** | Node.js, Express.js, Socket.IO, node-cron |
 | **Database** | MongoDB Atlas, Pinecone (Vector RAG) |
 | **AI / ML Runtime** | Gemini, Mistral AI, Pixtral |
@@ -133,7 +133,7 @@ ARC-AI is equipped with a suite of autonomous tools for research, automation, co
 
 ### Prerequisites
 
-* Node.js (v18+)
+* Node.js 
 * MongoDB Atlas Cluster
 * Mistral API Key
 * Pinecone API Key
