@@ -1,11 +1,3 @@
-// client/src/components/SeoPageLayout.jsx
-//
-// Shared shell for every marketing / SEO page (Features, Architecture, RAG
-// Memory, Web Research, Automation, About). Keeps the same neon / glass
-// language already established in AuthPage.jsx and DashboardPage.jsx:
-// deep-space gradient background, cyan / violet / magenta accents, glass
-// panels with a soft glow, uppercase monospace labels.
-
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import styled, { createGlobalStyle, keyframes } from 'styled-components';
@@ -59,8 +51,12 @@ const blink = keyframes`
 /* ----------------------------------------------------------------------- */
 
 const GlobalSeoStyle = createGlobalStyle`
+  html {
+    overflow-x: hidden;
+  }
   body {
     background: #050511;
+    overflow-x: hidden;
   }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -79,6 +75,7 @@ const GlobalSeoStyle = createGlobalStyle`
 const Page = styled.div`
   position: relative;
   min-height: 100dvh;
+  width: 100%;
   background: radial-gradient(circle at top, #1a1a3a 0%, #050511 55%, #020208 100%);
   color: #fff;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -126,28 +123,41 @@ const Glow = styled.div`
   &.cyan { background: #00ffff; top: -120px; left: -100px; }
   &.violet { background: #8a2be2; top: 30%; right: -160px; animation-delay: -7s; }
   &.magenta { background: #ff00ff; bottom: -160px; left: 30%; animation-delay: -14s; opacity: 0.18; }
+
+  @media (max-width: 700px) {
+    width: 280px;
+    height: 280px;
+    filter: blur(70px);
+  }
 `;
 
 /* ----------------------------------------------------------------------- */
 /* Navigation                                                               */
 /* ----------------------------------------------------------------------- */
 
-const Nav = styled.header`
+const HeaderWrap = styled.div`
   position: sticky;
   top: 0;
   z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px 32px;
+  width: 100%;
   background: rgba(5, 5, 17, 0.75);
   backdrop-filter: blur(16px) saturate(160%);
   -webkit-backdrop-filter: blur(16px) saturate(160%);
   border-bottom: 1px solid rgba(0, 255, 255, 0.12);
+`;
+
+const Nav = styled.header`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 32px;
+  max-width: 1280px;
+  margin: 0 auto;
 
   @media (max-width: 900px) {
-    padding: 14px 18px;
+    padding: 12px 16px;
+    gap: 8px;
   }
 `;
 
@@ -160,6 +170,8 @@ const Logo = styled(Link)`
   font-weight: 700;
   font-size: 18px;
   letter-spacing: 0.04em;
+  flex-shrink: 0;
+  white-space: nowrap;
 
   span.mark {
     width: 9px;
@@ -176,6 +188,10 @@ const Logo = styled(Link)`
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
+  }
+
+  @media (max-width: 380px) {
+    font-size: 15px;
   }
 `;
 
@@ -197,6 +213,7 @@ const NavItem = styled(Link)`
   font-weight: 600;
   letter-spacing: 0.04em;
   text-decoration: none;
+  white-space: nowrap;
   color: ${({ $active }) => ($active ? '#00ffff' : 'rgba(255,255,255,0.65)')};
   background: ${({ $active }) => ($active ? 'rgba(0, 255, 255, 0.08)' : 'transparent')};
   transition: color 0.2s ease, background 0.2s ease;
@@ -211,6 +228,23 @@ const NavActions = styled.div`
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
+
+  @media (max-width: 900px) {
+    gap: 8px;
+  }
+`;
+
+/* Hidden below the nav-link breakpoint — these two move into MobileMenu
+   instead, so the top bar never has to fit four buttons on a phone. */
+const DesktopOnlyActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  @media (max-width: 900px) {
+    display: none;
+  }
 `;
 
 const GhostLink = styled.a`
@@ -224,6 +258,7 @@ const GhostLink = styled.a`
   font-size: 13px;
   font-weight: 600;
   text-decoration: none;
+  white-space: nowrap;
   transition: all 0.2s ease;
 
   &:hover {
@@ -248,12 +283,19 @@ const SolidLink = styled.a`
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;
+  white-space: nowrap;
   box-shadow: 0 0 18px rgba(0, 255, 255, 0.25);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+  flex-shrink: 0;
 
   &:hover {
     transform: translateY(-1px);
     box-shadow: 0 0 26px rgba(0, 255, 255, 0.4);
+  }
+
+  @media (max-width: 360px) {
+    padding: 9px 12px;
+    font-size: 12.5px;
   }
 `;
 
@@ -268,6 +310,7 @@ const MenuButton = styled.button`
   background: rgba(255, 255, 255, 0.04);
   color: #fff;
   cursor: pointer;
+  flex-shrink: 0;
 
   @media (max-width: 900px) {
     display: inline-flex;
@@ -278,12 +321,8 @@ const MobileMenu = styled.div`
   display: ${({ $open }) => ($open ? 'flex' : 'none')};
   flex-direction: column;
   gap: 2px;
-  padding: 10px 14px 16px;
-  background: rgba(5, 5, 17, 0.96);
-  border-bottom: 1px solid rgba(0, 255, 255, 0.12);
-  position: sticky;
-  top: 73px;
-  z-index: 39;
+  padding: 10px 16px 18px;
+  border-top: 1px solid rgba(0, 255, 255, 0.1);
 
   a {
     padding: 12px 10px;
@@ -292,8 +331,30 @@ const MobileMenu = styled.div`
     text-decoration: none;
     font-size: 14px;
     font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   a.active { color: #00ffff; background: rgba(0, 255, 255, 0.06); }
+`;
+
+const MobileMenuDivider = styled.div`
+  height: 1px;
+  margin: 8px 10px;
+  background: rgba(255, 255, 255, 0.08);
+`;
+
+const MobileMenuActions = styled.div`
+  display: flex;
+  gap: 8px;
+  padding: 4px 10px 0;
+
+  a {
+    flex: 1;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 9px;
+  }
 `;
 
 /* ----------------------------------------------------------------------- */
@@ -309,7 +370,7 @@ const HeroWrap = styled.section`
   text-align: center;
 
   @media (max-width: 600px) {
-    padding: 56px 20px 36px;
+    padding: 48px 18px 32px;
   }
 `;
 
@@ -327,6 +388,7 @@ const EyebrowPill = styled.div`
   letter-spacing: 0.16em;
   text-transform: uppercase;
   margin-bottom: 22px;
+  max-width: 100%;
 
   &::before {
     content: '';
@@ -335,6 +397,7 @@ const EyebrowPill = styled.div`
     border-radius: 50%;
     background: #00ffff;
     box-shadow: 0 0 8px rgba(0, 255, 255, 0.9);
+    flex-shrink: 0;
   }
 `;
 
@@ -358,7 +421,11 @@ const HeroTitle = styled.h1`
   -webkit-text-fill-color: transparent;
 
   @media (max-width: 720px) {
-    font-size: 32px;
+    font-size: 30px;
+  }
+
+  @media (max-width: 380px) {
+    font-size: 25px;
   }
 `;
 
@@ -368,6 +435,10 @@ const HeroLead = styled.p`
   color: rgba(255, 255, 255, 0.68);
   max-width: 680px;
   margin: 0 auto;
+
+  @media (max-width: 600px) {
+    font-size: 15px;
+  }
 `;
 
 const StatRow = styled.div`
@@ -420,7 +491,7 @@ const SectionEl = styled.section`
   transition: opacity 0.6s ease, transform 0.6s ease;
 
   @media (max-width: 600px) {
-    padding: 32px 20px;
+    padding: 32px 18px;
   }
 `;
 
@@ -472,7 +543,7 @@ export const SectionHeading = styled.h2`
   color: #fff;
 
   @media (max-width: 600px) {
-    font-size: 22px;
+    font-size: 21px;
   }
 `;
 
@@ -482,6 +553,10 @@ export const SectionText = styled.p`
   color: rgba(255, 255, 255, 0.66);
   max-width: 720px;
   margin: 0 0 18px;
+
+  @media (max-width: 600px) {
+    font-size: 14.5px;
+  }
 `;
 
 export const BulletList = styled.ul`
@@ -517,7 +592,7 @@ export const BulletList = styled.ul`
 
 export const CardGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(${({ $min }) => $min || '230px'}, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(${({ $min }) => $min || '230px'}, 100%), 1fr));
   gap: 16px;
   margin-top: 22px;
 `;
@@ -594,8 +669,8 @@ const CtaWrap = styled.section`
   box-shadow: 0 0 60px rgba(0, 255, 255, 0.08), inset 0 0 30px rgba(138, 43, 226, 0.06);
 
   @media (max-width: 600px) {
-    margin: 20px 16px 56px;
-    padding: 32px 22px;
+    margin: 20px 14px 56px;
+    padding: 28px 18px;
   }
 `;
 
@@ -607,6 +682,10 @@ const CtaTitle = styled.h2`
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
+
+  @media (max-width: 600px) {
+    font-size: 20px;
+  }
 `;
 
 const CtaText = styled.p`
@@ -636,7 +715,7 @@ const FooterEl = styled.footer`
   padding: 48px 32px 28px;
 
   @media (max-width: 600px) {
-    padding: 36px 20px 24px;
+    padding: 32px 18px 22px;
   }
 `;
 
@@ -755,6 +834,15 @@ export const ArrowIcon = (p) => (
   </IconBase>
 );
 
+const GridIcon = (p) => (
+  <IconBase width="14" height="14" {...p}>
+    <rect x="3" y="3" width="7" height="7" rx="1.5" />
+    <rect x="14" y="3" width="7" height="7" rx="1.5" />
+    <rect x="3" y="14" width="7" height="7" rx="1.5" />
+    <rect x="14" y="14" width="7" height="7" rx="1.5" />
+  </IconBase>
+);
+
 /* ----------------------------------------------------------------------- */
 /* Document head — no extra dependency, just direct DOM updates            */
 /* ----------------------------------------------------------------------- */
@@ -797,6 +885,12 @@ const SeoPageLayout = ({
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // Close the mobile menu whenever the route changes, so it never stays
+  // open and overlapping content after a navigation.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [location.pathname]);
+
   return (
     <Page>
       <GlobalSeoStyle />
@@ -806,53 +900,66 @@ const SeoPageLayout = ({
         <Glow className="magenta" />
       </Field>
 
-      <Nav>
-        <Logo to="/">
-          <span className="mark" aria-hidden="true" />
-          <span className="text">ARC·AI</span>
-        </Logo>
+      <HeaderWrap>
+        <Nav>
+          <Logo to="/">
+            <span className="mark" aria-hidden="true" />
+            <span className="text">ARC·AI</span>
+          </Logo>
 
-        <NavLinks>
+          <NavLinks>
+            {NAV_LINKS.map((item) => (
+              <NavItem key={item.to} to={item.to} $active={location.pathname === item.to}>
+                {item.label}
+              </NavItem>
+            ))}
+          </NavLinks>
+
+          <NavActions>
+            <DesktopOnlyActions>
+              <GhostLink href={LINKS.repo} target="_blank" rel="noopener noreferrer">
+                <GithubIcon />
+                <span className="label">GitHub</span>
+              </GhostLink>
+              <SolidLink href={LINKS.live} target="_blank" rel="noopener noreferrer">
+                Dashboard <ArrowIcon />
+              </SolidLink>
+            </DesktopOnlyActions>
+
+            <SolidLink href={LINKS.signup} target="_blank" rel="noopener noreferrer">
+              Register
+            </SolidLink>
+
+            <MenuButton onClick={() => setMenuOpen((open) => !open)} aria-label="Toggle navigation" aria-expanded={menuOpen}>
+              {menuOpen ? <XIcon width="16" height="16" /> : <GridIcon />}
+            </MenuButton>
+          </NavActions>
+        </Nav>
+
+        <MobileMenu $open={menuOpen}>
           {NAV_LINKS.map((item) => (
-            <NavItem key={item.to} to={item.to} $active={location.pathname === item.to}>
+            <Link
+              key={item.to}
+              to={item.to}
+              className={location.pathname === item.to ? 'active' : ''}
+              onClick={() => setMenuOpen(false)}
+            >
               {item.label}
-            </NavItem>
+            </Link>
           ))}
-        </NavLinks>
 
-        <NavActions>
-          <GhostLink href={LINKS.repo} target="_blank" rel="noopener noreferrer">
-            <GithubIcon />
-            <span className="label">GitHub</span>
-          </GhostLink>
-          <SolidLink href={LINKS.live} target="_blank" rel="noopener noreferrer">
-             ARC-AI Dashboard <ArrowIcon />
-          </SolidLink>
-          <SolidLink href={LINKS.signup} target="_blank" rel="noopener noreferrer">
-             Sign Up <ArrowIcon />
-          </SolidLink>
-          <MenuButton onClick={() => setMenuOpen((open) => !open)} aria-label="Toggle navigation" aria-expanded={menuOpen}>
-            {menuOpen ? <XIcon width="18" height="18" /> : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M4 7h16M4 12h16M4 17h16" />
-              </svg>
-            )}
-          </MenuButton>
-        </NavActions>
-      </Nav>
+          <MobileMenuDivider />
 
-      <MobileMenu $open={menuOpen}>
-        {NAV_LINKS.map((item) => (
-          <Link
-            key={item.to}
-            to={item.to}
-            className={location.pathname === item.to ? 'active' : ''}
-            onClick={() => setMenuOpen(false)}
-          >
-            {item.label}
-          </Link>
-        ))}
-      </MobileMenu>
+          <MobileMenuActions>
+            <SolidLink href={LINKS.live} target="_blank" rel="noopener noreferrer">
+              Dashboard
+            </SolidLink>
+            <GhostLink href={LINKS.repo} target="_blank" rel="noopener noreferrer">
+              <GithubIcon /> <span className="label">GitHub</span>
+            </GhostLink>
+          </MobileMenuActions>
+        </MobileMenu>
+      </HeaderWrap>
 
       <HeroWrap>
         {eyebrow && (
@@ -885,9 +992,9 @@ const SeoPageLayout = ({
             <SolidLink href={ctaPrimaryHref} target="_blank" rel="noopener noreferrer">
               {ctaPrimaryLabel} <ArrowIcon />
             </SolidLink>
-            <GhostLink href={ctaSecondaryHref} target="_blank" rel="noopener noreferrer">
+            <SolidLink href={ctaSecondaryHref} target="_blank" rel="noopener noreferrer">
               <span className="label">{ctaSecondaryLabel}</span>
-            </GhostLink>
+            </SolidLink>
           </CtaButtons>
         </CtaWrap>
       )}
@@ -929,3 +1036,20 @@ const SeoPageLayout = ({
 };
 
 export default SeoPageLayout;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
