@@ -1,8 +1,17 @@
 <div align="center">
 
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0d0221,25:1a0b3d,50:2d0a4e,75:1a0b3d,100:0d0221&height=200&section=header&text=ARC-AI&fontSize=70&fontColor=00fff5&fontAlignY=42&animation=fadeIn&desc=AUTONOMOUS%20REAL-TIME%20CONVERSATIONAL%20AGENT&descAlignY=62&descSize=16&descColor=ff2ee6" width="100%"/>
+
 <h1>🤖 ARC-AI: Autonomous Real-time Conversational Agent</h1>
 
 <p><strong>A MERN-stack Digital Assistant featuring RAG Memory, Live Web Research, Proactive Cron Routines, and Serverless Microservices.</strong></p>
+
+<img src="https://img.shields.io/badge/MERN--STACK-0d0221?style=for-the-badge&labelColor=0d0221&color=00fff5" />
+<img src="https://img.shields.io/badge/RAG--MEMORY-0d0221?style=for-the-badge&labelColor=0d0221&color=b026ff" />
+<img src="https://img.shields.io/badge/SERVERLESS-0d0221?style=for-the-badge&labelColor=0d0221&color=ff2ee6" />
+<img src="https://img.shields.io/badge/BUILD-v0.13.0--beta-0d0221?style=for-the-badge&labelColor=0d0221&color=39ff14" />
+
+<br/><br/>
 
 <a href="https://arc-ai-project.vercel.app/" target="_blank">
   <img width="100%" alt="ARC-AI Demo" src="https://github.com/user-attachments/assets/3f9fd56f-263c-4fdd-b6fd-391612ba7807" />
@@ -11,12 +20,12 @@
 <p><strong>🔗 Click the image to try the Live Application</strong></p>
 
 <p>
-  <a href="https://arc-ai-project.vercel.app/"><img src="https://img.shields.io/badge/Live-Demo-brightgreen?style=for-the-badge" /></a>
-  <a href="https://github.com/Aashutosh31/arc-ai-project"><img src="https://img.shields.io/badge/Source-Code-blue?style=for-the-badge" /></a>
+  <a href="https://arc-ai-project.vercel.app/"><img src="https://img.shields.io/badge/Live-Demo-0d0221?style=for-the-badge&logo=vercel&logoColor=00fff5&labelColor=0d0221&color=00fff5" /></a>
+  <a href="https://github.com/Aashutosh31/arc-ai-project"><img src="https://img.shields.io/badge/Source-Code-0d0221?style=for-the-badge&logo=github&logoColor=ff2ee6&labelColor=0d0221&color=ff2ee6" /></a>
 </p>
 
 </div>
----
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
 ## 🚀 Overview
 
@@ -28,7 +37,7 @@ Evolving rapidly into a persistent AI workspace platform (similar to ChatGPT, Cl
 
 ▶️ **[Watch the Full YouTube Demo](https://www.youtube.com/watch?v=jt7q8v5KsrU)**
 
----
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
 ## 🔥 LATEST MAJOR RELEASE: v0.13.0-beta
 
@@ -58,7 +67,7 @@ Browser prompt flows have been completely replaced with a polished, execution-aw
 * **Platform Direction:** ARC-AI now visually and behaviorally acts as an enterprise-ready, execution-aware operating environment rather than a single conversational thread.
 * 🔗 **[Watch v0.13.0 Workspace Orchestration Demo](https://www.instagram.com/aashutosh_vaishnav.31/reel/DYmluEPxOhf/)**
 
----
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
 ## 🏗️ v0.12.0-beta: Runtime Architecture Evolution
 
@@ -68,7 +77,7 @@ ARC-AI was restructured into a more autonomous, execution-oriented runtime archi
 * **Multi-Workspace Foundation:** Introduced `WorkspaceRuntimeManager.js` to dynamically inject context. Every major runtime entity (conversations, memories, executions) became workspace-aware with isolated Pinecone vector namespaces.
 * 🔗 **[Watch Architecture Update 1 Demo](https://www.instagram.com/aashutosh_vaishnav.31/reel/DYfdVKmRQOf/)** | 🔗 **[Watch Architecture Update 2 Demo](https://www.instagram.com/aashutosh_vaishnav.31/reel/DYiHRfKRnqU/)**
 
----
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
 ## 🧠 v0.11.0-beta: Intelligent Workspace & Provider-Orchestrated Runtime
 
@@ -80,7 +89,7 @@ This phase established the intelligence layer on top of the persistent workspace
 * **Intelligent Retrieval Layer:** Utilizes relevance scoring, recency weighting, and duplicate suppression to fetch prioritized, low-noise context.
 * 🔗 **[Watch Provider Routing Demo](https://www.instagram.com/aashutosh_vaishnav.31/reel/DYNhWsDxFG1/)** | 🔗 **[Watch Runtime Demo](https://www.instagram.com/aashutosh_vaishnav.31/reel/DYXqoNMtwjL/)**
 
----
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
 ## 🛠️ The Core Ecosystem & Autonomous Tools
 
@@ -115,9 +124,17 @@ ARC-AI is equipped with a suite of autonomous tools for research, automation, co
 * **Serverless Email:** Utilizes a Google Apps Script webhook to bypass SMTP restrictions, ensuring 100% reliable production delivery.
 * 🔗 **[Watch UI Actuation Demo](https://www.instagram.com/aashutosh_vaishnav.31/reel/DWzcz9YE797/)**
 
----
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
 ## 💻 Tech Stack
+
+<div align="center">
+
+<img src="https://skillicons.dev/icons?i=react,vite,tailwind,nodejs,express,socketio,mongodb&theme=dark" />
+
+</div>
+
+<br/>
 
 | Category | Technologies |
 | --- | --- |
@@ -127,7 +144,7 @@ ARC-AI is equipped with a suite of autonomous tools for research, automation, co
 | **AI / ML Runtime** | Gemini, Mistral AI, Pixtral |
 | **Infrastructure** | Google Apps Script (Webhooks) |
 
----
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
 ## ⚙️ Local Setup
 
@@ -183,7 +200,7 @@ npm run dev
 
 ```
 
----
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
 ## ⚠️ Attribution Required
 
@@ -193,13 +210,13 @@ This project is open-source under the MIT License. You are free to use, modify, 
 * You **MUST** include a link to this repository.
 * You **MUST NOT** claim this project as your own work.
 
----
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
 ## 📝 License
 
 This project is licensed under the MIT License.
 
----
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
 ## 👨‍💻 Author & Original Creator
 
@@ -212,7 +229,10 @@ This project is licensed under the MIT License.
 
 > *If you are viewing this project elsewhere, verify the original source here.*
 
----
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
 ⭐ If you found this project interesting, consider starring the repo!
 
+<div align="center">
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:ff2ee6,50:b026ff,100:00fff5&height=120&section=footer" width="100%"/>
+</div>
