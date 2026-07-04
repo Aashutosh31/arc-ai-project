@@ -605,7 +605,7 @@ ChatMessage.displayName = 'ChatMessage';
 
 const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = false }) => {
   const { messages, replaceMessages, clearMessages, isProcessing, isStreaming, isSpeaking, mediaData, setMediaData, getLiveVisionFrame } = useChat();
-  const { interruptStream, sendCommand, socket } = useSocket();
+  const { interruptStream, sendCommand, socket, isConnected } = useSocket();
   const { activeExecution, presence, cancelActiveExecution } = useExecution();
   const { activeConversationId, activeConversationRevision, switchConversation, fetchConversations, fetchConversationMessages, updateConversationTitle, ensureConversationReady } = useConversation();
   const { activeWorkspaceId } = useWorkspace();
@@ -617,8 +617,9 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
   const messageContainerRef = useRef(null);
   const historyScrollRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
+  const loadedWorkspaceCountRef = useRef(0);
 
-  const isBusy = isProcessing || isStreaming || isSpeaking;
+  const isBusy = isProcessing || isStreaming || isSpeaking || !isConnected;
 
   const handleCancelWork = () => {
     cancelActiveExecution?.();
@@ -658,8 +659,13 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
     const loadConversationMessages = async () => {
       if (!activeConversationId) {
         console.log('[ChatInterface] loadConversationMessages:clear');
+        
+        if (activeWorkspaceId) {
+          loadedWorkspaceCountRef.current += 1;
+        }
+
         const isGuest = localStorage.getItem('authType') === 'guest';
-        if (!isGuest) {
+        if (!isGuest && loadedWorkspaceCountRef.current > 1) {
           clearMessages();
         }
         return;
@@ -955,7 +961,14 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
           </UploadLabel>
 
           <TextInput 
-            type="text" placeholder="Message, describe an image, or ask about a file..." 
+            type="text" 
+            placeholder={
+              !isConnected 
+                ? "Connecting to server..." 
+                : isSpeaking 
+                  ? "Listening..." 
+                  : "Message, describe an image, or ask about a file..."
+            }
             value={inputText} onChange={(e) => setInputText(e.target.value)}
             disabled={isBusy} autoComplete="off"
           />
