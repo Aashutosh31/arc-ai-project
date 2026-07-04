@@ -125,9 +125,15 @@ export const ChatProvider = ({ children }) => {
     }
   }, []);
 
+  const loadedWorkspaceCountRef = useRef(0);
+
   useEffect(() => {
-    const isGuest = localStorage.getItem('authType') === 'guest';
-    if (isGuest) {
+    if (activeWorkspaceId) {
+      loadedWorkspaceCountRef.current += 1;
+    }
+
+    // Skip clearing messages on the initial workspace bootstrap load
+    if (loadedWorkspaceCountRef.current <= 1) {
       return;
     }
 
