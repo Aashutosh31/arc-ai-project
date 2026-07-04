@@ -9,6 +9,9 @@ const records = new Map();
 const SESSIONS_DIR = path.resolve(__dirname, '../../.whatsapp-sessions');
 if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 
+const IDLE_TIMEOUT = Number(process.env.WHATSAPP_IDLE_TIMEOUT_MS) || 5 * 60 * 1000;
+
+
 const BROWSER_CANDIDATES = [
     process.env.CHROMIUM_PATH,
     process.env.CHROME_BIN,
@@ -93,10 +96,50 @@ const isClientValid = (client) => {
     return true;
 };
 
+const scheduleCleanupTimer = (userId, record) => {
+    if (record.cleanupTimer) clearTimeout(record.cleanupTimer);
+
+    const checkAndCleanup = async () => {
+        const currentRecord = getRecord(userId);
+        if (!currentRecord) return;
+
+        if (currentRecord.sockets.size > 0) {
+            currentRecord.cleanupTimer = null;
+            return;
+        }
+
+        const timeSinceLastActivity = Date.now() - currentRecord.lastActivity;
+        if (timeSinceLastActivity >= IDLE_TIMEOUT) {
+            console.log(`[WhatsApp] Idle timeout reached for user ${userId}. Terminating process.`);
+            
+            // Remove from map synchronously first to prevent any race condition with reconnects
+            records.delete(String(userId));
+
+            try {
+                if (currentRecord.client) {
+                    currentRecord.client.removeAllListeners();
+                    await currentRecord.client.destroy();
+                }
+            } catch (err) {
+                console.error(`[WhatsApp] Error destroying idle client for user ${userId}:`, err);
+            }
+        } else {
+            const remainingTime = IDLE_TIMEOUT - timeSinceLastActivity;
+            currentRecord.cleanupTimer = setTimeout(checkAndCleanup, remainingTime);
+        }
+    };
+
+    record.cleanupTimer = setTimeout(checkAndCleanup, IDLE_TIMEOUT);
+};
+
 const detachSocket = (userId, socket) => {
     const record = getRecord(userId);
     if (!record || !socket) return;
     record.sockets.delete(socket);
+
+    if (record.sockets.size === 0) {
+        scheduleCleanupTimer(userId, record);
+    }
 };
 
 const bindSocket = (userId, socket) => {
@@ -152,6 +195,11 @@ const scheduleRecovery = (userId, reason) => {
 };
 
 const attachClientEvents = (userId, client) => {
+    client.on('message_create', (msg) => {
+        const record = getRecord(userId);
+        if (record) record.lastActivity = Date.now();
+    });
+
     client.on('qr', async (qr) => {
         try {
             const dataUrl = await qrcode.toDataURL(qr);
@@ -175,6 +223,7 @@ const attachClientEvents = (userId, client) => {
             record.ready = false;
             record.lastAuthenticatedAt = Date.now();
             record.reconnectAttempt = 0;
+            record.lastActivity = Date.now();
         }
         console.log(`[WhatsApp] authenticated for user ${userId}`);
         emitToSockets(record, 'whatsapp:authenticated', { userId });
@@ -186,6 +235,7 @@ const attachClientEvents = (userId, client) => {
             record.ready = true;
             record.lastReadyAt = Date.now();
             record.reconnectAttempt = 0;
+            record.lastActivity = Date.now();
         }
         console.log(`[WhatsApp] client ready for user ${userId}`);
         emitToSockets(record, 'whatsapp:ready', { userId });
@@ -238,6 +288,9 @@ const recoverClient = async (userId, reason) => {
     const sockets = new Set(record.sockets);
     const oldClient = record.client;
 
+    // Immediately remove from map synchronously to prevent other bindings during async destruction
+    records.delete(String(userId));
+
     try {
         if (oldClient) {
             oldClient.removeAllListeners();
@@ -249,11 +302,15 @@ const recoverClient = async (userId, reason) => {
         }
     }
 
-    records.delete(String(userId));
     await initClientForUser(userId, null);
     const nextRecord = getRecord(userId);
     if (nextRecord) {
         sockets.forEach((socket) => nextRecord.sockets.add(socket));
+        // Clear any cleanup timer scheduled by initClientForUser(userId, null)
+        if (nextRecord.sockets.size > 0 && nextRecord.cleanupTimer) {
+            clearTimeout(nextRecord.cleanupTimer);
+            nextRecord.cleanupTimer = null;
+        }
     }
     emitToSockets(nextRecord, 'whatsapp:state', { state: 'recovering', reason: String(reason || 'disconnect') });
     return nextRecord ? nextRecord.client : null;
@@ -265,6 +322,12 @@ const initClientForUser = async (userId, socket) => {
 
     const existing = getRecord(key);
     if (existing) {
+        if (existing.cleanupTimer) {
+            clearTimeout(existing.cleanupTimer);
+            existing.cleanupTimer = null;
+            console.log(`[WhatsApp] Reconnection detected. Cancelled idle cleanup for user ${key}.`);
+        }
+        existing.lastActivity = Date.now();
         bindSocket(key, socket);
         return existing.client;
     }
@@ -277,7 +340,9 @@ const initClientForUser = async (userId, socket) => {
         reconnectTimer: null,
         reconnectAttempt: 0,
         recoveryInProgress: false,
-        initPromise: null
+        initPromise: null,
+        cleanupTimer: null,
+        lastActivity: Date.now()
     };
 
     const client = createClient(key);
@@ -285,6 +350,10 @@ const initClientForUser = async (userId, socket) => {
     records.set(key, record);
 
     attachClientEvents(key, client);
+
+    if (record.sockets.size === 0) {
+        scheduleCleanupTimer(key, record);
+    }
 
     record.initPromise = Promise.resolve()
         .then(() => client.initialize())
@@ -358,6 +427,7 @@ const waitForConnectedState = async (userId, client, timeoutMs = 20000) => {
 const syncContacts = async (userId, client = getClient(userId), socket) => {
     if (!client) throw new Error('WhatsApp client not initialized for user');
     const record = getRecord(userId);
+    if (record) record.lastActivity = Date.now();
     if (record?.initPromise) {
         await record.initPromise.catch(() => null);
     }
@@ -379,6 +449,7 @@ const resolveRecipient = (userId, recipientName) => contactIndex.resolveRecipien
 
 const sendMessage = async (userId, recipientName, text, options = {}) => {
     const record = getRecord(userId);
+    if (record) record.lastActivity = Date.now();
     const client = record?.client || null;
     if (!client) throw new Error('WhatsApp client not initialized for user');
     if (record?.initPromise) {
@@ -473,6 +544,7 @@ const sendMessage = async (userId, recipientName, text, options = {}) => {
 
 const requestPairingCode = async (userId, phoneNumber) => {
     const record = getRecord(userId);
+    if (record) record.lastActivity = Date.now();
     if (!record?.client) throw new Error('WhatsApp client not initialized for user');
     if (record?.initPromise) {
         await record.initPromise.catch(() => null);
@@ -500,6 +572,7 @@ const requestPairingCode = async (userId, phoneNumber) => {
 
 const cancelPairingCode = async (userId) => {
     const record = getRecord(userId);
+    if (record) record.lastActivity = Date.now();
     if (!record?.client) throw new Error('WhatsApp client not initialized for user');
 
     const client = getClient(userId);
@@ -515,6 +588,27 @@ const cancelPairingCode = async (userId) => {
     return { success: true };
 };
 
+const shutdownAllClients = async () => {
+    console.log('[WhatsApp] Shutting down all active clients...');
+    const destroyPromises = [];
+    for (const [userId, record] of records.entries()) {
+        if (record.cleanupTimer) clearTimeout(record.cleanupTimer);
+        if (record.reconnectTimer) clearTimeout(record.reconnectTimer);
+
+        if (record.client) {
+            console.log(`[WhatsApp] Destroying client for user ${userId}...`);
+            record.client.removeAllListeners();
+            destroyPromises.push(
+                record.client.destroy().catch((err) => {
+                    console.error(`[WhatsApp] Error destroying client for user ${userId}:`, err);
+                })
+            );
+        }
+    }
+    await Promise.allSettled(destroyPromises);
+    records.clear();
+};
+
 module.exports = {
     initClientForUser,
     getClient,
@@ -527,5 +621,6 @@ module.exports = {
     bindSocket,
     isWhatsAppConnected,
     recoverClient,
-    isTransientWhatsAppError
+    isTransientWhatsAppError,
+    shutdownAllClients
 };
