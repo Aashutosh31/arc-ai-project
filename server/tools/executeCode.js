@@ -1,5 +1,5 @@
-const { VM } = require('vm2');
 const util = require('util');
+const { getQuickJS, shouldInterruptAfterDeadline } = require('quickjs-emscripten');
 
 const MAX_LOG_LENGTH = 8000;
 const MAX_CODE_LENGTH = 12000;
@@ -24,22 +24,6 @@ const formatValue = (value) => {
         maxArrayLength: 50,
         compact: true
     });
-};
-
-const createSandboxConsole = (logs) => {
-    const push = (level, args) => {
-        const line = `[${level}] ${args.map(formatValue).join(' ')}`.trim();
-        if (!line) return;
-        logs.push(line.slice(0, MAX_LOG_LENGTH));
-    };
-
-    return {
-        log: (...args) => push('log', args),
-        info: (...args) => push('info', args),
-        warn: (...args) => push('warn', args),
-        error: (...args) => push('error', args),
-        debug: (...args) => push('debug', args)
-    };
 };
 
 /**
@@ -87,7 +71,7 @@ function transformExprToBigInt(expr) {
 
 /**
  * Deep convert BigInt values found in arbitrary return values to plain strings.
- * This ensures JSON-serializable or JSON-friendly results and matches requirement (6).
+ * This ensures JSON-serializable or JSON-friendly results.
  */
 function convertBigIntsToStrings(value, seen = new WeakSet()) {
     if (typeof value === 'bigint') {
@@ -166,38 +150,88 @@ module.exports = {
                 transformedCode = `return ${transformExprToBigInt(singleExprCandidate)};`;
             }
 
+            const QuickJS = await getQuickJS();
+            const vm = QuickJS.newContext();
+
+            // Set interruption deadline after 1200ms
+            vm.runtime.setInterruptHandler(shouldInterruptAfterDeadline(Date.now() + 1200));
+
             const logs = [];
-            const vm = new VM({
-                timeout: 1200,
-                sandbox: {
-                    console: createSandboxConsole(logs),
-                    Math,
-                    Number,
-                    String,
-                    Boolean,
-                    Array,
-                    Object,
-                    JSON,
-                    Date,
-                    RegExp,
-                    Set,
-                    Map,
-                    Promise,
-                    parseInt,
-                    parseFloat,
-                    isNaN,
-                    isFinite,
-                    BigInt
-                },
-                eval: false,
-                wasm: false,
-                allowAsync: true
-            });
+
+            const pushConsoleFunc = (level) => {
+                return vm.newFunction(level, (...args) => {
+                    const jsArgs = args.map(handle => {
+                        try {
+                            return vm.dump(handle);
+                        } catch (e) {
+                            return '[Unserializable Value]';
+                        }
+                    });
+                    const line = `[${level}] ${jsArgs.map(formatValue).join(' ')}`.trim();
+                    if (line) {
+                        logs.push(line.slice(0, MAX_LOG_LENGTH));
+                    }
+                });
+            };
+
+            const consoleObj = vm.newObject();
+            const logHandle = pushConsoleFunc('log');
+            const infoHandle = pushConsoleFunc('info');
+            const warnHandle = pushConsoleFunc('warn');
+            const errorHandle = pushConsoleFunc('error');
+            const debugHandle = pushConsoleFunc('debug');
+
+            vm.setProp(consoleObj, "log", logHandle);
+            vm.setProp(consoleObj, "info", infoHandle);
+            vm.setProp(consoleObj, "warn", warnHandle);
+            vm.setProp(consoleObj, "error", errorHandle);
+            vm.setProp(consoleObj, "debug", debugHandle);
+            vm.setProp(vm.global, "console", consoleObj);
+
+            // Clean up handles to prevent leaks
+            logHandle.dispose();
+            infoHandle.dispose();
+            warnHandle.dispose();
+            errorHandle.dispose();
+            debugHandle.dispose();
+            consoleObj.dispose();
 
             // Wrap in async IIFE so user's async code can use await at top-level
             const wrappedCode = `(async () => {\n${transformedCode}\n})()`;
 
-            const result = await vm.run(wrappedCode);
+            let result;
+            let executionError = null;
+
+            try {
+                const evalResult = vm.evalCode(wrappedCode);
+                if (evalResult.error) {
+                    executionError = vm.dump(evalResult.error);
+                    evalResult.error.dispose();
+                } else {
+                    const promiseResult = vm.resolvePromise(evalResult.value);
+                    vm.runtime.executePendingJobs();
+                    
+                    const resolved = await promiseResult;
+                    if (resolved.error) {
+                        executionError = vm.dump(resolved.error);
+                        resolved.error.dispose();
+                    } else {
+                        result = vm.dump(resolved.value);
+                        resolved.value.dispose();
+                    }
+                    evalResult.value.dispose();
+                }
+            } finally {
+                vm.dispose();
+            }
+
+            if (executionError) {
+                return {
+                    success: false,
+                    error: executionError?.message || String(executionError),
+                    errorType: executionError?.name || 'Error'
+                };
+            }
 
             // Prepare output text and convert BigInt return values to strings
             const output = logs.join('\n').slice(0, MAX_LOG_LENGTH);
