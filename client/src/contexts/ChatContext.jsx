@@ -126,6 +126,11 @@ export const ChatProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
+    const isGuest = localStorage.getItem('authType') === 'guest';
+    if (isGuest) {
+      return;
+    }
+
     clearMessages();
     setAgentStatus(null);
     setProviderInfo(null);

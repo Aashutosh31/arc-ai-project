@@ -658,7 +658,10 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
     const loadConversationMessages = async () => {
       if (!activeConversationId) {
         console.log('[ChatInterface] loadConversationMessages:clear');
-        clearMessages();
+        const isGuest = localStorage.getItem('authType') === 'guest';
+        if (!isGuest) {
+          clearMessages();
+        }
         return;
       }
 
