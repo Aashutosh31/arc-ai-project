@@ -24,8 +24,22 @@ global.userWorkspaceContext = new Map(); // Track active workspace per user (per
 
 const frontendOrigins = (process.env.FRONTEND_URL || '').split(',').map(origin => origin.trim()).filter(Boolean);
 
+const corsOriginHandler = (origin, callback) => {
+    // Allow non-browser requests (like server-to-server or curl)
+    if (!origin) {
+        callback(null, true);
+    } else if (frontendOrigins.length === 0) {
+        // Reflect origin dynamically for development
+        callback(null, origin);
+    } else if (frontendOrigins.includes(origin)) {
+        callback(null, true);
+    } else {
+        callback(new Error('Not allowed by CORS'));
+    }
+};
+
 app.use(cors({
-    origin: frontendOrigins.length > 0 ? frontendOrigins : '*',
+    origin: corsOriginHandler,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true
 }));
@@ -44,7 +58,11 @@ mongoose.connect(mongoUri)
     .catch(err => console.error('MongoDB connection error:', err));
 
 const io = new Server(server, {
-    cors: { origin: frontendOrigins.length > 0 ? frontendOrigins : '*', methods: ['GET', 'POST'] }
+    cors: {
+        origin: corsOriginHandler,
+        methods: ['GET', 'POST'],
+        credentials: true
+    }
 });
 
 // Initialize WhatsApp provider sockets (if present)
@@ -165,3 +183,58 @@ app.use('/api/memory', memoryRoutes);
 app.use('/api/workspaces', workspaceRoutes);
 
 server.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));
+
+let isShuttingDown = false;
+
+const gracefulShutdown = async (signal) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    console.info(`\n[Shutdown] Received ${signal}. Starting graceful shutdown...`);
+
+    // Set a timeout of 10 seconds to force shutdown if hanging
+    const forceExitTimeout = setTimeout(() => {
+        console.error('[Shutdown] Forcefully exiting due to timeout...');
+        process.exit(1);
+    }, 10000);
+
+    try {
+        // 1. Close HTTP & Socket.io server
+        console.info('[Shutdown] Closing HTTP server and Socket.io...');
+        await new Promise((resolve) => {
+            io.close(() => {
+                server.close(() => {
+                    resolve();
+                });
+            });
+        });
+        console.info('[Shutdown] HTTP and Socket.io closed.');
+
+        // 2. Shut down WhatsApp/Puppeteer clients
+        try {
+            const clientManager = require('./providers/whatsapp/clientManager');
+            await clientManager.shutdownAllClients();
+            console.info('[Shutdown] All WhatsApp clients destroyed.');
+        } catch (err) {
+            console.error('[Shutdown] Error shutting down WhatsApp clients:', err);
+        }
+
+        // 3. Close MongoDB connection
+        if (mongoose.connection.readyState !== 0) {
+            console.info('[Shutdown] Closing MongoDB connection...');
+            await mongoose.connection.close();
+            console.info('[Shutdown] MongoDB connection closed.');
+        }
+
+        clearTimeout(forceExitTimeout);
+        console.info('[Shutdown] Graceful shutdown completed. Exiting.');
+        process.exit(0);
+    } catch (err) {
+        console.error('[Shutdown] Error during graceful shutdown:', err);
+        clearTimeout(forceExitTimeout);
+        process.exit(1);
+    }
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

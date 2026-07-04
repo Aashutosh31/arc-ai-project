@@ -588,6 +588,27 @@ const cancelPairingCode = async (userId) => {
     return { success: true };
 };
 
+const shutdownAllClients = async () => {
+    console.log('[WhatsApp] Shutting down all active clients...');
+    const destroyPromises = [];
+    for (const [userId, record] of records.entries()) {
+        if (record.cleanupTimer) clearTimeout(record.cleanupTimer);
+        if (record.reconnectTimer) clearTimeout(record.reconnectTimer);
+
+        if (record.client) {
+            console.log(`[WhatsApp] Destroying client for user ${userId}...`);
+            record.client.removeAllListeners();
+            destroyPromises.push(
+                record.client.destroy().catch((err) => {
+                    console.error(`[WhatsApp] Error destroying client for user ${userId}:`, err);
+                })
+            );
+        }
+    }
+    await Promise.allSettled(destroyPromises);
+    records.clear();
+};
+
 module.exports = {
     initClientForUser,
     getClient,
@@ -600,5 +621,6 @@ module.exports = {
     bindSocket,
     isWhatsAppConnected,
     recoverClient,
-    isTransientWhatsAppError
+    isTransientWhatsAppError,
+    shutdownAllClients
 };

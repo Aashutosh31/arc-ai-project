@@ -13,5 +13,5 @@ services:
     network_mode: host
 
     volumes:
-      - /run/media/aashutosh31/7d732c20-429f-44b9-bbb2-dfe3aefe5b67/aashutosh/server/whatsapp:/app/.whatsapp-sessions
+      - ./.whatsapp-sessions:/app/.whatsapp-sessions
 

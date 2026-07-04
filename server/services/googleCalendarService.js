@@ -17,9 +17,15 @@ const GOOGLE_APP_SCOPES = [
 
 const TOKEN_FIELD = 'googleCalendar.encryptedTokenData';
 
+if (!process.env.GOOGLE_TOKEN_ENCRYPTION_KEY) {
+    console.error('❌ CRITICAL CONFIGURATION ERROR: GOOGLE_TOKEN_ENCRYPTION_KEY environment variable is not defined.');
+    console.error('Please configure GOOGLE_TOKEN_ENCRYPTION_KEY in your .env file to enable secure token encryption.');
+    process.exit(1);
+}
+
 const getEncryptionKey = () => {
-    const seed = process.env.GOOGLE_TOKEN_ENCRYPTION_KEY || process.env.JWT_SECRET || process.env.MISTRAL_API_KEY || 'arc-ai-google-fallback-key';
-    return crypto.createHash('sha256').update(String(seed)).digest();
+    const key = process.env.GOOGLE_TOKEN_ENCRYPTION_KEY;
+    return crypto.createHash('sha256').update(String(key)).digest();
 };
 
 const encryptJson = (value) => {

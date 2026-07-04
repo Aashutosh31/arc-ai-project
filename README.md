@@ -9,7 +9,7 @@
 <img src="https://img.shields.io/badge/MERN--STACK-0d0221?style=for-the-badge&labelColor=0d0221&color=00fff5" />
 <img src="https://img.shields.io/badge/RAG--MEMORY-0d0221?style=for-the-badge&labelColor=0d0221&color=b026ff" />
 <img src="https://img.shields.io/badge/SERVERLESS-0d0221?style=for-the-badge&labelColor=0d0221&color=ff2ee6" />
-<img src="https://img.shields.io/badge/BUILD-v0.13.0--beta-0d0221?style=for-the-badge&labelColor=0d0221&color=39ff14" />
+<img src="https://img.shields.io/badge/BUILD-v1.0.0-0d0221?style=for-the-badge&labelColor=0d0221&color=39ff14" />
 
 <br/><br/>
 
@@ -39,7 +39,29 @@ Evolving rapidly into a persistent AI workspace platform (similar to ChatGPT, Cl
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
-## 🔥 LATEST MAJOR RELEASE: v0.13.0-beta
+## 🔥 LATEST STABLE RELEASE: v1.0.0
+
+### *Production-Grade Security Hardening, Graceful Lifecycles, & WebAssembly Sandboxing*
+
+ARC-AI is now officially production-ready and fully prepared for local or remote hosting with the release of **v1.0.0**. This release introduces secure WebAssembly-based code execution sandboxing, mandatory OAuth token database encryption, container-friendly graceful lifecycles, and relative volume portability.
+
+#### 🛡️ WebAssembly-Isolated Sandboxed Execution
+* **QuickJS WebAssembly Runtime:** Replaced the deprecated `vm2` executor with `quickjs-emscripten`. Code execution triggered by LLMs now runs inside a secure WebAssembly sandbox, resolving the RCE code execution vulnerability.
+- **Mandatory OAuth Database Encryption:** Enforced `GOOGLE_TOKEN_ENCRYPTION_KEY` as a strictly required environment variable. The backend now fails-fast and exits on startup if this key is missing.
+- **Dynamic CORS Handler:** Replaced static CORS wildcards (`'*'`) with a dynamic origin resolver. This resolves the browser validation bug when combining wildcards with credential transmission (`credentials: true`).
+
+#### ⚡ Runtime Reliability & Graceful Lifecycles
+- **WhatsApp Process Leak Prevention:** Implemented an activity-aware idle timeout reaper. Headless Chromium browsers are automatically terminated after 5 minutes of inactivity, preserving system RAM and CPU.
+- **Graceful Shutdown Lifecycles:** Added signal listeners (`SIGINT`, `SIGTERM`) to execute clean resource teardowns. All HTTP servers, MongoDB connections, and active WhatsApp/Puppeteer processes are cleanly shut down in parallel.
+- **Race Condition Resolutions:** Synchronized client destruction and recovery hooks to prevent socket binding conflicts.
+
+#### 🏗️ Developer Onboarding & Deployment Portability
+- **Compose Volume Portability:** Replaced absolute host directory paths in `docker-compose.yml` with a portable, relative bind mount (`./.whatsapp-sessions`).
+- **Complete Environment Templates:** Added `.env.example` templates in both the root and `server` directories covering all mandatory and optional configurations (e.g. LLM routing, models, and timeouts).
+* 🔗 **[Read the Full v1.0.0 Release Notes](./docs/v1.0.0-RELEASE.md)**
+
+
+##  MAJOR RELEASE: v0.13.0-beta
 
 ### *Isolated Multi-Workspace Execution & Runtime Orchestration*
 
@@ -171,24 +193,18 @@ npm install
 
 ```
 
-Create a `.env` file in the `server` directory:
+Create a `.env` file in the `server` directory by copying the sample template:
 
-```env
-PORT=5000
-MONGO_URI=your_mongodb_connection_string
-JWT_SECRET=your_secret
-MISTRAL_API_KEY=your_key
-PINECONE_API_KEY=your_key
-EMAIL_WEBHOOK=your_webhook
-FRONTEND_URL=http://localhost:5173
-
+```bash
+cp .env.example .env
 ```
+
+Open `.env` and fill in your API keys and configuration. Note that **`GOOGLE_TOKEN_ENCRYPTION_KEY`** is a strictly mandatory key (32-byte hex/random string) required to encrypt OAuth tokens stored in the database. If missing, the server will fail-fast and crash on startup.
 
 Start the development server:
 
 ```bash
 npm run dev
-
 ```
 
 ### 3. Frontend Configuration
@@ -196,8 +212,17 @@ npm run dev
 ```bash
 cd ../client
 npm install
-npm run dev
+```
 
+*(Optional)* If you run the backend on a different port than `5000`, configure it by creating a `.env` file in the `client` directory:
+```env
+VITE_API_URL=your_backend_server_url
+```
+
+Start the development server:
+
+```bash
+npm run dev
 ```
 
 ### 4. Running with Docker
