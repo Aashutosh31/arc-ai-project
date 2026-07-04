@@ -1,0 +1,18 @@
+services:
+  arc-ai:
+    container_name: arc-ai
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    ports:
+      - "5000:5000"
+
+    volumes:
+      - /run/media/aashutosh31/7d732c20-429f-44b9-bbb2-dfe3aefe5b67/aashutosh/server/whatsapp:/app/.whatsapp-sessions
+
