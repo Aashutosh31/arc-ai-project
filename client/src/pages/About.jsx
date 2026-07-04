@@ -6,7 +6,6 @@ import SeoPageLayout, {
   BulletList,
   Divider,
   GithubIcon,
-  LINKS,
   LinkedinIcon,
   Section,
   SectionHeading,
@@ -17,6 +16,7 @@ import SeoPageLayout, {
   XIcon,
   YoutubeIcon,
 } from '../components/SeoPageLayout';
+import { LINKS } from '../constants/seoLinks';
 
 /* ----------------------------------------------------------------------- */
 /* Release timeline — a real chronological sequence, so version tags and   */
