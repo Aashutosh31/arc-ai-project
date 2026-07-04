@@ -200,6 +200,39 @@ npm run dev
 
 ```
 
+### 4. Running with Docker
+
+ARC-AI can be self-hosted using Docker Compose.
+
+#### Requirements
+- Docker
+- Docker Compose
+
+#### Steps to Run
+
+1. Navigate to the server directory:
+   ```bash
+   cd server
+   ```
+
+2. Copy the sample environment file and configure your API keys:
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Build and start the services:
+   ```bash
+   docker compose up --build
+   ```
+
+4. Visit the backend at:
+   ```
+   http://localhost:5000
+   ```
+
+#### Persistent WhatsApp Sessions
+To prevent needing to re-authenticate via QR code on every container restart, the host session directory (e.g. `./.whatsapp-sessions` or a custom configured mount) is intentionally mounted to `/app/.whatsapp-sessions` in the container. This preserves the authentication keys and session state managed by `whatsapp-web.js` (`LocalAuth`).
+
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
 ## ⚠️ Attribution Required
