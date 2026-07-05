@@ -2,7 +2,7 @@
 title: Isolated Workspaces — v0.13.0-beta
 ---
 
-# 🔥 LATEST MAJOR RELEASE: v0.13.0-beta
+# 🔥  MAJOR RELEASE: v0.13.0-beta
 
 **Release date:** 2026-05-22
 
