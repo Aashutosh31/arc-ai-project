@@ -22,6 +22,7 @@ export const ConversationProvider = ({ children }) => {
   const [loadingConversations, setLoadingConversations] = useState(false);
   const [conversationError, setConversationError] = useState(null);
   const activeConversationIdRef = React.useRef(null);
+  const isFirstMessageSendingRef = React.useRef(false);
 
   const getAuthHeaders = () => ({
     Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -86,6 +87,7 @@ export const ConversationProvider = ({ children }) => {
       return activeConversationId;
     }
 
+    isFirstMessageSendingRef.current = true;
     const newConversation = await createNewConversation(title);
     return newConversation?._id || null;
   }, [activeConversationId, createNewConversation]);
@@ -360,7 +362,8 @@ export const ConversationProvider = ({ children }) => {
     updateMemoryFact,
     deleteMemoryFact,
     updateSemanticMemory,
-    deleteSemanticMemory
+    deleteSemanticMemory,
+    isFirstMessageSendingRef
   };
 
   return (

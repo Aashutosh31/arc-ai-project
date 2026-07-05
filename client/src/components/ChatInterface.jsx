@@ -607,7 +607,7 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
   const { messages, replaceMessages, clearMessages, isProcessing, isStreaming, isSpeaking, mediaData, setMediaData, getLiveVisionFrame } = useChat();
   const { interruptStream, sendCommand, socket, isConnected } = useSocket();
   const { activeExecution, presence, cancelActiveExecution } = useExecution();
-  const { activeConversationId, activeConversationRevision, switchConversation, fetchConversations, fetchConversationMessages, updateConversationTitle, ensureConversationReady } = useConversation();
+  const { activeConversationId, activeConversationRevision, switchConversation, fetchConversations, fetchConversationMessages, updateConversationTitle, ensureConversationReady, isFirstMessageSendingRef } = useConversation();
   const { activeWorkspaceId } = useWorkspace();
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState(null); 
@@ -664,10 +664,15 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
           loadedWorkspaceCountRef.current += 1;
         }
 
-        const isGuest = localStorage.getItem('authType') === 'guest';
-        if (!isGuest && loadedWorkspaceCountRef.current > 1) {
+        if (loadedWorkspaceCountRef.current > 1) {
           clearMessages();
         }
+        return;
+      }
+
+      if (isFirstMessageSendingRef?.current) {
+        console.log('[ChatInterface] Skipping loadConversationMessages for first message of newly created conversation:', activeConversationId);
+        isFirstMessageSendingRef.current = false;
         return;
       }
 
