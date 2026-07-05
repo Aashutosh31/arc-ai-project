@@ -79,6 +79,11 @@ const TimelineText = styled.p`
 
 const RELEASES = [
   {
+    version: 'v1.0.0',
+    title: 'Stable release',
+    text: 'The first stable release of ARC-AI, featuring a robust multi-workspace runtime, enhanced memory management, and improved tool integrations for seamless automation and research capabilities.',
+  },
+  {
     version: 'v0.13.0-beta',
     title: 'Isolated multi-workspace execution',
     text: 'Every workspace became its own intelligent runtime: scoped conversations, workspace-aware execution buckets, and workspace-safe socket synchronization, plus a native modal-based workspace management UI replacing browser prompts.',

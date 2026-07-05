@@ -78,7 +78,7 @@ const Features = () => (
   <SeoPageLayout
     title="ARC-AI Features | Memory, Research, Automation, and Tooling"
     description="Explore ARC-AI features including RAG memory, live web research, automation, multi-workspace runtime, live vision, and UI actuation."
-    eyebrow="v0.13.0-beta · Multi-workspace runtime"
+    eyebrow="v1.0.0 · Stable release"
     heroTitle="Six systems, one real-time assistant"
     heroLead="ARC-AI combines long-term memory, live research, automation, multimodal perception, and action-taking tools behind a single Socket.IO pipeline. Each capability is built to be genuinely useful, not just a demo."
     stats={[
