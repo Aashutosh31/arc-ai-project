@@ -5,6 +5,7 @@ import { WorkspaceProvider } from './contexts/WorkspaceContext';
 import { ChatProvider } from './contexts/ChatContext';
 import { ExecutionProvider } from './contexts/ExecutionContext';
 import styled, { createGlobalStyle } from 'styled-components';
+import { Analytics } from "@vercel/analytics/react"
 
 const AuthPage = lazy(() => import('./pages/AuthPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
