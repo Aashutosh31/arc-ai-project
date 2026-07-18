@@ -1,13 +1,18 @@
 // client/src/contexts/SocketContext.jsx
-import React, { useEffect, useState } from 'react';
-import { io } from 'socket.io-client';
+import React, { useEffect, useState, ReactNode } from 'react';
+import { io, Socket } from 'socket.io-client';
 
-export const SocketContext = React.createContext();
+interface SocketContextType {
+    socket: Socket | null;
+    isConnected: boolean;
+}
+
+export const SocketContext = React.createContext<SocketContextType>({ socket: null, isConnected: false });
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
-export const SocketProvider = ({ children }) => {
-    const [socket, setSocket] = useState(null);
+export const SocketProvider = ({ children }: { children: ReactNode }) => {
+    const [socket, setSocket] = useState<Socket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
 
     useEffect(() => {
@@ -39,7 +44,7 @@ export const SocketProvider = ({ children }) => {
 
         setSocket(newSocket);
 
-        return () => newSocket.close();
+        return () => { newSocket.close(); };
     }, []); // Empty dependency array means this runs once on mount
 
     return (

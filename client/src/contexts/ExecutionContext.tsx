@@ -1,10 +1,45 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode, MutableRefObject } from 'react';
 import { SocketContext } from './SocketContext';
 import { useWorkspace } from './WorkspaceContext';
 
-const ExecutionContext = createContext(null);
+export interface ExecutionStep {
+  id: string;
+  tool: string;
+  status: string;
+  startedAt?: number;
+  finishedAt?: number;
+  result?: string;
+  error?: string;
+}
 
-const presenceFromStatus = (status) => {
+export interface Execution {
+  executionId: string;
+  title: string;
+  status: string;
+  steps: ExecutionStep[];
+  createdAt: number;
+  updatedAt: number;
+  [key: string]: unknown;
+}
+
+export interface ExecutionBucket {
+  executions: Execution[];
+  activeExecutionId: string | null;
+  presence: string;
+}
+
+interface ExecutionContextType {
+  activeExecution: Execution | null;
+  activeExecutionId: string | null;
+  executions: Execution[];
+  presence: string;
+  cancelActiveExecution: () => void;
+  setActiveExecutionId: (executionId: string | null) => void;
+}
+
+const ExecutionContext = createContext<ExecutionContextType | null>(null);
+
+const presenceFromStatus = (status: unknown): string => {
   switch (String(status || '').toLowerCase()) {
     case 'running':
       return 'Executing...';
@@ -24,15 +59,15 @@ const presenceFromStatus = (status) => {
   }
 };
 
-const initialExecution = null;
+const initialExecution: Execution | null = null;
 
-const emptyBucket = () => ({
+const emptyBucket = (): ExecutionBucket => ({
   executions: [],
   activeExecutionId: null,
   presence: 'Thinking...'
 });
 
-const resolveWorkspaceId = (payloadWorkspaceId, executionId, executionWorkspaceMapRef, fallbackWorkspaceId) => {
+const resolveWorkspaceId = (payloadWorkspaceId: unknown, executionId: string, executionWorkspaceMapRef: MutableRefObject<Map<string, string>>, fallbackWorkspaceId: string | null): string => {
   if (payloadWorkspaceId) return String(payloadWorkspaceId);
   if (executionId && executionWorkspaceMapRef.current.has(executionId)) {
     return executionWorkspaceMapRef.current.get(executionId);
@@ -40,13 +75,14 @@ const resolveWorkspaceId = (payloadWorkspaceId, executionId, executionWorkspaceM
   return fallbackWorkspaceId ? String(fallbackWorkspaceId) : 'global';
 };
 
-export const ExecutionProvider = ({ children }) => {
-  const { socket } = useContext(SocketContext) || {};
+export const ExecutionProvider = ({ children }: { children: ReactNode }) => {
+  const socketContext = useContext(SocketContext);
+  const socket = socketContext?.socket;
   const { activeWorkspaceId, workspaceRevision } = useWorkspace();
-  const [executionBuckets, setExecutionBuckets] = useState({});
-  const executionWorkspaceMapRef = useRef(new Map());
+  const [executionBuckets, setExecutionBuckets] = useState<Record<string, ExecutionBucket>>({});
+  const executionWorkspaceMapRef = useRef<Map<string, string>>(new Map());
 
-  const updateBucket = useCallback((workspaceId, updater) => {
+  const updateBucket = useCallback((workspaceId: string | null, updater: (bucket: ExecutionBucket) => ExecutionBucket) => {
     const key = workspaceId ? String(workspaceId) : 'global';
     setExecutionBuckets((prev) => {
       const current = prev[key] || emptyBucket();
@@ -58,7 +94,7 @@ export const ExecutionProvider = ({ children }) => {
     });
   }, []);
 
-  const setBucketPresence = useCallback((workspaceId, nextPresence) => {
+  const setBucketPresence = useCallback((workspaceId: string | null, nextPresence: string) => {
     const key = workspaceId ? String(workspaceId) : 'global';
     setExecutionBuckets((prev) => {
       const current = prev[key] || emptyBucket();
@@ -72,7 +108,7 @@ export const ExecutionProvider = ({ children }) => {
     });
   }, []);
 
-  const setBucketActiveExecutionId = useCallback((workspaceId, executionId) => {
+  const setBucketActiveExecutionId = useCallback((workspaceId: string | null, executionId: string | null) => {
     const key = workspaceId ? String(workspaceId) : 'global';
     setExecutionBuckets((prev) => {
       const current = prev[key] || emptyBucket();
@@ -86,7 +122,7 @@ export const ExecutionProvider = ({ children }) => {
     });
   }, []);
 
-  const upsertExecution = useCallback((workspaceId, executionId, patch) => {
+  const upsertExecution = useCallback((workspaceId: string | null, executionId: string, patch: Partial<Execution> & { presence?: string }) => {
     if (!executionId) return;
     const key = workspaceId ? String(workspaceId) : 'global';
     setExecutionBuckets((prev) => {
@@ -124,34 +160,34 @@ export const ExecutionProvider = ({ children }) => {
   useEffect(() => {
     if (!socket) return;
 
-    const onCreated = (data) => {
-      const executionId = data?.executionId || data?._id || data?.id;
+    const onCreated = (data: Record<string, unknown>) => {
+      const executionId = (data?.executionId || data?._id || data?.id) as string;
       if (!executionId) return;
       const workspaceId = resolveWorkspaceId(data?.workspaceId, executionId, executionWorkspaceMapRef, activeWorkspaceId);
       executionWorkspaceMapRef.current.set(executionId, workspaceId);
       upsertExecution(workspaceId, executionId, {
         executionId,
-        title: data?.title || 'Autonomous plan',
+        title: (data?.title as string) || 'Autonomous plan',
         status: 'PLANNED',
-        steps: data?.steps || []
+        steps: (data?.steps as ExecutionStep[]) || []
       });
       setBucketActiveExecutionId(workspaceId, executionId);
       setBucketPresence(workspaceId, 'Planning...');
     };
 
-    const onStarted = (data) => {
-      const executionId = data?.executionId || data?._id || data?.id;
+    const onStarted = (data: Record<string, unknown>) => {
+      const executionId = (data?.executionId || data?._id || data?.id) as string;
       if (!executionId) return;
       const workspaceId = resolveWorkspaceId(data?.workspaceId, executionId, executionWorkspaceMapRef, activeWorkspaceId);
       executionWorkspaceMapRef.current.set(executionId, workspaceId);
       setBucketActiveExecutionId(workspaceId, executionId);
-      upsertExecution(workspaceId, executionId, { status: data?.status || 'RUNNING' });
+      upsertExecution(workspaceId, executionId, { status: (data?.status as string) || 'RUNNING' });
       setBucketPresence(workspaceId, presenceFromStatus(data?.status || 'running'));
     };
 
-    const onStepStarted = (data) => {
-      const executionId = data?.executionId;
-      const stepId = data?.stepId;
+    const onStepStarted = (data: Record<string, unknown>) => {
+      const executionId = data?.executionId as string;
+      const stepId = data?.stepId as string;
       if (!executionId || !stepId) return;
       const workspaceId = resolveWorkspaceId(data?.workspaceId, executionId, executionWorkspaceMapRef, activeWorkspaceId);
       if (!executionWorkspaceMapRef.current.has(executionId)) {
@@ -160,7 +196,7 @@ export const ExecutionProvider = ({ children }) => {
       setBucketActiveExecutionId(workspaceId, executionId);
       setBucketPresence(workspaceId, `Executing ${data?.tool || 'step'}...`);
       updateBucket(workspaceId, (current) => {
-        const nextSteps = (current.executions.find((execution) => execution.executionId === executionId)?.steps || []).map((step) => step.id === stepId ? { ...step, status: 'RUNNING', startedAt: step.startedAt || Date.now(), tool: data?.tool || step.tool } : step);
+        const nextSteps = (current.executions.find((execution) => execution.executionId === executionId)?.steps || []).map((step) => step.id === stepId ? { ...step, status: 'RUNNING', startedAt: step.startedAt || Date.now(), tool: (data?.tool as string) || step.tool } : step);
         return {
           ...current,
           executions: current.executions.map((execution) => execution.executionId === executionId ? { ...execution, status: 'RUNNING', steps: nextSteps, updatedAt: Date.now() } : execution)
@@ -168,9 +204,9 @@ export const ExecutionProvider = ({ children }) => {
       });
     };
 
-    const onStepCompleted = (data) => {
-      const executionId = data?.executionId;
-      const stepId = data?.stepId;
+    const onStepCompleted = (data: Record<string, unknown>) => {
+      const executionId = data?.executionId as string;
+      const stepId = data?.stepId as string;
       if (!executionId || !stepId) return;
       const normalizedStatus = String(data?.status || '').toUpperCase();
       const workspaceId = resolveWorkspaceId(data?.workspaceId, executionId, executionWorkspaceMapRef, activeWorkspaceId);
@@ -181,31 +217,31 @@ export const ExecutionProvider = ({ children }) => {
         ...current,
         executions: current.executions.map((execution) => {
           if (execution.executionId !== executionId) return execution;
-          const nextSteps = (execution.steps || []).map((step) => step.id === stepId ? { ...step, status: normalizedStatus || 'COMPLETED', result: data?.result || step.result, finishedAt: Date.now() } : step);
+          const nextSteps = (execution.steps || []).map((step) => step.id === stepId ? { ...step, status: normalizedStatus || 'COMPLETED', result: (data?.result as string) || step.result, finishedAt: Date.now() } : step);
           return { ...execution, status: normalizedStatus === 'FAILED' ? 'FAILED' : normalizedStatus === 'BLOCKED' ? 'BLOCKED' : execution.status, steps: nextSteps, updatedAt: Date.now() };
         })
       }));
       setBucketPresence(workspaceId, normalizedStatus === 'FAILED' ? 'Failed' : normalizedStatus === 'BLOCKED' ? 'Blocked — insufficient credits' : 'Synthesizing...');
     };
 
-    const onStepFailed = (data) => {
-      const executionId = data?.executionId;
-      const stepId = data?.stepId;
+    const onStepFailed = (data: Record<string, unknown>) => {
+      const executionId = data?.executionId as string;
+      const stepId = data?.stepId as string;
       if (!executionId || !stepId) return;
       const workspaceId = resolveWorkspaceId(data?.workspaceId, executionId, executionWorkspaceMapRef, activeWorkspaceId);
       updateBucket(workspaceId, (current) => ({
         ...current,
         executions: current.executions.map((execution) => {
           if (execution.executionId !== executionId) return execution;
-          const nextSteps = (execution.steps || []).map((step) => step.id === stepId ? { ...step, status: 'FAILED', error: data?.error || 'Step failed', finishedAt: Date.now() } : step);
+          const nextSteps = (execution.steps || []).map((step) => step.id === stepId ? { ...step, status: 'FAILED', error: (data?.error as string) || 'Step failed', finishedAt: Date.now() } : step);
           return { ...execution, status: 'FAILED', steps: nextSteps, updatedAt: Date.now() };
         })
       }));
       setBucketPresence(workspaceId, 'Failed');
     };
 
-    const onCompleted = (data) => {
-      const executionId = data?.executionId;
+    const onCompleted = (data: Record<string, unknown>) => {
+      const executionId = data?.executionId as string;
       if (!executionId) return;
       const normalizedStatus = String(data?.status || 'COMPLETED').toUpperCase();
       const workspaceId = resolveWorkspaceId(data?.workspaceId, executionId, executionWorkspaceMapRef, activeWorkspaceId);
@@ -216,8 +252,8 @@ export const ExecutionProvider = ({ children }) => {
       setBucketPresence(workspaceId, normalizedStatus === 'BLOCKED' ? 'Blocked — insufficient credits' : 'Completed');
     };
 
-    const onFailed = (data) => {
-      const executionId = data?.executionId;
+    const onFailed = (data: Record<string, unknown>) => {
+      const executionId = data?.executionId as string;
       if (!executionId) return;
       const workspaceId = resolveWorkspaceId(data?.workspaceId, executionId, executionWorkspaceMapRef, activeWorkspaceId);
       updateBucket(workspaceId, (current) => ({
@@ -227,8 +263,8 @@ export const ExecutionProvider = ({ children }) => {
       setBucketPresence(workspaceId, 'Failed');
     };
 
-    const onBlocked = (data) => {
-      const executionId = data?.executionId;
+    const onBlocked = (data: Record<string, unknown>) => {
+      const executionId = data?.executionId as string;
       if (!executionId) return;
       const workspaceId = resolveWorkspaceId(data?.workspaceId, executionId, executionWorkspaceMapRef, activeWorkspaceId);
       updateBucket(workspaceId, (current) => ({
@@ -261,11 +297,11 @@ export const ExecutionProvider = ({ children }) => {
 
   useEffect(() => {
     if (!socket) return;
-    const onAgentStatus = (data) => {
+    const onAgentStatus = (data: Record<string, unknown>) => {
       if (data?.status) setBucketPresence(String(activeWorkspaceId || 'global'), String(data.status));
     };
     socket.on('ai:agent:status', onAgentStatus);
-    return () => socket.off('ai:agent:status', onAgentStatus);
+    return () => { socket.off('ai:agent:status', onAgentStatus); };
   }, [socket, activeWorkspaceId, setBucketPresence]);
 
   const activeExecution = useMemo(
@@ -290,10 +326,10 @@ export const ExecutionProvider = ({ children }) => {
     executions,
     presence,
     cancelActiveExecution,
-    setActiveExecutionId: (executionId) => setBucketActiveExecutionId(activeWorkspaceId, executionId)
+    setActiveExecutionId: (executionId: string | null) => setBucketActiveExecutionId(activeWorkspaceId, executionId)
   }), [activeExecution, activeExecutionId, executions, presence, activeWorkspaceId, setBucketActiveExecutionId]);
 
   return <ExecutionContext.Provider value={value}>{children}</ExecutionContext.Provider>;
 };
 
-export const useExecution = () => useContext(ExecutionContext) || {};
+export const useExecution = (): Partial<ExecutionContextType> => useContext(ExecutionContext) || {};

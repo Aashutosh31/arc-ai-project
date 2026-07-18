@@ -1,13 +1,59 @@
-import React, { createContext, useCallback, useEffect, useMemo, useRef, useState, useContext } from 'react';
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState, useContext, ReactNode, MutableRefObject } from 'react';
 import { useWorkspace } from './WorkspaceContext';
 
-const ChatContext = createContext();
+export interface ChatMessage {
+  sender: 'ai' | 'user' | 'system';
+  text: string;
+  isStreaming?: boolean;
+  isInterrupted?: boolean;
+  [key: string]: unknown;
+}
 
-export const useChat = () => useContext(ChatContext);
+export interface MediaData {
+  videoId?: string;
+  [key: string]: unknown;
+}
+
+interface ChatContextType {
+  messages: ChatMessage[];
+  addMessage: (message: ChatMessage) => void;
+  replaceMessages: (nextMessages?: ChatMessage[]) => void;
+  clearMessages: () => void;
+  appendBotChunk: (chunk: string) => void;
+  finishBotStream: () => void;
+  markBotInterrupted: () => void;
+  isProcessing: boolean;
+  setIsProcessing: (nextValue: boolean | ((prev: boolean) => boolean)) => void;
+  isStreaming: boolean;
+  setIsStreaming: (val: boolean) => void;
+  isSpeaking: boolean;
+  setIsSpeaking: (val: boolean) => void;
+  isVoiceListening: boolean;
+  setIsVoiceListening: (val: boolean) => void;
+  isInterrupted: boolean;
+  setIsInterrupted: (val: boolean) => void;
+  agentStatus: string | null;
+  setAgentStatus: (status: string | null) => void;
+  providerInfo: Record<string, unknown> | null;
+  setProviderInfo: (info: Record<string, unknown> | null) => void;
+  isInterruptedRef: MutableRefObject<boolean>;
+  mediaData: MediaData | null;
+  setMediaData: (data: MediaData | null) => void;
+  setLiveVisionCapture: (captureFn: () => string | null) => void;
+  getLiveVisionFrame: () => string | null;
+}
+
+const ChatContext = createContext<ChatContextType | undefined>(undefined);
+
+export const useChat = () => {
+  const context = useContext(ChatContext);
+  if (!context) throw new Error("useChat must be used within a ChatProvider");
+  return context;
+};
 
 // Exportable sanitizer for display-time normalization
-export const sanitizeForDisplay = (text) => {
-  if (!text || typeof text !== 'string') return text;
+export const sanitizeForDisplay = (text: unknown): string => {
+  if (!text || typeof text !== 'string') return text ? String(text) : '';
   let t = String(text);
   t = t.replace(/\r\n|\r/g, '\n');
   t = t.replace(/\*{1,2}/g, '');
@@ -22,48 +68,48 @@ export const sanitizeForDisplay = (text) => {
   return t.trim();
 };
 
-export const ChatProvider = ({ children }) => {
+export const ChatProvider = ({ children }: { children: ReactNode }) => {
   const { activeWorkspaceId, workspaceRevision } = useWorkspace();
-  const [messages, setMessages] = useState([]);
-  const [isProcessing, setIsProcessingState] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isProcessing, setIsProcessingState] = useState<boolean>(false);
+  const [isStreaming, setIsStreaming] = useState<boolean>(false);
 
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isVoiceListening, setIsVoiceListening] = useState(false);
-  const [isInterrupted, setIsInterrupted] = useState(false);
-  const [agentStatus, setAgentStatus] = useState(null);
-  const [providerInfo, setProviderInfo] = useState(null);
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  const [isVoiceListening, setIsVoiceListening] = useState<boolean>(false);
+  const [isInterrupted, setIsInterrupted] = useState<boolean>(false);
+  const [agentStatus, setAgentStatus] = useState<string | null>(null);
+  const [providerInfo, setProviderInfo] = useState<Record<string, unknown> | null>(null);
 
   // 🚀 NEW: State to hold the currently playing YouTube video
-  const [mediaData, setMediaData] = useState(null);
-  const liveVisionCaptureRef = useRef(() => null);
+  const [mediaData, setMediaData] = useState<MediaData | null>(null);
+  const liveVisionCaptureRef = useRef<() => string | null>(() => null);
 
-  const isInterruptedRef = useRef(false);
+  const isInterruptedRef = useRef<boolean>(false);
 
-  const setIsProcessing = useCallback((nextValue) => {
+  const setIsProcessing = useCallback((nextValue: boolean | ((prev: boolean) => boolean)) => {
     const resolvedValue = typeof nextValue === 'function' ? nextValue(isProcessing) : nextValue;
     const nextBoolean = Boolean(resolvedValue);
     setIsProcessingState(nextBoolean);
     setIsStreaming(nextBoolean);
   }, [isProcessing]);
 
-  const addMessage = useCallback((message) => {
+  const addMessage = useCallback((message: ChatMessage) => {
     setMessages((prev) => [...prev, message]);
   }, []);
 
-  const replaceMessages = useCallback((nextMessages = []) => {
+  const replaceMessages = useCallback((nextMessages: ChatMessage[] = []) => {
     setMessages(Array.isArray(nextMessages) ? nextMessages : []);
-    setIsProcessing(false);
+    setIsProcessingState(false);
     setIsStreaming(false);
   }, []);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
-    setIsProcessing(false);
+    setIsProcessingState(false);
     setIsStreaming(false);
   }, []);
 
-  const appendBotChunk = useCallback((chunk) => {
+  const appendBotChunk = useCallback((chunk: string) => {
     // Append-only streaming: do not sanitize, normalize, or mutate previous content.
     // This ensures stable rendering with no layout shifts while streaming.
     setMessages((prev) => {
@@ -80,7 +126,7 @@ export const ChatProvider = ({ children }) => {
 
   const finishBotStream = useCallback(() => {
     // Final normalization pass: use shared sanitizer (exported below)
-    const normalizeFinalText = (text) => sanitizeForDisplay(text);
+    const normalizeFinalText = (text: string) => sanitizeForDisplay(text);
 
     setMessages((prev) => {
       const updated = [...prev];
@@ -91,7 +137,7 @@ export const ChatProvider = ({ children }) => {
       }
       return updated;
     });
-    setIsProcessing(false);
+    setIsProcessingState(false);
     setIsStreaming(false);
     setIsInterrupted(false);
   }, []);
@@ -106,14 +152,14 @@ export const ChatProvider = ({ children }) => {
       }
       return updated;
     });
-    setIsProcessing(false);
+    setIsProcessingState(false);
     setIsStreaming(false);
     setIsInterrupted(true);
   }, []);
 
   
 
-  const setLiveVisionCapture = useCallback((captureFn) => {
+  const setLiveVisionCapture = useCallback((captureFn: () => string | null) => {
     liveVisionCaptureRef.current = typeof captureFn === 'function' ? captureFn : () => null;
   }, []);
 

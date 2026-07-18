@@ -1,17 +1,41 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { SocketContext } from './SocketContext';
+
+export interface Workspace {
+  _id: string;
+  name: string;
+  description?: string;
+  visibility?: string;
+  [key: string]: unknown;
+}
+
+interface WorkspaceContextType {
+  workspaces: Workspace[];
+  activeWorkspace: Workspace | null;
+  activeWorkspaceId: string | null;
+  workspaceRevision: number;
+  loadingWorkspaces: boolean;
+  switchingWorkspace: boolean;
+  workspaceError: string;
+  refreshWorkspaces: (options?: { preferredWorkspaceId?: string | null }) => Promise<Workspace | null>;
+  switchWorkspace: (workspaceId: string) => Promise<string | null>;
+  createWorkspace: (options: { name: string; description?: string; visibility?: string }) => Promise<Workspace | null>;
+  renameWorkspace: (workspaceId: string, updates?: Record<string, unknown>) => Promise<Workspace | null>;
+  deleteWorkspace: (workspaceId: string) => Promise<boolean>;
+  setActiveWorkspaceId: React.Dispatch<React.SetStateAction<string | null>>;
+}
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 const ACTIVE_WORKSPACE_STORAGE_KEY = 'arc.activeWorkspaceId';
 
-const WorkspaceContext = createContext(null);
+const WorkspaceContext = createContext<WorkspaceContextType | null>(null);
 
-const normalizeWorkspace = (workspace) => {
+const normalizeWorkspace = (workspace: Record<string, unknown> | null | undefined): Workspace | null => {
   if (!workspace) return null;
   return {
     ...workspace,
     _id: String(workspace._id || workspace.id || workspace.workspaceId || ''),
-  };
+  } as Workspace;
 };
 
 export const useWorkspace = () => {
@@ -20,25 +44,29 @@ export const useWorkspace = () => {
   return ctx;
 };
 
-export const WorkspaceProvider = ({ children }) => {
-  const { socket, authInfo } = useContext(SocketContext) || {};
-  const [workspaces, setWorkspaces] = useState([]);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState(null);
-  const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
-  const [switchingWorkspace, setSwitchingWorkspace] = useState(false);
-  const [workspaceError, setWorkspaceError] = useState('');
-  const [workspaceRevision, setWorkspaceRevision] = useState(0);
-  const activeWorkspaceIdRef = useRef(null);
+export const WorkspaceProvider = ({ children }: { children: ReactNode }) => {
+  const socketContext = useContext(SocketContext);
+  const socket = socketContext?.socket;
+  // Note: authInfo is no longer in SocketContext based on SocketContext.tsx types.
+  // The token is pulled from localStorage directly.
+  
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState<boolean>(false);
+  const [switchingWorkspace, setSwitchingWorkspace] = useState<boolean>(false);
+  const [workspaceError, setWorkspaceError] = useState<string>('');
+  const [workspaceRevision, setWorkspaceRevision] = useState<number>(0);
+  const activeWorkspaceIdRef = useRef<string | null>(null);
 
-  const authToken = authInfo?.token || localStorage.getItem('token');
-  const userId = authInfo?.userId || localStorage.getItem('userId');
-  const authReady = Boolean(authInfo?.ready || (authToken && userId));
+  const authToken = localStorage.getItem('token');
+  const userId = localStorage.getItem('userId');
+  const authReady = Boolean(authToken && userId);
 
   const getAuthHeaders = useCallback(() => ({
     Authorization: `Bearer ${authToken || localStorage.getItem('token')}`
   }), [authToken]);
 
-  const syncActiveWorkspace = useCallback((workspace, { bumpRevision = true } = {}) => {
+  const syncActiveWorkspace = useCallback((workspace: Record<string, unknown> | null, { bumpRevision = true } = {}) => {
     const normalized = normalizeWorkspace(workspace);
     if (!normalized?._id) return null;
 
@@ -61,7 +89,7 @@ export const WorkspaceProvider = ({ children }) => {
     return normalized;
   }, []);
 
-  const fetchWorkspaceById = useCallback(async (workspaceId) => {
+  const fetchWorkspaceById = useCallback(async (workspaceId: string) => {
     if (!workspaceId) return null;
     const response = await fetch(`${API_URL}/api/workspaces/${workspaceId}`, {
       headers: getAuthHeaders()
@@ -71,7 +99,7 @@ export const WorkspaceProvider = ({ children }) => {
     return normalizeWorkspace(data?.workspace || null);
   }, [getAuthHeaders]);
 
-  const refreshWorkspaces = useCallback(async ({ preferredWorkspaceId = null } = {}) => {
+  const refreshWorkspaces = useCallback(async ({ preferredWorkspaceId = null }: { preferredWorkspaceId?: string | null } = {}) => {
     if (!authReady) return null;
 
     setLoadingWorkspaces(true);
@@ -108,15 +136,15 @@ export const WorkspaceProvider = ({ children }) => {
       }
 
       return selectedWorkspace;
-    } catch (error) {
-      setWorkspaceError(error?.message || 'Failed to load workspaces');
+    } catch (error: unknown) {
+      setWorkspaceError((error as Error)?.message || 'Failed to load workspaces');
       return null;
     } finally {
       setLoadingWorkspaces(false);
     }
   }, [authReady, getAuthHeaders]);
 
-  const createWorkspace = useCallback(async ({ name, description = '', visibility = 'private' }) => {
+  const createWorkspace = useCallback(async ({ name, description = '', visibility = 'private' }: { name: string; description?: string; visibility?: string }) => {
     const response = await fetch(`${API_URL}/api/workspaces`, {
       method: 'POST',
       headers: {
@@ -141,7 +169,7 @@ export const WorkspaceProvider = ({ children }) => {
     return workspace;
   }, [getAuthHeaders, socket, syncActiveWorkspace]);
 
-  const renameWorkspace = useCallback(async (workspaceId, updates = {}) => {
+  const renameWorkspace = useCallback(async (workspaceId: string, updates: Record<string, unknown> = {}) => {
     const response = await fetch(`${API_URL}/api/workspaces/${workspaceId}`, {
       method: 'PUT',
       headers: {
@@ -161,7 +189,7 @@ export const WorkspaceProvider = ({ children }) => {
     return workspace;
   }, [getAuthHeaders, syncActiveWorkspace]);
 
-  const deleteWorkspace = useCallback(async (workspaceId) => {
+  const deleteWorkspace = useCallback(async (workspaceId: string) => {
     const response = await fetch(`${API_URL}/api/workspaces/${workspaceId}`, {
       method: 'DELETE',
       headers: getAuthHeaders()
@@ -187,7 +215,7 @@ export const WorkspaceProvider = ({ children }) => {
     return true;
   }, [getAuthHeaders, socket, syncActiveWorkspace, workspaces]);
 
-  const switchWorkspace = useCallback(async (workspaceId) => {
+  const switchWorkspace = useCallback(async (workspaceId: string) => {
     if (!workspaceId || workspaceId === activeWorkspaceIdRef.current) return activeWorkspaceIdRef.current;
 
     setSwitchingWorkspace(true);
@@ -202,8 +230,8 @@ export const WorkspaceProvider = ({ children }) => {
         socket.emit('workspace:switch', { workspaceId: workspace._id });
       }
       return workspace._id;
-    } catch (error) {
-      setWorkspaceError(error?.message || 'Failed to switch workspace');
+    } catch (error: unknown) {
+      setWorkspaceError((error as Error)?.message || 'Failed to switch workspace');
       throw error;
     } finally {
       setSwitchingWorkspace(false);
@@ -220,7 +248,7 @@ export const WorkspaceProvider = ({ children }) => {
   useEffect(() => {
     if (!socket) return undefined;
 
-    const handleWorkspaceSwitched = (data) => {
+    const handleWorkspaceSwitched = (data: Record<string, unknown>) => {
       const workspaceId = data?.workspaceId ? String(data.workspaceId) : null;
       if (!workspaceId) return;
       const workspace = normalizeWorkspace({
@@ -232,7 +260,7 @@ export const WorkspaceProvider = ({ children }) => {
     };
 
     socket.on('workspace:switched', handleWorkspaceSwitched);
-    return () => socket.off('workspace:switched', handleWorkspaceSwitched);
+    return () => { socket.off('workspace:switched', handleWorkspaceSwitched); };
   }, [socket, syncActiveWorkspace]);
 
   const activeWorkspace = useMemo(

@@ -1,10 +1,43 @@
-import React, { createContext, useState, useContext, useCallback, useEffect } from 'react';
+import React, { createContext, useState, useContext, useCallback, useEffect, ReactNode } from 'react';
 import { SocketContext } from './SocketContext';
 import { useWorkspace } from './WorkspaceContext';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
-const ConversationContext = createContext();
+export interface Conversation {
+  _id: string;
+  title: string;
+  [key: string]: unknown;
+}
+
+export interface ConversationContextType {
+  conversations: Conversation[];
+  activeConversationId: string | null;
+  activeConversationRevision: number;
+  focusedMessageId: string | null;
+  setFocusedMessageId: React.Dispatch<React.SetStateAction<string | null>>;
+  loadingConversations: boolean;
+  conversationError: string | null;
+  fetchConversations: () => Promise<void>;
+  createNewConversation: (title?: string) => Promise<Conversation>;
+  ensureConversationReady: (title?: string) => Promise<string | null>;
+  switchConversation: (conversationId: string | null) => void;
+  updateConversation: (conversationId: string, updates: Record<string, unknown>) => Promise<Conversation>;
+  deleteConversation: (conversationId: string) => Promise<void>;
+  fetchConversationMessages: (conversationId: string | null, options?: { limit?: number; skip?: number }) => Promise<Record<string, unknown>[]>;
+  addConversationFromSocket: (conversation: Conversation) => void;
+  updateConversationTitle: (conversationId: string, title: string, workspaceId?: string | null) => void;
+  searchWorkspace: (query: string, options?: { limit?: number; signal?: AbortSignal }) => Promise<Record<string, unknown>>;
+  fetchMemoryDashboard: () => Promise<Record<string, unknown>>;
+  updateMemoryPreferences: (memoryLearningEnabled: boolean) => Promise<Record<string, unknown>>;
+  updateMemoryFact: (memoryId: string, updates: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  deleteMemoryFact: (memoryId: string) => Promise<Record<string, unknown>>;
+  updateSemanticMemory: (memoryId: string, updates: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  deleteSemanticMemory: (memoryId: string) => Promise<Record<string, unknown>>;
+  isFirstMessageSendingRef: React.MutableRefObject<boolean>;
+}
+
+const ConversationContext = createContext<ConversationContextType | null>(null);
 
 export const useConversation = () => {
   const ctx = useContext(ConversationContext);
@@ -12,23 +45,24 @@ export const useConversation = () => {
   return ctx;
 };
 
-export const ConversationProvider = ({ children }) => {
-  const { socket } = useContext(SocketContext) || {};
+export const ConversationProvider = ({ children }: { children: ReactNode }) => {
+  const socketContext = useContext(SocketContext);
+  const socket = socketContext?.socket;
   const { activeWorkspaceId, workspaceRevision } = useWorkspace();
-  const [conversations, setConversations] = useState([]);
-  const [activeConversationId, setActiveConversationId] = useState(null);
-  const [activeConversationRevision, setActiveConversationRevision] = useState(0);
-  const [focusedMessageId, setFocusedMessageId] = useState(null);
-  const [loadingConversations, setLoadingConversations] = useState(false);
-  const [conversationError, setConversationError] = useState(null);
-  const activeConversationIdRef = React.useRef(null);
-  const isFirstMessageSendingRef = React.useRef(false);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [activeConversationRevision, setActiveConversationRevision] = useState<number>(0);
+  const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
+  const [loadingConversations, setLoadingConversations] = useState<boolean>(false);
+  const [conversationError, setConversationError] = useState<string | null>(null);
+  const activeConversationIdRef = React.useRef<string | null>(null);
+  const isFirstMessageSendingRef = React.useRef<boolean>(false);
 
   const getAuthHeaders = () => ({
     Authorization: `Bearer ${localStorage.getItem('token')}`
   });
 
-  const getWorkspaceParam = useCallback((workspaceId = activeWorkspaceId) => {
+  const getWorkspaceParam = useCallback((workspaceId: string | null = activeWorkspaceId) => {
     if (!workspaceId) return '';
     return `workspaceId=${encodeURIComponent(workspaceId)}`;
   }, [activeWorkspaceId]);
@@ -49,16 +83,16 @@ export const ConversationProvider = ({ children }) => {
         setActiveConversationId(data[0]._id);
         activeConversationIdRef.current = data[0]._id;
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error fetching conversations:', err);
-      setConversationError(err.message);
+      setConversationError((err as Error).message);
     } finally {
       setLoadingConversations(false);
     }
   }, [getWorkspaceParam, activeWorkspaceId]);
 
   // Create new conversation
-  const createNewConversation = useCallback(async (title = 'New Conversation') => {
+  const createNewConversation = useCallback(async (title: string = 'New Conversation') => {
     try {
       const response = await fetch(`${API_URL}/api/conversations`, {
         method: 'POST',
@@ -75,14 +109,14 @@ export const ConversationProvider = ({ children }) => {
       activeConversationIdRef.current = newConv._id;
       setActiveConversationRevision((value) => value + 1);
       return newConv;
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error creating conversation:', err);
-      setConversationError(err.message);
+      setConversationError((err as Error).message);
       throw err;
     }
   }, [activeWorkspaceId]);
 
-  const ensureConversationReady = useCallback(async (title = 'New Conversation') => {
+  const ensureConversationReady = useCallback(async (title: string = 'New Conversation') => {
     if (activeConversationId) {
       return activeConversationId;
     }
@@ -93,7 +127,7 @@ export const ConversationProvider = ({ children }) => {
   }, [activeConversationId, createNewConversation]);
 
   // Switch to a conversation
-  const switchConversation = useCallback((conversationId) => {
+  const switchConversation = useCallback((conversationId: string | null) => {
     console.log('[ConversationContext] switchConversation', {
       from: activeConversationId,
       to: conversationId
@@ -105,7 +139,7 @@ export const ConversationProvider = ({ children }) => {
   }, [activeConversationId]);
 
   // Update conversation (title, pinned status)
-  const updateConversation = useCallback(async (conversationId, updates) => {
+  const updateConversation = useCallback(async (conversationId: string, updates: Record<string, unknown>) => {
     try {
       const response = await fetch(`${API_URL}/api/conversations/${conversationId}`, {
         method: 'PATCH',
@@ -121,14 +155,14 @@ export const ConversationProvider = ({ children }) => {
         prev.map((conv) => (conv._id === conversationId ? updated : conv))
       );
       return updated;
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error updating conversation:', err);
-      setConversationError(err.message);
+      setConversationError((err as Error).message);
       throw err;
     }
   }, [activeWorkspaceId]);
 
-  const searchWorkspace = useCallback(async (query, options = {}) => {
+  const searchWorkspace = useCallback(async (query: string, options: { limit?: number; signal?: AbortSignal } = {}) => {
     const normalizedQuery = String(query || '').trim();
     if (!normalizedQuery) {
       return { query: '', items: [], grouped: { conversations: [], messages: [], memories: [] }, stats: { total: 0, conversations: 0, messages: 0, memories: 0 } };
@@ -154,7 +188,7 @@ export const ConversationProvider = ({ children }) => {
     return response.json();
   }, [activeWorkspaceId]);
 
-  const updateMemoryPreferences = useCallback(async (memoryLearningEnabled) => {
+  const updateMemoryPreferences = useCallback(async (memoryLearningEnabled: boolean) => {
     const response = await fetch(`${API_URL}/api/memory/preferences`, {
       method: 'PATCH',
       headers: {
@@ -168,7 +202,7 @@ export const ConversationProvider = ({ children }) => {
     return response.json();
   }, [activeWorkspaceId]);
 
-  const updateMemoryFact = useCallback(async (memoryId, updates) => {
+  const updateMemoryFact = useCallback(async (memoryId: string, updates: Record<string, unknown>) => {
     const response = await fetch(`${API_URL}/api/memory/facts/${memoryId}`, {
       method: 'PATCH',
       headers: {
@@ -182,7 +216,7 @@ export const ConversationProvider = ({ children }) => {
     return response.json();
   }, [activeWorkspaceId]);
 
-  const deleteMemoryFact = useCallback(async (memoryId) => {
+  const deleteMemoryFact = useCallback(async (memoryId: string) => {
     const response = await fetch(`${API_URL}/api/memory/facts/${memoryId}`, {
       method: 'DELETE',
       headers: getAuthHeaders()
@@ -192,7 +226,7 @@ export const ConversationProvider = ({ children }) => {
     return response.json();
   }, [activeWorkspaceId]);
 
-  const updateSemanticMemory = useCallback(async (memoryId, updates) => {
+  const updateSemanticMemory = useCallback(async (memoryId: string, updates: Record<string, unknown>) => {
     const response = await fetch(`${API_URL}/api/memory/semantic/${memoryId}`, {
       method: 'PATCH',
       headers: {
@@ -206,7 +240,7 @@ export const ConversationProvider = ({ children }) => {
     return response.json();
   }, [activeWorkspaceId]);
 
-  const deleteSemanticMemory = useCallback(async (memoryId) => {
+  const deleteSemanticMemory = useCallback(async (memoryId: string) => {
     const response = await fetch(`${API_URL}/api/memory/semantic/${memoryId}`, {
       method: 'DELETE',
       headers: getAuthHeaders()
@@ -217,7 +251,7 @@ export const ConversationProvider = ({ children }) => {
   }, []);
 
   // Delete conversation
-  const deleteConversation = useCallback(async (conversationId) => {
+  const deleteConversation = useCallback(async (conversationId: string) => {
     try {
       const response = await fetch(`${API_URL}/api/conversations/${conversationId}`, {
         method: 'DELETE',
@@ -233,14 +267,14 @@ export const ConversationProvider = ({ children }) => {
         }
         return next;
       });
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error deleting conversation:', err);
-      setConversationError(err.message);
+      setConversationError((err as Error).message);
       throw err;
     }
   }, [activeConversationId, activeWorkspaceId]);
 
-  const fetchConversationMessages = useCallback(async (conversationId, options = {}) => {
+  const fetchConversationMessages = useCallback(async (conversationId: string | null, options: { limit?: number; skip?: number } = {}) => {
     if (!conversationId) return [];
     const limit = Number(options.limit || 200);
     const skip = Number(options.skip || 0);
@@ -252,7 +286,7 @@ export const ConversationProvider = ({ children }) => {
       skip
     });
 
-    const loadMessages = async (workspaceId) => {
+    const loadMessages = async (workspaceId: string | null) => {
       const response = await fetch(
         `${API_URL}/api/conversations/${conversationId}/messages?limit=${limit}&skip=${skip}${workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ''}`,
         { headers: getAuthHeaders() }
@@ -269,8 +303,8 @@ export const ConversationProvider = ({ children }) => {
         if (Array.isArray(legacyData?.messages) && legacyData.messages.length > 0) {
           data = legacyData;
         }
-      } catch (legacyErr) {
-        console.warn('[ConversationContext] legacy fallback failed:', legacyErr?.message || legacyErr);
+      } catch (legacyErr: unknown) {
+        console.warn('[ConversationContext] legacy fallback failed:', (legacyErr as Error)?.message || legacyErr);
       }
     }
 
@@ -278,7 +312,7 @@ export const ConversationProvider = ({ children }) => {
       conversationId,
       count: Array.isArray(data?.messages) ? data.messages.length : 0,
       statuses: Array.isArray(data?.messages)
-        ? data.messages.map((message) => ({
+        ? data.messages.map((message: { role?: string, metadata?: Record<string, unknown>, content?: string }) => ({
             role: message?.role,
             interrupted: Boolean(message?.metadata?.interrupted),
             streaming: Boolean(message?.metadata?.streaming),
@@ -292,7 +326,7 @@ export const ConversationProvider = ({ children }) => {
   }, [activeWorkspaceId]);
 
   // Register new conversation from socket event
-  const addConversationFromSocket = useCallback((conversation) => {
+  const addConversationFromSocket = useCallback((conversation: Conversation) => {
     if (!conversation?._id) return;
     if (conversation?.workspaceId && activeWorkspaceId && String(conversation.workspaceId) !== String(activeWorkspaceId)) return;
     setConversations((prev) => [conversation, ...prev.filter((conv) => conv._id !== conversation._id)]);
@@ -301,7 +335,7 @@ export const ConversationProvider = ({ children }) => {
   }, [activeWorkspaceId]);
 
   // Update conversation title from auto-generation
-  const updateConversationTitle = useCallback((conversationId, title, workspaceId = null) => {
+  const updateConversationTitle = useCallback((conversationId: string, title: string, workspaceId: string | null = null) => {
     console.log('[ConversationContext] updateConversationTitle', { conversationId, title });
     if (workspaceId && activeWorkspaceId && String(workspaceId) !== String(activeWorkspaceId)) return;
     setConversations((prev) =>
@@ -314,9 +348,9 @@ export const ConversationProvider = ({ children }) => {
   useEffect(() => {
     if (!socket) return;
 
-    const handleConversationTitle = (data) => {
+    const handleConversationTitle = (data: Record<string, unknown>) => {
       if (!data?.conversationId || !data?.title) return;
-      updateConversationTitle(data.conversationId, data.title, data.workspaceId || null);
+      updateConversationTitle(data.conversationId as string, data.title as string, (data.workspaceId as string) || null);
       console.log('[ConversationContext] title event received', {
         conversationId: data.conversationId,
         title: data.title,
@@ -326,7 +360,7 @@ export const ConversationProvider = ({ children }) => {
     };
 
     socket.on('ai:conversation:title', handleConversationTitle);
-    return () => socket.off('ai:conversation:title', handleConversationTitle);
+    return () => { socket.off('ai:conversation:title', handleConversationTitle); };
   }, [socket, updateConversationTitle, fetchConversations]);
 
   // Reset and reload whenever the active workspace changes.
@@ -339,7 +373,7 @@ export const ConversationProvider = ({ children }) => {
     fetchConversations();
   }, [activeWorkspaceId, workspaceRevision]);
 
-  const value = {
+  const value: ConversationContextType = {
     conversations,
     activeConversationId,
     activeConversationRevision,
