@@ -10,10 +10,10 @@ export const useVoiceInput = () => {
     const { isConnected, sendCommand } = useSocket();
     const { setIsVoiceListening } = useChat();
     
-    const [isListening, setIsListening] = useState(false);
-    const [transcript, setTranscript] = useState('');
-    const recognitionRef = useRef(null);
-    const finalCommandRef = useRef(''); 
+    const [isListening, setIsListening] = useState<boolean>(false);
+    const [transcript, setTranscript] = useState<string>('');
+    const recognitionRef = useRef<SpeechRecognition | null>(null);
+    const finalCommandRef = useRef<string>('');
 
     const startListening = () => {
         if (!SpeechRecognition) {
@@ -39,7 +39,7 @@ export const useVoiceInput = () => {
             finalCommandRef.current = ''; 
         };
 
-        recognition.onresult = (event) => {
+        recognition.onresult = (event: SpeechRecognitionEvent) => {
             let interimTranscript = '';
             let finalTranscript = '';
 
@@ -66,7 +66,7 @@ export const useVoiceInput = () => {
             }
         };
 
-        recognition.onerror = (event) => {
+        recognition.onerror = (event: SpeechRecognitionEvent) => {
             setIsListening(false);
             setIsVoiceListening(false);
             console.error('STT Error:', event.error);

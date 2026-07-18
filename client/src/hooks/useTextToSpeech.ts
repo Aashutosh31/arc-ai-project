@@ -1,7 +1,22 @@
 import { useCallback } from 'react';
-import { useChat } from '../contexts/ChatContext'; // 🚀 FIX: Import global context
+import { useChat } from '../contexts/ChatContext';
 
-const sharedSpeechState = {
+interface SpeechQueueItem {
+  sessionId: number;
+  text: string;
+}
+
+interface SharedSpeechState {
+  sentenceBuffer: string;
+  speechQueue: SpeechQueueItem[];
+  isQueueRunning: boolean;
+  currentUtterance: SpeechSynthesisUtterance | null;
+  pendingDelay: ReturnType<typeof setTimeout> | null;
+  activeSpeechSessionId: number;
+  currentSpeechSessionId: number;
+}
+
+const sharedSpeechState: SharedSpeechState = {
   sentenceBuffer: '',
   speechQueue: [],
   isQueueRunning: false,
@@ -11,10 +26,10 @@ const sharedSpeechState = {
   currentSpeechSessionId: 0
 };
 
-const cleanTextForSpeech = (text) => {
+const cleanTextForSpeech = (text: string | null | undefined): string => {
   let cleaned = String(text || '');
 
-  const replacements = [
+  const replacements: [RegExp, string][] = [
     [/\bP\.S\./gi, 'By the way'],
     [/\be\.g\./gi, 'for example'],
     [/\bi\.e\./gi, 'that is'],
@@ -48,26 +63,26 @@ const cleanTextForSpeech = (text) => {
   return cleaned.trim();
 };
 
-const splitTextForSpeech = (text) => {
+const splitTextForSpeech = (text: string | null | undefined): string[] => {
   const cleaned = cleanTextForSpeech(text);
   if (!cleaned) return [];
 
-  const protectedTokens = [];
-  const protectToken = (match) => {
+  const protectedTokens: string[] = [];
+  const protectToken = (match: string) => {
     const tokenId = protectedTokens.push(match) - 1;
     return `__TTS_TOKEN_${tokenId}__`;
   };
 
-  const restoreTokens = (value) => String(value || '').replace(/__TTS_TOKEN_(\d+)__/g, (_, index) => protectedTokens[Number(index)] || '');
+  const restoreTokens = (value: string | null | undefined) => String(value || '').replace(/__TTS_TOKEN_(\d+)__/g, (_, index) => protectedTokens[Number(index)] || '');
   const workingText = cleaned
     .replace(/\bv?\d+(?:\.\d+)+\b/gi, protectToken)
     .replace(/\b\d+\.\d+\b/g, protectToken);
 
   const sentenceChunks = workingText.split(/(?<=[.!?])\s+(?=[A-Z"“(])/g) || [workingText];
-  const segments = [];
+  const segments: string[] = [];
   const maxLength = 150;
 
-  const pushWordChunks = (value) => {
+  const pushWordChunks = (value: string | null | undefined) => {
     const words = String(value || '').trim().split(/\s+/).filter(Boolean);
     if (words.length === 0) return;
 
@@ -127,7 +142,7 @@ export const useTextToSpeech = () => {
     sharedSpeechState.activeSpeechSessionId = 0;
   }, []);
 
-  const finishQueue = useCallback((sessionId) => {
+  const finishQueue = useCallback((sessionId: number) => {
     if (sessionId !== sharedSpeechState.currentSpeechSessionId) return;
     sharedSpeechState.isQueueRunning = false;
     sharedSpeechState.currentUtterance = null;
@@ -138,7 +153,7 @@ export const useTextToSpeech = () => {
     }
   }, [setIsSpeaking]);
 
-  const speakNextInQueue = useCallback((sessionId) => {
+  const speakNextInQueue = useCallback((sessionId: number) => {
     if (sessionId !== sharedSpeechState.currentSpeechSessionId) {
       return;
     }
@@ -197,7 +212,7 @@ export const useTextToSpeech = () => {
     window.speechSynthesis.speak(utterance);
   }, [finishQueue, setIsSpeaking]);
 
-  const speakQueue = useCallback((segments) => {
+  const speakQueue = useCallback((segments: string[]) => {
     if (!('speechSynthesis' in window)) return;
 
     const queueItems = Array.isArray(segments) ? segments.map((segment) => String(segment || '').trim()).filter(Boolean) : [];
@@ -211,12 +226,12 @@ export const useTextToSpeech = () => {
     speakNextInQueue(sessionId);
   }, [speakNextInQueue, startNewSpeechSession]);
 
-  const speak = useCallback((text) => {
+  const speak = useCallback((text: string | null | undefined) => {
     const segments = splitTextForSpeech(text);
     speakQueue(segments);
   }, [speakQueue]);
 
-  const processStreamChunk = useCallback((chunk, isFinal) => {
+  const processStreamChunk = useCallback((chunk: string | null | undefined, isFinal: boolean) => {
     if (chunk) sharedSpeechState.sentenceBuffer += chunk;
 
     const shouldFlush = isFinal || /[.!?]/.test(chunk) || sharedSpeechState.sentenceBuffer.length >= 220;

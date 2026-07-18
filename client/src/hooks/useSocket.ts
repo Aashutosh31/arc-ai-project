@@ -1,15 +1,25 @@
-import { useEffect, useContext } from 'react';
-import { useRef } from 'react';
+import { useEffect, useContext, useRef } from 'react';
 import { SocketContext } from '../contexts/SocketContext';
 import { useChat } from '../contexts/ChatContext';
 import { useTextToSpeech } from './useTextToSpeech';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 
+interface DocumentData {
+  name: string;
+  [key: string]: unknown;
+}
+
 // 🚀 FIX: Global deduplication timer shared across all tabs and reloads
 let lastReminderTime = 0;
 
 export const useSocket = () => {
-  const { socket, isConnected, authInfo, setAuthInfo } = useContext(SocketContext) || {}; 
+  const socketContext = useContext(SocketContext);
+  const socket = socketContext?.socket;
+  const isConnected = socketContext?.isConnected;
+  // authInfo and setAuthInfo are not in SocketContext, fallback safely
+  const authInfo: Record<string, unknown> | undefined = undefined;
+  const setAuthInfo: React.Dispatch<React.SetStateAction<Record<string, unknown>>> | undefined = undefined;
+
   const { activeWorkspaceId } = useWorkspace();
   const { addMessage, appendBotChunk, finishBotStream, markBotInterrupted, setIsProcessing, setIsStreaming, isInterruptedRef, setIsInterrupted, setMediaData, setAgentStatus, setProviderInfo } = useChat();
   const { processStreamChunk, stop, stopSpeech } = useTextToSpeech();
@@ -26,7 +36,7 @@ export const useSocket = () => {
     socket.off('ai:agent:status');
     socket.off('ai:credits:update');
 
-    socket.on('ai:tts:response:chunk', (data) => {
+    socket.on('ai:tts:response:chunk', (data: Record<string, unknown>) => {
       if (isInterruptedRef.current) return; 
 
       const { chunk, displayText, isFinal } = data;
@@ -42,9 +52,9 @@ export const useSocket = () => {
       }
 
       if (!isFinal) {
-        appendBotChunk(displayText || chunk);
+        appendBotChunk((displayText as string) || (chunk as string));
         if (!suppressSpeechRef.current) {
-          processStreamChunk(displayText || chunk, false);
+          processStreamChunk((displayText as string) || (chunk as string), false);
         }
       } else {
         finishBotStream();
@@ -57,11 +67,11 @@ export const useSocket = () => {
       }
     });
 
-    socket.on('ai:agent:status', (data) => {
-      setAgentStatus(data?.status || null);
+    socket.on('ai:agent:status', (data: Record<string, unknown>) => {
+      setAgentStatus((data?.status as string) || null);
     });
 
-    socket.on('ai:provider:info', (data) => {
+    socket.on('ai:provider:info', (data: Record<string, unknown>) => {
       if (setProviderInfo) {
         setProviderInfo({
           provider: data?.provider || null,
@@ -71,7 +81,7 @@ export const useSocket = () => {
       }
     });
 
-    socket.on('ai:credits:update', (data) => {
+    socket.on('ai:credits:update', (data: Record<string, unknown>) => {
       const creditsRemaining = Number(data?.creditsRemaining ?? 0);
       if (setAuthInfo) {
         setAuthInfo((prev) => ({
@@ -82,19 +92,19 @@ export const useSocket = () => {
       localStorage.setItem('creditsRemaining', String(creditsRemaining));
     });
 
-    socket.on('ai:client:action', async (action) => {
+    socket.on('ai:client:action', async (action: Record<string, unknown>) => {
       console.log('Received Client Action:', action);
       
       if (action.type === 'OPEN_URL') {
-        window.open(action.url, '_blank');
+        window.open(action.url as string, '_blank');
       } 
       else if (action.type === 'COPY_TO_CLIPBOARD') {
         try {
             if (navigator.clipboard && window.isSecureContext) {
-                await navigator.clipboard.writeText(action.text);
+                await navigator.clipboard.writeText(action.text as string);
             } else {
                 const textArea = document.createElement("textarea");
-                textArea.value = action.text;
+                textArea.value = action.text as string;
                 document.body.appendChild(textArea);
                 textArea.select();
                 document.execCommand('copy');
@@ -105,10 +115,10 @@ export const useSocket = () => {
         }
       }
       else if (action.type === 'CHANGE_THEME') {
-        document.documentElement.setAttribute('data-theme', action.theme);
+        document.documentElement.setAttribute('data-theme', action.theme as string);
       }
       else if (action.type === 'PLAY_MEDIA') {
-        setMediaData({ videoId: action.videoId, title: action.title });
+        setMediaData({ videoId: action.videoId as string, title: action.title as string });
       }
       else if (action.type === 'STOP_MEDIA') {
         setMediaData(null); 
@@ -125,14 +135,14 @@ export const useSocket = () => {
 
         stop(); // Silence anything currently playing
         
-        addMessage({ sender: 'ai', text: `⏰ PROACTIVE REMINDER: ${action.message}` });
+        addMessage({ sender: 'ai', text: `⏰ PROACTIVE REMINDER: ${action.message as string}` });
         
-        const spokenMessage = `Excuse me sir, I have a reminder for you: ${action.message}`;
+        const spokenMessage = `Excuse me sir, I have a reminder for you: ${action.message as string}`;
         processStreamChunk(spokenMessage, true);
       }
     });
 
-    socket.on('bot_error', (errorMsg) => {
+    socket.on('bot_error', (errorMsg: string) => {
       if (isInterruptedRef.current) {
         return;
       }
@@ -151,7 +161,7 @@ export const useSocket = () => {
     };
   }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef, setMediaData, setAgentStatus, setAuthInfo]);
 
-  const sendCommand = (text, imageBase64 = null, documentData = null, conversationId = null) => {
+  const sendCommand = (text: string, imageBase64: string | null = null, documentData: DocumentData | null = null, conversationId: string | null = null) => {
     if (socket) {
       isInterruptedRef.current = false; 
       if (setIsInterrupted) setIsInterrupted(false);

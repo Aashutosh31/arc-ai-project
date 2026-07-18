@@ -1,15 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { useChat } from '../contexts/ChatContext';
 
-export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
-  const [isVoiceModeActive, setIsVoiceModeActive] = useState(false);
+export const useAdvancedVoice = (onFinalCommand?: (text: string) => void, onInterrupt?: () => void) => {
+  const [isVoiceModeActive, setIsVoiceModeActive] = useState<boolean>(false);
   const [liveTranscript, setLiveTranscript] = useState('');
   const { setIsVoiceListening } = useChat();
   
-  const recognitionRef = useRef(null);
-  const silenceTimerRef = useRef(null);
-  const isSpeakingRef = useRef(false);
-  const isVoiceModeActiveRef = useRef(false);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSpeakingRef = useRef<boolean>(false);
+  const isVoiceModeActiveRef = useRef<boolean>(false);
   const onFinalCommandRef = useRef(onFinalCommand);
   const onInterruptRef = useRef(onInterrupt);
 
@@ -51,7 +51,7 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
       isSpeakingRef.current = false;
     };
 
-    recognition.onresult = (event) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       let finalTranscript = '';
       let interimTranscript = '';
 
@@ -66,7 +66,9 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
       const currentText = (finalTranscript + interimTranscript).trim();
       setLiveTranscript(currentText);
 
-      clearTimeout(silenceTimerRef.current);
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+      }
       
       if (currentText.length > 0) {
         silenceTimerRef.current = setTimeout(() => {
@@ -90,7 +92,7 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
       }
     };
 
-    recognition.onerror = (event) => {
+    recognition.onerror = (event: SpeechRecognitionEvent) => {
       if (event.error !== 'no-speech') {
         console.error('[Advanced Voice] Recognition error:', event.error);
       }
@@ -100,7 +102,9 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
 
     return () => {
       recognition.stop();
-      clearTimeout(silenceTimerRef.current);
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+      }
       setIsVoiceListening(false);
     };
   }, []);
@@ -115,8 +119,8 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
         console.debug('[Advanced Voice] stop failed', error);
       }
       setLiveTranscript('');
-      clearTimeout(silenceTimerRef.current);
-        setIsVoiceListening(false);
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      setIsVoiceListening(false);
     } else {
       setIsVoiceModeActive(true);
       isVoiceModeActiveRef.current = true;

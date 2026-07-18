@@ -5,7 +5,7 @@ const getViewportWidth = () => {
   return window.innerWidth || document.documentElement.clientWidth || 1440;
 };
 
-const classifyWorkspaceMode = (width) => {
+const classifyWorkspaceMode = (width: number) => {
   if (width >= 1400) return 'desktop-wide';
   if (width >= 1000) return 'desktop-compact';
   if (width >= 700) return 'tablet';
