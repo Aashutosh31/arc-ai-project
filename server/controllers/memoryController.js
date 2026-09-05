@@ -1,8 +1,31 @@
 const AIMemory = require('../models/AIMemory');
 const UserFact = require('../models/UserFact');
 const User = require('../models/User');
+const { getActor, isGuestActor } = require('../lib/actor');
 
-const getUserId = (req) => req.user?.id || req.user?.userId;
+const getUserId = (req) => getActor(req)?.id || null;
+
+// Guests persist no memory records (AIMemory/UserFact reference real users
+// only). The dashboard returns empty collections instead of hitting ObjectId
+// casts; mutations are rejected instead of 500ing on those casts.
+const rejectGuestMutation = (req, res) => {
+  const actor = getActor(req);
+  if (actor && isGuestActor(actor)) {
+    res.status(403).json({ error: 'Memory management requires a signed-in account.', code: 'GUEST_NOT_ALLOWED' });
+    return true;
+  }
+  return false;
+};
+
+const emptyDashboard = () => ({
+  preferences: {
+    memoryLearningEnabled: true,
+    voice: 'professional',
+    accentColor: '#00FFFF'
+  },
+  facts: [],
+  memories: []
+});
 
 const toMemoryResponse = (memory) => ({
   _id: String(memory._id),
@@ -31,9 +54,11 @@ const toFactResponse = (fact) => ({
 
 exports.getMemoryDashboard = async (req, res) => {
   try {
-    const userId = getUserId(req);
+    const actor = getActor(req);
+    const userId = actor?.id || null;
     const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!userId) return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    if (actor && isGuestActor(actor)) return res.json(emptyDashboard());
 
     const factQuery = { userId };
     const memoryQuery = { userId };
@@ -66,7 +91,8 @@ exports.getMemoryDashboard = async (req, res) => {
 exports.updatePreferences = async (req, res) => {
   try {
     const userId = getUserId(req);
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!userId) return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    if (rejectGuestMutation(req, res)) return;
 
     const { memoryLearningEnabled } = req.body || {};
     if (typeof memoryLearningEnabled !== 'boolean') {
@@ -94,7 +120,8 @@ exports.updateFact = async (req, res) => {
     const userId = getUserId(req);
     const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
     const { memoryId } = req.params;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!userId) return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    if (rejectGuestMutation(req, res)) return;
 
     const factQuery = { _id: memoryId, userId };
     if (workspaceId) factQuery.workspaceId = workspaceId;
@@ -120,7 +147,8 @@ exports.deleteFact = async (req, res) => {
     const userId = getUserId(req);
     const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
     const { memoryId } = req.params;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!userId) return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    if (rejectGuestMutation(req, res)) return;
 
     const factQuery = { _id: memoryId, userId };
     if (workspaceId) factQuery.workspaceId = workspaceId;
@@ -138,7 +166,8 @@ exports.updateSemanticMemory = async (req, res) => {
     const userId = getUserId(req);
     const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
     const { memoryId } = req.params;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!userId) return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    if (rejectGuestMutation(req, res)) return;
 
     const memoryQuery = { _id: memoryId, userId };
     if (workspaceId) memoryQuery.workspaceId = workspaceId;
@@ -165,7 +194,8 @@ exports.deleteSemanticMemory = async (req, res) => {
     const userId = getUserId(req);
     const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
     const { memoryId } = req.params;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!userId) return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    if (rejectGuestMutation(req, res)) return;
 
     const memoryQuery = { _id: memoryId, userId };
     if (workspaceId) memoryQuery.workspaceId = workspaceId;

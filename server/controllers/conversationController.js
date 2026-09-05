@@ -1,14 +1,49 @@
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const LLMRouter = require('../lib/llm/LLMRouter');
+const mongoose = require('mongoose');
+const { getActor, isGuestActor } = require('../lib/actor');
+const WorkspaceRuntimeManager = require('../services/WorkspaceRuntimeManager');
 
-// Guests own no workspaces, so any workspace filter they send can only be a
-// stale id from another session. Ignore it (treat as null) so guest
-// conversations stay visible instead of 404ing on a foreign workspace.
-const getActorContext = (req) => ({
-  userId: req.user?.id || req.user?.userId,
-  workspaceId: req.authType === 'guest' ? null : (req.query?.workspaceId || req.body?.workspaceId || null)
-});
+const workspaceRuntime = new WorkspaceRuntimeManager({ logger: console });
+
+// Request identity comes from the canonical actor (server/lib/actor.js), never
+// from provider-specific fields. Guests own no workspaces, so any workspace
+// filter they send can only be stale — it is ignored (treated as null) so
+// guest conversations stay visible instead of 404ing on a foreign workspace.
+const getRequestContext = (req) => {
+  const actor = getActor(req);
+  const rawWorkspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
+  return {
+    actor,
+    userId: actor?.id || null,
+    workspaceId: actor && isGuestActor(actor) ? null : rawWorkspaceId
+  };
+};
+
+const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
+
+// Ownership lookup with workspace fallback: a workspace-scoped miss is retried
+// without the workspace filter (still scoped to the actor), so conversations
+// stored before workspace attribution stay reachable instead of 404ing.
+// Cross-actor access still 404s — the workspace filter is not a security
+// boundary, actor scoping is.
+const findOwnedConversation = async (userId, conversationId, workspaceId) => {
+  if (!isValidObjectId(conversationId)) return null;
+  if (workspaceId) {
+    const scoped = await Conversation.findOne({ _id: conversationId, userId, workspaceId });
+    if (scoped) return scoped;
+  }
+  return Conversation.findOne({ _id: conversationId, userId });
+};
+
+const rejectInvalidWorkspace = (res, workspaceId) => {
+  if (workspaceId && !isValidObjectId(workspaceId)) {
+    res.status(400).json({ error: 'Invalid workspace ID.', code: 'INVALID_WORKSPACE_ID' });
+    return true;
+  }
+  return false;
+};
 
 const toFallbackTitle = (rawText) => {
   const cleaned = String(rawText || '')
@@ -34,8 +69,9 @@ const toFallbackTitle = (rawText) => {
 // Get all conversations for a user
 exports.getConversations = async (req, res) => {
   try {
-    const { userId, workspaceId } = getActorContext(req);
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const { userId, workspaceId } = getRequestContext(req);
+    if (!userId) return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    if (rejectInvalidWorkspace(res, workspaceId)) return;
 
     const query = { userId, archived: false };
     if (workspaceId) query.workspaceId = workspaceId;
@@ -48,17 +84,31 @@ exports.getConversations = async (req, res) => {
     res.json(conversations);
   } catch (err) {
     console.error('Error fetching conversations:', err);
-    res.status(500).json({ error: 'Failed to fetch conversations' });
+    res.status(500).json({ error: 'Failed to fetch conversations', code: 'SERVER_ERROR' });
   }
 };
 
 // Create a new conversation
 exports.createConversation = async (req, res) => {
   try {
-    const { userId, workspaceId } = getActorContext(req);
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const { actor, userId, workspaceId: requestedWorkspaceId } = getRequestContext(req);
+    if (!userId) return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    if (rejectInvalidWorkspace(res, requestedWorkspaceId)) return;
 
     const { title = 'New Conversation' } = req.body;
+
+    // Users always get a resolved workspace so later workspace-filtered reads
+    // match what was stored (same as the Socket/AI path). Guests stay null.
+    let workspaceId = requestedWorkspaceId;
+    if (!workspaceId && actor && !isGuestActor(actor)) {
+      try {
+        const resolved = await workspaceRuntime.resolveWorkspace({ userId, workspaceId: null });
+        workspaceId = resolved?._id || null;
+      } catch (resolveErr) {
+        console.warn('[Conversations] workspace auto-resolve failed, storing without workspace:', resolveErr?.message || resolveErr);
+        workspaceId = null;
+      }
+    }
 
     const conversation = new Conversation({
       userId,
@@ -70,25 +120,23 @@ exports.createConversation = async (req, res) => {
     res.status(201).json(conversation);
   } catch (err) {
     console.error('Error creating conversation:', err);
-    res.status(500).json({ error: 'Failed to create conversation' });
+    res.status(500).json({ error: 'Failed to create conversation', code: 'SERVER_ERROR' });
   }
 };
 
 // Get a specific conversation with all messages
 exports.getConversation = async (req, res) => {
   try {
-    const { userId, workspaceId } = getActorContext(req);
+    const { userId, workspaceId } = getRequestContext(req);
     const { conversationId } = req.params;
 
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!userId) return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    if (rejectInvalidWorkspace(res, workspaceId)) return;
 
-    const convQuery = { _id: conversationId, userId };
-    if (workspaceId) convQuery.workspaceId = workspaceId;
-
-    const conversation = await Conversation.findOne(convQuery);
+    const conversation = await findOwnedConversation(userId, conversationId, workspaceId);
 
     if (!conversation) {
-      return res.status(404).json({ error: 'Conversation not found' });
+      return res.status(404).json({ error: 'Conversation not found', code: 'CONVERSATION_NOT_FOUND' });
     }
 
     const msgQuery = { conversationId };
@@ -104,27 +152,26 @@ exports.getConversation = async (req, res) => {
     });
   } catch (err) {
     console.error('Error fetching conversation:', err);
-    res.status(500).json({ error: 'Failed to fetch conversation' });
+    res.status(500).json({ error: 'Failed to fetch conversation', code: 'SERVER_ERROR' });
   }
 };
 
 // Get paginated messages for a conversation
 exports.getMessages = async (req, res) => {
   try {
-    const { userId, workspaceId } = getActorContext(req);
+    const { userId, workspaceId } = getRequestContext(req);
     const { conversationId } = req.params;
-    const { limit = 50, skip = 0 } = req.query;
+    const limitNum = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
+    const skipNum = Math.max(parseInt(req.query.skip, 10) || 0, 0);
 
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!userId) return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    if (rejectInvalidWorkspace(res, workspaceId)) return;
 
-    // Verify user owns this conversation
-    const convQuery = { _id: conversationId, userId };
-    if (workspaceId) convQuery.workspaceId = workspaceId;
-
-    const conversation = await Conversation.findOne(convQuery);
+    // Verify the actor owns this conversation (with workspace fallback)
+    const conversation = await findOwnedConversation(userId, conversationId, workspaceId);
 
     if (!conversation) {
-      return res.status(404).json({ error: 'Conversation not found' });
+      return res.status(404).json({ error: 'Conversation not found', code: 'CONVERSATION_NOT_FOUND' });
     }
 
     const msgQuery = { conversationId };
@@ -132,8 +179,8 @@ exports.getMessages = async (req, res) => {
 
     const messages = await Message.find(msgQuery)
       .sort({ createdAt: 1 })
-      .skip(parseInt(skip))
-      .limit(parseInt(limit))
+      .skip(skipNum)
+      .limit(limitNum)
       .lean();
 
     const total = await Message.countDocuments(msgQuery);
@@ -141,30 +188,28 @@ exports.getMessages = async (req, res) => {
     res.json({
       messages,
       total,
-      hasMore: skip + limit < total
+      hasMore: skipNum + limitNum < total
     });
   } catch (err) {
     console.error('Error fetching messages:', err);
-    res.status(500).json({ error: 'Failed to fetch messages' });
+    res.status(500).json({ error: 'Failed to fetch messages', code: 'SERVER_ERROR' });
   }
 };
 
 // Update conversation (title, pinned status)
 exports.updateConversation = async (req, res) => {
   try {
-    const { userId, workspaceId } = getActorContext(req);
+    const { userId, workspaceId } = getRequestContext(req);
     const { conversationId } = req.params;
     const { title, pinned } = req.body;
 
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!userId) return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    if (rejectInvalidWorkspace(res, workspaceId)) return;
 
-    const convQuery = { _id: conversationId, userId };
-    if (workspaceId) convQuery.workspaceId = workspaceId;
-
-    const conversation = await Conversation.findOne(convQuery);
+    const conversation = await findOwnedConversation(userId, conversationId, workspaceId);
 
     if (!conversation) {
-      return res.status(404).json({ error: 'Conversation not found' });
+      return res.status(404).json({ error: 'Conversation not found', code: 'CONVERSATION_NOT_FOUND' });
     }
 
     if (typeof title === 'string') conversation.title = title;
@@ -174,25 +219,23 @@ exports.updateConversation = async (req, res) => {
     res.json(conversation);
   } catch (err) {
     console.error('Error updating conversation:', err);
-    res.status(500).json({ error: 'Failed to update conversation' });
+    res.status(500).json({ error: 'Failed to update conversation', code: 'SERVER_ERROR' });
   }
 };
 
 // Delete/archive a conversation
 exports.deleteConversation = async (req, res) => {
   try {
-    const { userId, workspaceId } = getActorContext(req);
+    const { userId, workspaceId } = getRequestContext(req);
     const { conversationId } = req.params;
 
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!userId) return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    if (rejectInvalidWorkspace(res, workspaceId)) return;
 
-    const convQuery = { _id: conversationId, userId };
-    if (workspaceId) convQuery.workspaceId = workspaceId;
-
-    const conversation = await Conversation.findOne(convQuery);
+    const conversation = await findOwnedConversation(userId, conversationId, workspaceId);
 
     if (!conversation) {
-      return res.status(404).json({ error: 'Conversation not found' });
+      return res.status(404).json({ error: 'Conversation not found', code: 'CONVERSATION_NOT_FOUND' });
     }
 
     // Soft delete (archive)
@@ -202,7 +245,7 @@ exports.deleteConversation = async (req, res) => {
     res.json({ success: true, message: 'Conversation archived' });
   } catch (err) {
     console.error('Error deleting conversation:', err);
-    res.status(500).json({ error: 'Failed to delete conversation' });
+    res.status(500).json({ error: 'Failed to delete conversation', code: 'SERVER_ERROR' });
   }
 };
 

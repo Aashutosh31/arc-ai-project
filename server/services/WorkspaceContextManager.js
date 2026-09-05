@@ -56,9 +56,9 @@ class WorkspaceContextManager {
     }
   }
 
-  async getActiveContext({ userId, conversationId = null, query = '', limit = 12, signal = null, workspaceId = null }) {
+  async getActiveContext({ userId, conversationId = null, query = '', limit = 12, signal = null, workspaceId = null, actorType = 'user' }) {
     // Gather retrievals from semantic + structured searches (workspace-scoped)
-    const retrievalsPromise = buildMemoryContext({ userId, query, signal, limit, workspaceId });
+    const retrievalsPromise = buildMemoryContext({ userId, query, signal, limit, workspaceId, actorType });
     const shortPromise = this.getShortTermContext(userId, conversationId, workspaceId, 6);
 
     const [retrievals, shortTerm] = await Promise.all([retrievalsPromise, shortPromise]);

@@ -3,6 +3,13 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const GuestSession = require('../models/GuestSession');
 
+// Authentication boundary: every supported identity (local, guest, Google
+// OAuth, future providers) resolves to req.actor = { type, id }.
+// See server/lib/actor.js for the canonical model.
+const setActor = (req, type, id) => {
+    req.actor = { type, id: String(id) };
+};
+
 const protect = async (req, res, next) => {
     let token;
 
@@ -31,6 +38,7 @@ const protect = async (req, res, next) => {
                     userId: guestSession.sessionId
                 };
                 req.authType = 'guest';
+                setActor(req, 'guest', guestSession.sessionId);
                 return next();
             }
 
@@ -41,6 +49,9 @@ const protect = async (req, res, next) => {
             }
 
             req.authType = 'user';
+            // Canonical user actor id: the stable User ObjectId hex string,
+            // regardless of which provider issued the JWT.
+            setActor(req, 'user', req.user._id);
 
             next();
         } catch (error) {

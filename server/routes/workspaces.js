@@ -4,6 +4,7 @@ const Workspace = require('../models/Workspace');
 const WorkspaceRuntimeManager = require('../services/WorkspaceRuntimeManager');
 const mongoose = require('mongoose');
 const { protect } = require('../middleware/authMiddleware');
+const { getActor, isGuestActor } = require('../lib/actor');
 
 const workspaceRuntime = new WorkspaceRuntimeManager({ logger: console });
 
@@ -13,7 +14,7 @@ router.use(protect);
 // an ObjectId ref to User). Short-circuit instead of letting string sessionIds
 // hit ObjectId casts (500s) or mint orphan workspaces.
 router.use((req, res, next) => {
-  if (req.authType !== 'guest') return next();
+  if (!isGuestActor(getActor(req))) return next();
   if (req.method === 'GET' && req.path === '/') return res.json({ workspaces: [] });
   if (req.method === 'GET' && req.path === '/active') return res.json({ workspace: null });
   return res.status(403).json({ error: 'Guest sessions cannot manage workspaces. Sign in to use workspaces.' });
@@ -22,7 +23,7 @@ router.use((req, res, next) => {
 // Get current user's workspaces
 router.get('/', async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const userId = getActor(req)?.id || null;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     const workspaces = await Workspace.find({
@@ -43,7 +44,7 @@ router.get('/', async (req, res) => {
 // Get active workspace (resolved based on context or default)
 router.get('/active', async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const userId = getActor(req)?.id || null;
     const workspaceId = req.query?.workspaceId || null;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -69,7 +70,7 @@ router.get('/active', async (req, res) => {
 // Get specific workspace
 router.get('/:workspaceId', async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const userId = getActor(req)?.id || null;
     const { workspaceId } = req.params;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -94,7 +95,7 @@ router.get('/:workspaceId', async (req, res) => {
 // Create new workspace
 router.post('/', async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const userId = getActor(req)?.id || null;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     const { name, description, visibility = 'private' } = req.body;
@@ -135,7 +136,7 @@ router.post('/', async (req, res) => {
 // Update workspace
 router.put('/:workspaceId', async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const userId = getActor(req)?.id || null;
     const { workspaceId } = req.params;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -163,7 +164,7 @@ router.put('/:workspaceId', async (req, res) => {
 // Delete workspace (soft delete by archiving)
 router.delete('/:workspaceId', async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const userId = getActor(req)?.id || null;
     const { workspaceId } = req.params;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 

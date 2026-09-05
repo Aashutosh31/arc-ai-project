@@ -1164,7 +1164,13 @@ class AIService {
                     ? "Your current multimodal provider is rate-limited right now. Please wait 1-2 minutes and retry the image request."
                     : "The current AI provider is rate-limited. Please wait a minute and try again.";
             } else if (error.statusCode === 400) {
-                 userFriendlyError = "There was an issue processing the file format. Please try again.";
+                 // 400s are not always file problems (e.g. provider rejected a
+                 // plain-text request). Only blame the file format when the
+                 // request actually carried an attachment.
+                 const hadAttachment = Boolean(imageBase64 || document);
+                 userFriendlyError = hadAttachment
+                     ? "There was an issue processing the file format. Please try again."
+                     : "The AI provider could not process that request. Please try again.";
             }
             
             if (socket) socket.emit('bot_error', userFriendlyError);

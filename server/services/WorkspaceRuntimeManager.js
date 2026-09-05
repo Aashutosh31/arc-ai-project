@@ -54,6 +54,9 @@ class WorkspaceRuntimeManager {
   }
 
   async resolveWorkspace({ userId, workspaceId } = {}) {
+    // Guests own no workspaces (Workspace.owner references real users only).
+    // Return null instead of driving ObjectId casts with session ids.
+    if (!userId || String(userId).startsWith('guest_')) return null;
     // priority: explicit workspaceId -> user's default workspace -> create default
     if (workspaceId) {
       const ws = await this.getWorkspaceById(workspaceId);

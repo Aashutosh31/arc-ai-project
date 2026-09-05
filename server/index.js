@@ -85,8 +85,14 @@ io.use((socket, next) => {
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const rawId = decoded.id || decoded.userId || decoded._id;
-        socket.userId = String(rawId); 
+        socket.userId = String(rawId);
         socket.authType = decoded.role || 'user';
+        // Same canonical actor as REST (server/lib/actor.js): guests resolve
+        // to their sessionId, users to their User ObjectId hex string.
+        socket.actor = {
+            type: socket.authType === 'guest' ? 'guest' : 'user',
+            id: String(rawId)
+        };
         console.log(`✅ Socket authenticated for web user: ${socket.userId}`);
         next();
     } catch (err) {

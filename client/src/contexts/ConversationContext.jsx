@@ -244,7 +244,6 @@ export const ConversationProvider = ({ children }) => {
     if (!conversationId) return [];
     const limit = Number(options.limit || 200);
     const skip = Number(options.skip || 0);
-    const useWorkspaceFilter = Boolean(activeWorkspaceId);
 
     console.log('[ConversationContext] fetchConversationMessages:start', {
       conversationId,
@@ -252,27 +251,21 @@ export const ConversationProvider = ({ children }) => {
       skip
     });
 
-    const loadMessages = async (workspaceId) => {
-      const response = await fetch(
-        `${API_URL}/api/conversations/${conversationId}/messages?limit=${limit}&skip=${skip}${workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ''}`,
-        { headers: getAuthHeaders() }
-      );
+    // Single request: the server falls back to the unfiltered ownership lookup
+    // when the workspace-scoped lookup misses, so no client second-fetch is needed.
+    const response = await fetch(
+      `${API_URL}/api/conversations/${conversationId}/messages?limit=${limit}&skip=${skip}${activeWorkspaceId ? `&workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ''}`,
+      { headers: getAuthHeaders() }
+    );
 
-      if (!response.ok) throw new Error('Failed to fetch conversation messages');
-      return response.json();
-    };
-
-    let data = await loadMessages(useWorkspaceFilter ? activeWorkspaceId : null);
-    if (useWorkspaceFilter && Array.isArray(data?.messages) && data.messages.length === 0) {
-      try {
-        const legacyData = await loadMessages(null);
-        if (Array.isArray(legacyData?.messages) && legacyData.messages.length > 0) {
-          data = legacyData;
-        }
-      } catch (legacyErr) {
-        console.warn('[ConversationContext] legacy fallback failed:', legacyErr?.message || legacyErr);
-      }
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      const error = new Error(detail?.error || 'Failed to fetch conversation messages');
+      error.status = response.status;
+      error.code = detail?.code || null;
+      throw error;
     }
+    const data = await response.json();
 
     console.log('[ConversationContext] fetchConversationMessages:done', {
       conversationId,

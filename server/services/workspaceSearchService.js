@@ -133,7 +133,10 @@ const searchMessages = async (userId, query, limit = 10, workspaceId = null) => 
   }));
 };
 
-const searchStructuredMemory = async (userId, query, limit = 8, workspaceId = null) => {
+const searchStructuredMemory = async (userId, query, limit = 8, workspaceId = null, actorType = 'user') => {
+  // UserFact/AIMemory reference real users (ObjectId) only; guests persist no
+  // records there, so skip those collections instead of hitting ObjectId casts.
+  if (actorType === 'guest') return [];
   const regex = buildSearchRegex(query);
   const [facts, memories] = await Promise.all([
     UserFact.find({ userId: String(userId), ...(regex ? { fact: regex } : {}), ...(workspaceId ? { workspaceId: String(workspaceId) } : {}) }).sort({ pinned: -1, createdAt: -1 }).limit(limit).lean(),
@@ -236,7 +239,7 @@ const buildRetrievalContext = (items, query) => {
   return grouped;
 };
 
-const searchWorkspace = async ({ userId, query, signal = null, limit = 10, workspaceId = null }) => {
+const searchWorkspace = async ({ userId, query, signal = null, limit = 10, workspaceId = null, actorType = 'user' }) => {
   const normalizedQuery = normalizeText(query);
   if (!normalizedQuery) {
     return { query: normalizedQuery, items: [], grouped: buildRetrievalContext([], normalizedQuery), stats: { total: 0 } };
@@ -245,7 +248,7 @@ const searchWorkspace = async ({ userId, query, signal = null, limit = 10, works
   const [conversationResults, messageResults, memoryResults, semanticResults] = await Promise.all([
     searchConversations(userId, normalizedQuery, Math.min(limit, 5), workspaceId),
     searchMessages(userId, normalizedQuery, Math.min(limit, 8), workspaceId),
-    searchStructuredMemory(userId, normalizedQuery, Math.min(limit, 8), workspaceId),
+    searchStructuredMemory(userId, normalizedQuery, Math.min(limit, 8), workspaceId, actorType),
     searchSemanticVectors(userId, normalizedQuery, signal, Math.min(limit, 8), workspaceId).catch((error) => {
       console.warn('[WorkspaceSearch] semantic search failed:', error?.message || error);
       return [];
@@ -272,8 +275,8 @@ const searchWorkspace = async ({ userId, query, signal = null, limit = 10, works
   };
 };
 
-const buildMemoryContext = async ({ userId, query, signal = null, limit = 12, workspaceId = null }) => {
-  const results = await searchWorkspace({ userId, query, signal, limit, workspaceId });
+const buildMemoryContext = async ({ userId, query, signal = null, limit = 12, workspaceId = null, actorType = 'user' }) => {
+  const results = await searchWorkspace({ userId, query, signal, limit, workspaceId, actorType });
   return results.items
     .slice(0, limit)
     .map((item, index) => ({

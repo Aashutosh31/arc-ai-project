@@ -618,6 +618,9 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
   const historyScrollRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
   const loadedWorkspaceCountRef = useRef(0);
+  // Monotonic sequence so only the latest conversation load may apply state
+  // or report errors; superseded loads are ignored, never surfaced.
+  const messageLoadSeqRef = useRef(0);
 
   const isBusy = isProcessing || isStreaming || isSpeaking || !isConnected;
 
@@ -654,7 +657,10 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
   }, [socket, updateConversationTitle, activeWorkspaceId]);
 
   useEffect(() => {
+    const seq = messageLoadSeqRef.current + 1;
+    messageLoadSeqRef.current = seq;
     let isCancelled = false;
+    const isStale = () => isCancelled || seq !== messageLoadSeqRef.current;
 
     const loadConversationMessages = async () => {
       if (!activeConversationId) {
@@ -683,7 +689,7 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
 
       try {
         const dbMessages = await fetchConversationMessages(activeConversationId, { limit: 500, skip: 0 });
-        if (isCancelled) return;
+        if (isStale()) return;
 
         console.log('[ChatInterface] loadConversationMessages:fetched', {
           activeConversationId,
@@ -717,6 +723,9 @@ const ChatInterface = ({ workspaceMode = 'desktop-wide', sidebarCollapsed = fals
 
         replaceMessages(mappedMessages);
       } catch (error) {
+        // A superseded load failing after a newer load started is expected
+        // (e.g. conversation switched mid-flight) — never surface it.
+        if (isStale()) return;
         console.error('Failed loading conversation messages:', error);
       }
     };
