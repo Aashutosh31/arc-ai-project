@@ -18,13 +18,17 @@ const GOOGLE_APP_SCOPES = [
 const TOKEN_FIELD = 'googleCalendar.encryptedTokenData';
 
 if (!process.env.GOOGLE_TOKEN_ENCRYPTION_KEY) {
-    console.error('❌ CRITICAL CONFIGURATION ERROR: GOOGLE_TOKEN_ENCRYPTION_KEY environment variable is not defined.');
-    console.error('Please configure GOOGLE_TOKEN_ENCRYPTION_KEY in your .env file to enable secure token encryption.');
-    process.exit(1);
+    // Do not crash the whole server when this optional integration is unconfigured.
+    // Google token encryption stays fail-closed via getEncryptionKey() below:
+    // any Google OAuth/Calendar operation throws a clear error until the key is set.
+    console.warn('⚠️ GOOGLE_TOKEN_ENCRYPTION_KEY is not defined. Google Calendar token encryption is disabled until it is configured. The server will continue to boot; Google OAuth/Calendar endpoints will return errors.');
 }
 
 const getEncryptionKey = () => {
     const key = process.env.GOOGLE_TOKEN_ENCRYPTION_KEY;
+    if (!key) {
+        throw new Error('GOOGLE_TOKEN_ENCRYPTION_KEY is not configured. Google Calendar integration is disabled.');
+    }
     return crypto.createHash('sha256').update(String(key)).digest();
 };
 

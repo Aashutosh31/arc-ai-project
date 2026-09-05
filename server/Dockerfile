@@ -1,4 +1,4 @@
-FROM node:20-bullseye-slim
+FROM node:20-bookworm-slim
 
 ENV NODE_ENV=production
 # Prevent puppeteer from downloading its own Chromium - we install system chromium
@@ -39,9 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libglib2.0-0 \
     libfontconfig1 \
-    chromium \
-    chromium-driver \
-    --no-install-recommends && \
+    chromium && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy package manifests and install dependencies

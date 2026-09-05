@@ -2,8 +2,27 @@ const { Pinecone } = require('@pinecone-database/pinecone');
 const crypto = require('crypto');
 const { getEmbedding, normalizeText, cacheKeyFor } = require('./embeddingService');
 
-const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-const index = pinecone.index(process.env.PINECONE_INDEX || 'arc-brain');
+let pineconeClient = null;
+let pineconeIndex = null;
+let warnedMissingPineconeKey = false;
+
+// Lazily create the Pinecone client on first use so the server can boot when
+// PINECONE_API_KEY is unconfigured. Index writes/deletes become no-ops that
+// report { skipped: true }; callers already treat failures as non-fatal.
+const getPineconeIndex = () => {
+    if (pineconeIndex) return pineconeIndex;
+    const apiKey = process.env.PINECONE_API_KEY;
+    if (!apiKey) {
+        if (!warnedMissingPineconeKey) {
+            warnedMissingPineconeKey = true;
+            console.warn('[WorkspaceIndex] PINECONE_API_KEY is not defined. Vector indexing is disabled; data remains in MongoDB only.');
+        }
+        return null;
+    }
+    pineconeClient = pineconeClient || new Pinecone({ apiKey });
+    pineconeIndex = pineconeIndex || pineconeClient.index(process.env.PINECONE_INDEX || 'arc-brain');
+    return pineconeIndex;
+};
 
 const getNamespace = (userId, workspaceId = null) => (workspaceId ? `workspace_${String(workspaceId)}` : `user_${String(userId)}`);
 
@@ -25,10 +44,13 @@ const upsertTextVector = async ({ userId, kind, entityId, text, metadata = {}, s
   const vector = await getEmbedding(text, { signal });
   if (!vector) return { skipped: true };
 
+  const targetIndex = getPineconeIndex();
+  if (!targetIndex) return { skipped: true };
+
   const namespace = getNamespace(userId, workspaceId);
   const id = makeVectorId(kind, entityId, text);
 
-  await index.upsert({
+  await targetIndex.upsert({
     records: [
       {
         id,
@@ -51,11 +73,14 @@ const upsertTextVector = async ({ userId, kind, entityId, text, metadata = {}, s
 };
 
 const removeVectorsByEntity = async ({ userId, kind, entityId, workspaceId = null }) => {
+  const targetIndex = getPineconeIndex();
+  if (!targetIndex) return { skipped: true };
+
   const namespace = getNamespace(userId, workspaceId);
   const prefix = `${kind}_${String(entityId)}_`;
 
   try {
-    const stats = await index.describeIndexStats({ namespace });
+    const stats = await targetIndex.describeIndexStats({ namespace });
     const namespaces = stats?.namespaces || {};
     if (!namespaces[namespace]) return { success: true, deleted: 0 };
   } catch {
@@ -63,7 +88,7 @@ const removeVectorsByEntity = async ({ userId, kind, entityId, workspaceId = nul
   }
 
   try {
-    await index.deleteMany({ namespace, filter: { userId: String(userId), kind, entityId: String(entityId) } });
+    await targetIndex.deleteMany({ namespace, filter: { userId: String(userId), kind, entityId: String(entityId) } });
   } catch (error) {
     console.warn('[WorkspaceIndex] deleteMany fallback failed:', error?.message || error);
   }

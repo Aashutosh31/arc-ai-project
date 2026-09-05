@@ -5,8 +5,27 @@ const AIMemory = require('../models/AIMemory');
 const UserFact = require('../models/UserFact');
 const { getEmbedding, normalizeText, cacheKeyFor } = require('./embeddingService');
 
-const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-const index = pinecone.index(process.env.PINECONE_INDEX || 'arc-brain');
+let pineconeClient = null;
+let pineconeIndex = null;
+let warnedMissingPineconeKey = false;
+
+// Lazily create the Pinecone client on first semantic-search use so the server
+// can boot when PINECONE_API_KEY is unconfigured. Semantic search degrades to
+// keyword-only results; nothing is sent anywhere when the key is missing.
+const getPineconeIndex = () => {
+    if (pineconeIndex) return pineconeIndex;
+    const apiKey = process.env.PINECONE_API_KEY;
+    if (!apiKey) {
+        if (!warnedMissingPineconeKey) {
+            warnedMissingPineconeKey = true;
+            console.warn('[WorkspaceSearch] PINECONE_API_KEY is not defined. Semantic vector search is disabled; keyword search remains available.');
+        }
+        return null;
+    }
+    pineconeClient = pineconeClient || new Pinecone({ apiKey });
+    pineconeIndex = pineconeIndex || pineconeClient.index(process.env.PINECONE_INDEX || 'arc-brain');
+    return pineconeIndex;
+};
 
 const getNamespace = (userId, workspaceId) => (workspaceId ? `workspace_${String(workspaceId)}` : `user_${String(userId)}`);
 
@@ -155,8 +174,10 @@ const searchStructuredMemory = async (userId, query, limit = 8, workspaceId = nu
 const searchSemanticVectors = async (userId, query, signal = null, limit = 8, workspaceId = null) => {
   const vector = await getEmbedding(query, { signal });
   if (!vector) return [];
+  const targetIndex = getPineconeIndex();
+  if (!targetIndex) return [];
   const namespace = getNamespace(userId, workspaceId);
-  const response = await index.query({
+  const response = await targetIndex.query({
     namespace,
     vector,
     topK: limit,
