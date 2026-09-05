@@ -2,6 +2,14 @@ const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const LLMRouter = require('../lib/llm/LLMRouter');
 
+// Guests own no workspaces, so any workspace filter they send can only be a
+// stale id from another session. Ignore it (treat as null) so guest
+// conversations stay visible instead of 404ing on a foreign workspace.
+const getActorContext = (req) => ({
+  userId: req.user?.id || req.user?.userId,
+  workspaceId: req.authType === 'guest' ? null : (req.query?.workspaceId || req.body?.workspaceId || null)
+});
+
 const toFallbackTitle = (rawText) => {
   const cleaned = String(rawText || '')
     .replace(/\s+/g, ' ')
@@ -26,8 +34,7 @@ const toFallbackTitle = (rawText) => {
 // Get all conversations for a user
 exports.getConversations = async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
-    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
+    const { userId, workspaceId } = getActorContext(req);
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     const query = { userId, archived: false };
@@ -48,8 +55,7 @@ exports.getConversations = async (req, res) => {
 // Create a new conversation
 exports.createConversation = async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
-    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
+    const { userId, workspaceId } = getActorContext(req);
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     const { title = 'New Conversation' } = req.body;
@@ -71,9 +77,8 @@ exports.createConversation = async (req, res) => {
 // Get a specific conversation with all messages
 exports.getConversation = async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const { userId, workspaceId } = getActorContext(req);
     const { conversationId } = req.params;
-    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
 
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -106,9 +111,8 @@ exports.getConversation = async (req, res) => {
 // Get paginated messages for a conversation
 exports.getMessages = async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const { userId, workspaceId } = getActorContext(req);
     const { conversationId } = req.params;
-    const workspaceId = req.query?.workspaceId || null;
     const { limit = 50, skip = 0 } = req.query;
 
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -148,9 +152,8 @@ exports.getMessages = async (req, res) => {
 // Update conversation (title, pinned status)
 exports.updateConversation = async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const { userId, workspaceId } = getActorContext(req);
     const { conversationId } = req.params;
-    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
     const { title, pinned } = req.body;
 
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -178,9 +181,8 @@ exports.updateConversation = async (req, res) => {
 // Delete/archive a conversation
 exports.deleteConversation = async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const { userId, workspaceId } = getActorContext(req);
     const { conversationId } = req.params;
-    const workspaceId = req.query?.workspaceId || req.body?.workspaceId || null;
 
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 

@@ -12,6 +12,7 @@ const conversationRoutes = require('./routes/conversations.js');
 const searchRoutes = require('./routes/search.js');
 const memoryRoutes = require('./routes/memory.js');
 const workspaceRoutes = require('./routes/workspaces.js');
+const voiceRoutes = require('./routes/voice.js');
 const AIService = require('./services/AIService.js'); 
 
 const app = express();
@@ -44,7 +45,9 @@ app.use(cors({
     credentials: true
 }));
 
-app.use(express.json());
+// 8mb allows short base64 voice clips for /api/voice/transcribe; other
+// endpoints send small JSON payloads and are unaffected.
+app.use(express.json({ limit: '8mb' }));
 
 const mongoUri = process.env.MONGO_URI || process.env.DATABASE_URL;
 
@@ -181,6 +184,7 @@ app.use('/api/conversations', conversationRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/memory', memoryRoutes);
 app.use('/api/workspaces', workspaceRoutes);
+app.use('/api/voice', voiceRoutes);
 
 server.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));
 

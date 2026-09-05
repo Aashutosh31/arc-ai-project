@@ -133,6 +133,39 @@ class GeminiProvider {
       usage: response?.usageMetadata || response?.usage_metadata || null
     };
   }
+
+  // Transcribe a short voice clip for browsers without native SpeechRecognition.
+  // Reuses the configured Gemini API key; throws when unconfigured or when the
+  // provider rejects the request. Never logs audio content or API keys.
+  async transcribeAudio({ audioBase64, mimeType } = {}) {
+    if (!audioBase64 || typeof audioBase64 !== 'string') {
+      const error = new Error('Audio data is required for transcription.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const client = this.getClient();
+    const startedAt = Date.now();
+    const response = await client.models.generateContent({
+      model: this.defaultModel,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: 'Transcribe the speech in this audio clip verbatim. Return only the transcription text with no commentary. If there is no speech, return an empty string.' },
+            { inlineData: { mimeType: mimeType || 'audio/webm', data: audioBase64 } }
+          ]
+        }
+      ]
+    });
+
+    return {
+      provider: 'gemini',
+      model: this.defaultModel,
+      text: String(extractResponseText(response) || '').trim(),
+      latencyMs: Date.now() - startedAt
+    };
+  }
 }
 
 module.exports = new GeminiProvider();

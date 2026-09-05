@@ -32,6 +32,27 @@ export const SocketProvider = ({ children }) => {
             let creditsRemaining = Number(localStorage.getItem('creditsRemaining') || 0);
             let googleLinked = localStorage.getItem('googleLinked') === 'true';
 
+            // A cached guest token can outlive its server-side session (TTL expiry,
+            // DB reset). The socket handshake never checks the DB, so a stale token
+            // still connects while every REST call 401s. Validate once at bootstrap
+            // and mint a fresh guest session when the cached one is rejected.
+            // Non-guest credentials are left untouched (existing login flow owns them).
+            if (token && userId && authType === 'guest') {
+                try {
+                    const meResponse = await fetch(`${API_URL}/api/auth/me`, {
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
+                    if (!meResponse.ok) throw new Error(`stale guest session (HTTP ${meResponse.status})`);
+                } catch (validationError) {
+                    console.warn('Cached guest session invalid, creating a fresh one:', validationError?.message || validationError);
+                    for (const key of ['token', 'userId', 'authType', 'authProvider', 'username', 'creditsRemaining', 'googleLinked']) {
+                        localStorage.removeItem(key);
+                    }
+                    token = null;
+                    userId = null;
+                }
+            }
+
             if (!token || !userId) {
                 const guestResponse = await fetch(`${API_URL}/api/auth/guest`, {
                     method: 'POST',

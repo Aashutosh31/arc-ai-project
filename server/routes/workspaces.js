@@ -9,6 +9,16 @@ const workspaceRuntime = new WorkspaceRuntimeManager({ logger: console });
 
 router.use(protect);
 
+// Guest sessions are ephemeral and cannot own workspaces (Workspace.owner is
+// an ObjectId ref to User). Short-circuit instead of letting string sessionIds
+// hit ObjectId casts (500s) or mint orphan workspaces.
+router.use((req, res, next) => {
+  if (req.authType !== 'guest') return next();
+  if (req.method === 'GET' && req.path === '/') return res.json({ workspaces: [] });
+  if (req.method === 'GET' && req.path === '/active') return res.json({ workspace: null });
+  return res.status(403).json({ error: 'Guest sessions cannot manage workspaces. Sign in to use workspaces.' });
+});
+
 // Get current user's workspaces
 router.get('/', async (req, res) => {
   try {

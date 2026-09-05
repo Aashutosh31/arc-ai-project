@@ -18,10 +18,18 @@ const protect = async (req, res, next) => {
                 const guestSession = await GuestSession.findOne({ sessionId: decoded.id });
 
                 if (!guestSession) {
-                    return res.status(401).json({ message: 'Not authorized, guest session not found' });
+                    return res.status(401).json({ message: 'Not authorized, guest session not found', code: 'GUEST_SESSION_EXPIRED' });
                 }
 
-                req.user = guestSession;
+                // Expose the canonical guest actor id (sessionId, e.g. "guest_<uuid>").
+                // This matches the JWT `id` claim, the Socket.IO userId, and credit
+                // accounting. The raw Mongoose `.id` virtual would otherwise leak the
+                // internal ObjectId and split guest data across two identities.
+                req.user = {
+                    ...guestSession.toObject(),
+                    id: guestSession.sessionId,
+                    userId: guestSession.sessionId
+                };
                 req.authType = 'guest';
                 return next();
             }

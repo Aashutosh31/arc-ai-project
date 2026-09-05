@@ -185,7 +185,7 @@ const AdvancedVoiceButton = () => {
     }
   };
 
-  const { isVoiceModeActive, liveTranscript, toggleAdvancedVoice } = useAdvancedVoice(
+  const { isVoiceModeActive, liveTranscript, voiceMode, voiceError, toggleAdvancedVoice } = useAdvancedVoice(
     handleFinalCommand,
     handleInterrupt
   );
@@ -193,7 +193,9 @@ const AdvancedVoiceButton = () => {
   let orbState = 'off';
   let statusText = "Click to Start Advanced Voice";
 
-  if (isVoiceModeActive) {
+  if (voiceError) {
+    statusText = voiceError;
+  } else if (isVoiceModeActive) {
     if (isSpeaking) {
       orbState = 'speaking';
       statusText = "ARC-AI is speaking...";
@@ -202,7 +204,9 @@ const AdvancedVoiceButton = () => {
       statusText = agentStatus || "Processing...";
     } else {
       orbState = 'listening';
-      statusText = "Listening... (Just start talking)";
+      statusText = voiceMode === 'server'
+        ? "Listening... (server transcription)"
+        : "Listening... (Just start talking)";
     }
   }
 
