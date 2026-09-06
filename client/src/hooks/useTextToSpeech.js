@@ -7,8 +7,92 @@ const sharedSpeechState = {
   isQueueRunning: false,
   currentUtterance: null,
   pendingDelay: null,
+  resumeTimer: null,
   activeSpeechSessionId: 0,
   currentSpeechSessionId: 0
+};
+
+// Prefer a natural assistant voice when the browser offers a choice.
+// Feature-based only: match well-known natural voice names / en-US locale,
+// fall back to the browser default. Never browser-sniff.
+const PREFERRED_VOICE_PATTERNS = [
+  /google us english/i,
+  /google uk english (female|male)/i,
+  /samantha/i,
+  /aria/i,
+  /jenny/i,
+  /guy/i,
+  /microsoft.+natural/i,
+  /en[-_]US/i
+];
+
+let cachedVoice = null;
+let cachedVoiceKey = '';
+
+const listVoices = () => {
+  try {
+    if (!('speechSynthesis' in window)) return [];
+    return window.speechSynthesis.getVoices() || [];
+  } catch {
+    return [];
+  }
+};
+
+const pickNaturalVoice = () => {
+  const voices = listVoices();
+  const key = voices.map((v) => v?.name || '').join('|');
+  if (cachedVoice && key === cachedVoiceKey) return cachedVoice;
+  cachedVoiceKey = key;
+  cachedVoice = null;
+  if (!voices.length) return null;
+  for (const pattern of PREFERRED_VOICE_PATTERNS) {
+    const match = voices.find((v) => pattern.test(`${v?.name || ''} ${v?.lang || ''}`));
+    if (match) {
+      cachedVoice = match;
+      return match;
+    }
+  }
+  const english = voices.find((v) => /^en([-_]US)?/i.test(v?.lang || ''));
+  cachedVoice = english || null;
+  return cachedVoice;
+};
+
+const preloadVoices = () => {
+  try {
+    if (!('speechSynthesis' in window)) return;
+    // Some browsers populate voices asynchronously; warm the cache.
+    listVoices();
+    pickNaturalVoice();
+  } catch {
+    // ignore
+  }
+};
+
+// Firefox pauses long utterances and never resumes on its own; a periodic
+// resume() keeps speech moving. Started per queue run, cleared on finish/stop.
+const startResumeGuard = () => {
+  try {
+    stopResumeGuard();
+    if (!('speechSynthesis' in window)) return;
+    sharedSpeechState.resumeTimer = setInterval(() => {
+      try {
+        if (window.speechSynthesis.paused && !window.speechSynthesis.pending) {
+          window.speechSynthesis.resume();
+        }
+      } catch {
+        // ignore
+      }
+    }, 5000);
+  } catch {
+    // ignore
+  }
+};
+
+const stopResumeGuard = () => {
+  if (sharedSpeechState.resumeTimer) {
+    clearInterval(sharedSpeechState.resumeTimer);
+    sharedSpeechState.resumeTimer = null;
+  }
 };
 
 const cleanTextForSpeech = (text) => {
@@ -112,6 +196,17 @@ const splitTextForSpeech = (text) => {
   return segments.filter(Boolean);
 };
 
+try {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window && typeof window.speechSynthesis.addEventListener === 'function') {
+    window.speechSynthesis.addEventListener('voiceschanged', () => {
+      cachedVoiceKey = '';
+      pickNaturalVoice();
+    });
+  }
+} catch {
+  // ignore
+}
+
 export const useTextToSpeech = () => {
   const { setIsSpeaking } = useChat(); // 🚀 FIX: Use Global State
   const queueDelayMs = 100;
@@ -129,6 +224,7 @@ export const useTextToSpeech = () => {
 
   const finishQueue = useCallback((sessionId) => {
     if (sessionId !== sharedSpeechState.currentSpeechSessionId) return;
+    stopResumeGuard();
     sharedSpeechState.isQueueRunning = false;
     sharedSpeechState.currentUtterance = null;
     sharedSpeechState.speechQueue = [];
@@ -164,6 +260,14 @@ export const useTextToSpeech = () => {
     utterance.rate = 1.04;
     utterance.pitch = 0.94;
     utterance.volume = 1;
+    const naturalVoice = pickNaturalVoice();
+    if (naturalVoice) {
+      try {
+        utterance.voice = naturalVoice;
+      } catch {
+        // keep the browser default voice
+      }
+    }
 
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => {
@@ -195,6 +299,7 @@ export const useTextToSpeech = () => {
     };
 
     window.speechSynthesis.speak(utterance);
+    startResumeGuard();
   }, [finishQueue, setIsSpeaking]);
 
   const speakQueue = useCallback((segments) => {
@@ -202,6 +307,18 @@ export const useTextToSpeech = () => {
 
     const queueItems = Array.isArray(segments) ? segments.map((segment) => String(segment || '').trim()).filter(Boolean) : [];
     if (queueItems.length === 0) return;
+
+    preloadVoices();
+    // Safari can leave a stale speaking flag from a previous session; a
+    // cancel before a fresh run unsticks the queue without audible effect
+    // when nothing is actually playing.
+    try {
+      if (!sharedSpeechState.isQueueRunning && window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+      }
+    } catch {
+      // ignore
+    }
 
     const sessionId = sharedSpeechState.activeSpeechSessionId || startNewSpeechSession();
     sharedSpeechState.speechQueue.push(...queueItems.map((text) => ({ sessionId, text })));
@@ -229,6 +346,7 @@ export const useTextToSpeech = () => {
 
   const stopSpeech = useCallback(() => {
     if ('speechSynthesis' in window) {
+      stopResumeGuard();
       if (sharedSpeechState.pendingDelay) {
         clearTimeout(sharedSpeechState.pendingDelay);
         sharedSpeechState.pendingDelay = null;

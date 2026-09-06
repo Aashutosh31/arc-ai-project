@@ -3,6 +3,7 @@ import { useRef } from 'react';
 import { SocketContext } from '../contexts/SocketContext';
 import { useChat } from '../contexts/ChatContext';
 import { useTextToSpeech } from './useTextToSpeech';
+import { useServerTtsAudio } from './useServerTtsAudio';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 
 // 🚀 FIX: Global deduplication timer shared across all tabs and reloads
@@ -13,6 +14,11 @@ export const useSocket = () => {
   const { activeWorkspaceId } = useWorkspace();
   const { addMessage, appendBotChunk, finishBotStream, markBotInterrupted, setIsProcessing, setIsStreaming, isInterruptedRef, setIsInterrupted, setMediaData, setAgentStatus, setProviderInfo } = useChat();
   const { processStreamChunk, stop, stopSpeech } = useTextToSpeech();
+  const { enqueueSegment, resetAudio } = useServerTtsAudio();
+  // 'browser' = speechSynthesis path (default, current behavior).
+  // 'server'  = server-generated audio queue; browser speech is suppressed
+  // for the response so the two voices never overlap.
+  const ttsModeRef = useRef('browser');
   const speechCharCountRef = useRef(0);
   const suppressSpeechRef = useRef(false);
   const SPEECH_THRESHOLD = 1800;
@@ -21,10 +27,30 @@ export const useSocket = () => {
     if (!socket) return;
 
     socket.off('ai:tts:response:chunk');
+    socket.off('ai:tts:mode');
+    socket.off('ai:tts:audio');
+    socket.off('ai:tts:audio:stop');
     socket.off('bot_error');
     socket.off('ai:client:action');
     socket.off('ai:agent:status');
     socket.off('ai:credits:update');
+
+    // Server TTS mode announcement per response. A new response always
+    // starts from a clean slate: drop stale audio and reset the mode.
+    socket.on('ai:tts:mode', (data) => {
+      resetAudio();
+      ttsModeRef.current = data?.mode === 'server' ? 'server' : 'browser';
+    });
+
+    socket.on('ai:tts:audio', (data) => {
+      if (ttsModeRef.current !== 'server') return;
+      if (data?.isFinal) return;
+      enqueueSegment(data);
+    });
+
+    socket.on('ai:tts:audio:stop', () => {
+      resetAudio();
+    });
 
     socket.on('ai:tts:response:chunk', (data) => {
       const { chunk, displayText, isFinal } = data;
@@ -52,13 +78,13 @@ export const useSocket = () => {
 
       if (!isFinal) {
         appendBotChunk(displayText || chunk);
-        if (!suppressSpeechRef.current) {
+        if (!suppressSpeechRef.current && ttsModeRef.current !== 'server') {
           processStreamChunk(displayText || chunk, false);
         }
       } else {
         finishBotStream();
         setAgentStatus(null);
-        if (!suppressSpeechRef.current) {
+        if (!suppressSpeechRef.current && ttsModeRef.current !== 'server') {
           processStreamChunk('', true);
         }
         speechCharCountRef.current = 0;
@@ -147,6 +173,7 @@ export const useSocket = () => {
       // The visible error message is only appended for the active request;
       // errors for an intentionally stopped request stay silent.
       setAgentStatus(null);
+      resetAudio();
       finishBotStream();
       if (!isInterruptedRef.current) {
         addMessage({ sender: 'ai', text: `[Error]: ${errorMsg}` });
@@ -155,13 +182,16 @@ export const useSocket = () => {
 
     return () => {
       socket.off('ai:tts:response:chunk');
+      socket.off('ai:tts:mode');
+      socket.off('ai:tts:audio');
+      socket.off('ai:tts:audio:stop');
       socket.off('bot_error');
       socket.off('ai:client:action');
       socket.off('ai:agent:status');
       socket.off('ai:provider:info');
       socket.off('ai:credits:update');
     };
-  }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, isInterruptedRef, setMediaData, setAgentStatus, setAuthInfo]);
+  }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, enqueueSegment, resetAudio, isInterruptedRef, setMediaData, setAgentStatus, setAuthInfo]);
 
   const sendCommand = (text, imageBase64 = null, documentData = null, conversationId = null) => {
     if (socket) {
@@ -170,6 +200,8 @@ export const useSocket = () => {
       setAgentStatus(null);
       if (setIsStreaming) setIsStreaming(true);
       stop();
+      resetAudio();
+      ttsModeRef.current = 'browser';
       speechCharCountRef.current = 0;
       suppressSpeechRef.current = false;
       setIsProcessing(true);
@@ -199,6 +231,8 @@ export const useSocket = () => {
       } else {
         stop();
       }
+      resetAudio();
+      ttsModeRef.current = 'browser';
       speechCharCountRef.current = 0;
       suppressSpeechRef.current = false;
       socket.emit('ai:stream:stop');

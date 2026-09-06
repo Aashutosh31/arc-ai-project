@@ -17,6 +17,7 @@ const { upsertTextVector } = require('./workspaceIndexService');
 const { buildProviderContinuationMessages, normalizeProviderError, describeProviderFailure } = require('../lib/llm/utils');
 const WorkspaceRuntimeManager = require('./WorkspaceRuntimeManager');
 const WorkspaceLogger = require('../lib/WorkspaceLogger');
+const ttsService = require('./ttsService');
 
 const SCHEDULE_KEYWORDS = [
     'schedule',
@@ -430,6 +431,35 @@ class AIService {
             model: null,
             tokens: { input: 0, output: 0 }
         };
+        // Delivery timing diagnostics (elapsed ms only — never message text,
+        // keys, or tokens). Anchored at provider generation start.
+        const deliveryTiming = {
+            providerStartAt: null,
+            providerDoneAt: null,
+            firstChunkAt: null,
+            deliveryDoneAt: null,
+            persistenceDoneAt: null
+        };
+        const deliveryHooks = {
+            onFirstChunk: () => {
+                if (deliveryTiming.firstChunkAt == null) {
+                    deliveryTiming.firstChunkAt = Date.now();
+                    console.log('[AIService] delivery.firstChunk', {
+                        elapsedMs: deliveryTiming.firstChunkAt - deliveryTiming.providerStartAt,
+                        provider: assistantResponseMeta.provider || null
+                    });
+                }
+            },
+            onLastChunk: () => {
+                if (deliveryTiming.deliveryDoneAt == null) {
+                    deliveryTiming.deliveryDoneAt = Date.now();
+                }
+            }
+        };
+        // Server TTS buffer handle. Declared here (not inside try) so the
+        // abort path below can stop audio even when generation is cancelled.
+        // Null unless server TTS is active for this request.
+        let ttsBuffer = null;
         let assistantDraftMessageId = null;
         let assistantDraftContent = '';
         let finalOutputText = '';
@@ -707,6 +737,7 @@ class AIService {
                 });
             }
 
+            deliveryTiming.providerStartAt = Date.now();
             const response = await this.llmRouter.generate({
                 messages,
                 systemPrompt,
@@ -723,6 +754,13 @@ class AIService {
                 attachments,
                 signal: controller.signal
             });
+            deliveryTiming.providerDoneAt = Date.now();
+            console.log('[AIService] provider.completed', {
+                elapsedMs: deliveryTiming.providerDoneAt - deliveryTiming.providerStartAt,
+                provider: response?.provider || null,
+                model: response?.model || null,
+                fallbackUsed: Boolean(response?.fallbackUsed)
+            });
 
             if (socket) {
                 socket.emit('ai:provider:info', {
@@ -738,6 +776,18 @@ class AIService {
             assistantResponseMeta.provider = response?.provider || null;
             assistantResponseMeta.model = response?.model || null;
             assistantResponseMeta.tokens = response?.tokens || { input: 0, output: 0 };
+
+            // Server TTS mode announcement (additive event). When server TTS
+            // is active the client suppresses browser speechSynthesis for this
+            // response and plays `ai:tts:audio` segments instead. Text delivery
+            // below is unaffected either way.
+            const serverTtsActive = Boolean(socket) && ttsService.isServerTtsActive();
+            ttsBuffer = serverTtsActive
+                ? new ttsService.TtsStreamBuffer({ socket, signal: controller.signal })
+                : null;
+            if (socket) {
+                socket.emit('ai:tts:mode', { mode: serverTtsActive ? 'server' : 'browser' });
+            }
 
             finalOutputText = response?.text || "";
             const toolCalls = response?.toolCalls || [];
@@ -882,7 +932,8 @@ class AIService {
                             finalOutputText = await this.streamingRuntime.consume(finalGeneration.stream, socket, controller.signal, async (chunkText) => {
                                 assistantDraftContent += chunkText;
                                 await persistAssistantDraft(assistantDraftContent, { interrupted: false, state: 'streaming' });
-                            });
+                                if (ttsBuffer) ttsBuffer.push(chunkText);
+                            }, deliveryHooks);
                         }
                 } else {
                     console.log('[Planner] Delegating execution inline (quick tool path)');
@@ -988,7 +1039,7 @@ class AIService {
                         toolResults: providerToolResults
                     });
 
-                    finalOutputText = await this.streamingRuntime.consume(finalGeneration.stream, socket, controller.signal);
+                    finalOutputText = await this.streamingRuntime.consume(finalGeneration.stream, socket, controller.signal, ttsBuffer ? async (chunkText) => { ttsBuffer.push(chunkText); } : null, deliveryHooks);
                 }
             } else {
                 finalOutputText = response?.text || '';
@@ -996,7 +1047,18 @@ class AIService {
                     await this.streamingRuntime.emitText(socket, finalOutputText, controller.signal, async (chunkText) => {
                         assistantDraftContent += chunkText;
                         await persistAssistantDraft(assistantDraftContent, { interrupted: false, state: 'streaming' });
-                    });
+                        if (ttsBuffer) ttsBuffer.push(chunkText);
+                    }, deliveryHooks);
+                }
+            }
+
+            // Flush any buffered server-TTS audio only AFTER text delivery has
+            // completed, so speech synthesis can never delay visible text.
+            if (ttsBuffer) {
+                try {
+                    await ttsBuffer.flush();
+                } catch (error) {
+                    console.warn('[TTS] buffer flush failed:', error?.message || error);
                 }
             }
 
@@ -1091,6 +1153,17 @@ class AIService {
                             });
                         }
 
+                        deliveryTiming.persistenceDoneAt = Date.now();
+                        console.log('[AIService] delivery.completed', {
+                            provider: assistantResponseMeta.provider || null,
+                            elapsedMs: deliveryTiming.deliveryDoneAt != null && deliveryTiming.providerStartAt != null
+                                ? deliveryTiming.deliveryDoneAt - deliveryTiming.providerStartAt
+                                : null
+                        });
+                        console.log('[AIService] persistence.completed', {
+                            elapsedMs: deliveryTiming.persistenceDoneAt - deliveryTiming.providerStartAt
+                        });
+
                         const messageCount = await Message.countDocuments({ conversationId });
                         if (messageCount === 2) {
                             const conversationCtrl = require('../controllers/conversationController');
@@ -1128,6 +1201,9 @@ class AIService {
                 errorText.includes('interrupted');
             if (isAbortError) {
                 console.log(`[AIService] Request aborted for user ${userId}.`);
+                // Stop server TTS immediately so no stale audio plays after
+                // barge-in / Stop Generating. Client flushes its audio queue.
+                if (ttsBuffer) ttsBuffer.stop();
 
                 if (assistantDraftMessageId && conversationId) {
                     const partialContent = assistantDraftContent || finalOutputText || '';
