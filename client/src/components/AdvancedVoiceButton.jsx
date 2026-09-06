@@ -185,28 +185,43 @@ const AdvancedVoiceButton = () => {
     }
   };
 
-  const { isVoiceModeActive, liveTranscript, voiceMode, voiceError, toggleAdvancedVoice } = useAdvancedVoice(
+  const { isVoiceModeActive, liveTranscript, voiceMode, voiceError, voiceInteractionState, toggleAdvancedVoice } = useAdvancedVoice(
     handleFinalCommand,
     handleInterrupt
   );
 
   let orbState = 'off';
   let statusText = "Click to Start Advanced Voice";
+  let ariaLabel = 'Start advanced voice mode';
 
   if (voiceError) {
     statusText = voiceError;
   } else if (isVoiceModeActive) {
-    if (isSpeaking) {
+    // Explicit voice interaction state drives the UI so the button never
+    // claims "Listening..." while the mic is off, nor "Speaking..." after
+    // audio finished.
+    if (voiceInteractionState === 'speaking') {
       orbState = 'speaking';
-      statusText = "ARC-AI is speaking...";
-    } else if (isProcessing) {
+      statusText = "ARC-AI is speaking... (tap to interrupt)";
+      ariaLabel = 'Interrupt ARC and start listening';
+    } else if (voiceInteractionState === 'processing') {
       orbState = 'processing';
-      statusText = agentStatus || "Processing...";
+      statusText = agentStatus || "Thinking...";
+      ariaLabel = 'Cancel generation and stop advanced voice mode';
+    } else if (voiceInteractionState === 'interrupted') {
+      orbState = 'listening';
+      statusText = "Listening...";
+      ariaLabel = 'Stop advanced voice mode';
+    } else if (voiceInteractionState === 'error') {
+      orbState = 'off';
+      statusText = voiceError || "Voice error — tap to retry";
+      ariaLabel = 'Stop advanced voice mode';
     } else {
       orbState = 'listening';
       statusText = voiceMode === 'server'
         ? "Listening... (server transcription)"
         : "Listening... (Just start talking)";
+      ariaLabel = 'Stop advanced voice mode';
     }
   }
 
@@ -225,7 +240,7 @@ const AdvancedVoiceButton = () => {
         <Button
           onClick={toggleAdvancedVoice}
           $state={orbState}
-          aria-label={isVoiceModeActive ? 'Stop advanced voice mode' : 'Start advanced voice mode'}
+          aria-label={ariaLabel}
         >
           {isVoiceModeActive ? (
             <StopIcon />
