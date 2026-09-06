@@ -17,6 +17,10 @@ const extractTextFromContent = (content) => {
     if (Array.isArray(content.parts)) {
       return content.parts.map(extractTextFromContent).filter(Boolean).join(' ');
     }
+    // Unknown object shape (e.g. an SDK response envelope with no text):
+    // return empty rather than "[object Object]", which previously leaked
+    // into user-visible titles and messages.
+    return '';
   }
 
   return safeString(content);
@@ -281,6 +285,15 @@ const classifyProviderFailure = (error) => {
   // Treat API key errors (400) as transient to trigger provider fallback
   const isApiKeyError = status === 400 && message.includes('api key');
 
+  // Provider-side model/config rejections (e.g. Mistral "invalid_model"):
+  // the request itself may be fine, so a healthy backup provider deserves a
+  // chance. Never treated as transient-retries against the SAME provider —
+  // only as cross-provider failover. Matched narrowly to avoid masking
+  // genuinely malformed requests.
+  const isModelError =
+    (status === 400 || status === 404) &&
+    /(invalid_model|model_not_found|unknown model|does not exist|unsupported model|model .*not (available|found|supported))/.test(message);
+
   const isTransient =
     isRateLimit ||
     isApiKeyError ||
@@ -289,11 +302,63 @@ const classifyProviderFailure = (error) => {
     message.includes('timeout') ||
     message.includes('network');
 
-  return { isRateLimit, isTransient, status, message, isApiKeyError };
+  return { isRateLimit, isTransient, status, message, isApiKeyError, isModelError };
+};
+
+// Normalize provider SDK errors to a common shape WITHOUT touching secrets.
+// Different SDKs report HTTP status differently (@google/genai uses `.status`,
+// mistralai uses `.statusCode`). After this, `error.statusCode` is reliable
+// for classification, and `error.providerCode` carries the short machine tag
+// (e.g. API_KEY_INVALID, invalid_model) when one is detectable.
+const normalizeProviderError = (error, providerId = null) => {
+  if (!error || typeof error !== 'object') return error;
+
+  if (error.statusCode == null) {
+    const status = Number(error.status ?? error.code ?? 0);
+    if (Number.isFinite(status) && status >= 100 && status < 600) {
+      error.statusCode = status;
+    }
+  }
+
+  if (providerId && error.providerId == null) error.providerId = providerId;
+
+  if (error.providerCode == null) {
+    const message = safeString(error.message);
+    if (/api key not valid|invalid api key/i.test(message)) {
+      error.providerCode = 'API_KEY_INVALID';
+    } else {
+      const match = message.match(/(API_KEY_INVALID|invalid_model|INVALID_ARGUMENT|SAFETY|RESOURCE_EXHAUSTED|model_not_found)/i);
+      if (match) error.providerCode = match[1];
+    }
+  }
+
+  return error;
+};
+
+// Safe one-line diagnostic for server logs: provider, model, HTTP status,
+// machine-readable code, truncated message, request-shape metadata and
+// key-configured booleans. NEVER includes keys, tokens, audio, or full text.
+const describeProviderFailure = (error, context = {}) => {
+  const failure = classifyProviderFailure(error);
+  return {
+    provider: context.providerId || error?.providerId || null,
+    model: context.model || null,
+    operation: context.operation || 'generate',
+    status: failure.status || null,
+    providerCode: error?.providerCode || null,
+    message: failure.message.slice(0, 300),
+    keyConfigured: context.keyConfigured ?? null,
+    tools: context.tools ?? null,
+    hasAttachments: context.hasAttachments ?? null,
+    stream: context.stream ?? null,
+    failover: context.failover ?? null
+  };
 };
 
 module.exports = {
   classifyProviderFailure,
+  normalizeProviderError,
+  describeProviderFailure,
   extractResponseText,
   extractTextFromContent,
   inferTaskProfile,

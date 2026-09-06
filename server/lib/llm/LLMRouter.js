@@ -2,9 +2,29 @@ const providerRegistry = require('./providers');
 const StreamingRuntime = require('./StreamingRuntime');
 const {
   classifyProviderFailure,
+  normalizeProviderError,
+  describeProviderFailure,
   inferTaskProfile,
   extractTextFromContent
 } = require('./utils');
+
+// Request-shape metadata for diagnostics (counts and flags only — never
+// message text, attachments, keys, or tool internals).
+const summarizeRequest = (request = {}) => ({
+  tools: Array.isArray(request.tools) ? request.tools.length : 0,
+  hasAttachments: Array.isArray(request.attachments) && request.attachments.length > 0,
+  stream: Boolean(request.stream),
+  messageCount: Array.isArray(request.messages) ? request.messages.length : 0
+});
+
+const resolveProviderModel = (provider, request = {}) => {
+  try {
+    if (provider && typeof provider.resolveModel === 'function') return provider.resolveModel(request) || null;
+  } catch {
+    // ignore resolver failures; model stays unknown
+  }
+  return provider?.defaultModel || null;
+};
 
 class LLMRouter {
   constructor() {
@@ -214,15 +234,28 @@ class LLMRouter {
           provider: provider.id
         };
       } catch (error) {
+        normalizeProviderError(error, provider.id);
         this.recordFailure(provider.id, error, telemetryRoute);
         lastError = error;
 
-        if (!this.isRetryable(error) || index === providerOrder.length - 1) {
+        const failure = classifyProviderFailure(error);
+        const canFailover = this.isRetryable(error) || failure.isModelError;
+        const isLast = index === providerOrder.length - 1;
+        console.error('[LLMRouter] provider request failed', describeProviderFailure(error, {
+          providerId: provider.id,
+          model: resolveProviderModel(provider, request),
+          operation: 'generate',
+          keyConfigured: typeof provider.isAvailable === 'function' ? Boolean(provider.isAvailable()) : null,
+          ...summarizeRequest(request),
+          failover: canFailover && !isLast ? providerOrder[index + 1]?.id || null : null
+        }));
+
+        if (!canFailover || isLast) {
           throw error;
         }
 
         const nextProvider = providerOrder[index + 1];
-        this.logFallback(provider.id, nextProvider.id, classifyProviderFailure(error).message || 'transient failure');
+        this.logFallback(provider.id, nextProvider.id, failure.message.slice(0, 160) || 'provider failure');
       }
     }
 
@@ -252,8 +285,21 @@ class LLMRouter {
               };
             }
           } catch (streamError) {
+            normalizeProviderError(streamError, provider.id);
             self.recordFailure(provider.id, streamError, route);
-            if (emittedChunk || !self.isRetryable(streamError) || index === providerOrder.length - 1) {
+            const streamFailure = classifyProviderFailure(streamError);
+            const canFailoverStream = !emittedChunk &&
+              (self.isRetryable(streamError) || streamFailure.isModelError) &&
+              index < providerOrder.length - 1;
+            console.error('[LLMRouter] provider stream failed', describeProviderFailure(streamError, {
+              providerId: provider.id,
+              model: resolveProviderModel(provider, request),
+              operation: 'stream',
+              keyConfigured: typeof provider.isAvailable === 'function' ? Boolean(provider.isAvailable()) : null,
+              ...summarizeRequest(request),
+              failover: canFailoverStream ? providerOrder[index + 1]?.id || null : null
+            }));
+            if (!canFailoverStream) {
               throw streamError;
             }
 
@@ -263,7 +309,7 @@ class LLMRouter {
               throw blockedFallbackError;
             }
 
-            self.logFallback(provider.id, providerOrder[index + 1].id, classifyProviderFailure(streamError).message || 'stream failure');
+            self.logFallback(provider.id, providerOrder[index + 1].id, streamFailure.message.slice(0, 160) || 'stream failure');
             continue;
           }
 
@@ -276,12 +322,23 @@ class LLMRouter {
           });
           return;
         } catch (error) {
+          normalizeProviderError(error, provider.id);
           self.recordFailure(provider.id, error, route);
-          if (!self.isRetryable(error) || index === providerOrder.length - 1) {
+          const genFailure = classifyProviderFailure(error);
+          const canFailoverGen = (self.isRetryable(error) || genFailure.isModelError) && index < providerOrder.length - 1;
+          console.error('[LLMRouter] provider stream setup failed', describeProviderFailure(error, {
+            providerId: provider.id,
+            model: resolveProviderModel(provider, request),
+            operation: 'stream-setup',
+            keyConfigured: typeof provider.isAvailable === 'function' ? Boolean(provider.isAvailable()) : null,
+            ...summarizeRequest(request),
+            failover: canFailoverGen ? providerOrder[index + 1]?.id || null : null
+          }));
+          if (!canFailoverGen) {
             throw error;
           }
 
-          self.logFallback(provider.id, providerOrder[index + 1].id, classifyProviderFailure(error).message || 'generation failure');
+          self.logFallback(provider.id, providerOrder[index + 1].id, genFailure.message.slice(0, 160) || 'generation failure');
         }
       }
     })();

@@ -14,7 +14,7 @@ const WorkspaceContextManager = require('./WorkspaceContextManager');
 const TaskPlanner = require('./TaskPlanner');
 const ToolRecoveryManager = require('./ToolRecoveryManager');
 const { upsertTextVector } = require('./workspaceIndexService');
-const { buildProviderContinuationMessages } = require('../lib/llm/utils');
+const { buildProviderContinuationMessages, normalizeProviderError, describeProviderFailure } = require('../lib/llm/utils');
 const WorkspaceRuntimeManager = require('./WorkspaceRuntimeManager');
 const WorkspaceLogger = require('../lib/WorkspaceLogger');
 
@@ -1112,6 +1112,10 @@ class AIService {
             return finalOutputText;
 
         } catch (error) {
+            // Normalize SDK shapes first (@google/genai reports `.status`,
+            // mistralai reports `.statusCode`) so classification below and the
+            // router logs see one reliable `statusCode`. Never touches secrets.
+            normalizeProviderError(error, assistantResponseMeta.provider || null);
             const errorText = String(error?.message || error || '').toLowerCase();
             const isAbortError =
                 error?.name === 'AbortError' ||
@@ -1157,6 +1161,19 @@ class AIService {
             }
 
             console.error("[AIService] Error processing query:", error);
+            // Structured, secret-free diagnostic: provider, model, HTTP status,
+            // provider code, request-shape metadata. Message truncated; never
+            // includes keys, tokens, or message content.
+            console.error("[AIService] provider failure summary", describeProviderFailure(error, {
+                providerId: assistantResponseMeta.provider || null,
+                model: assistantResponseMeta.model || null,
+                operation: 'processQuery',
+                // `tools` is try-block scoped; typeof-guard avoids a
+                // ReferenceError inside the error handler itself.
+                tools: (typeof tools !== 'undefined' && Array.isArray(tools)) ? tools.length : null,
+                hasAttachments: Boolean(imageBase64 || (document && (document.data || document.url))),
+                stream: false
+            }));
             let userFriendlyError = "An internal system error occurred.";
             
                 if (error.statusCode === 429 || (error.message && (error.message.includes('capacity exceeded') || error.message.includes('Rate limit exceeded')))) {
