@@ -27,9 +27,18 @@ export const useSocket = () => {
     socket.off('ai:credits:update');
 
     socket.on('ai:tts:response:chunk', (data) => {
-      if (isInterruptedRef.current) return; 
-
       const { chunk, displayText, isFinal } = data;
+
+      // Terminal events always run cleanup (idempotent): swallowing them while
+      // interrupted is what used to wedge "Stop Generating" on forever.
+      // Only content appends/speech stay gated on the interrupt flag.
+      if (isInterruptedRef.current) {
+        if (isFinal) {
+          finishBotStream();
+          setAgentStatus(null);
+        }
+        return;
+      }
       const chunkText = String(displayText || chunk || '');
 
       if (chunkText) {
@@ -133,12 +142,15 @@ export const useSocket = () => {
     });
 
     socket.on('bot_error', (errorMsg) => {
-      if (isInterruptedRef.current) {
-        return;
-      }
+      // Always terminate the generation state (idempotent) so a failure can
+      // never leave the UI generating forever — even if it arrives late.
+      // The visible error message is only appended for the active request;
+      // errors for an intentionally stopped request stay silent.
       setAgentStatus(null);
       finishBotStream();
-      addMessage({ sender: 'ai', text: `[Error]: ${errorMsg}` });
+      if (!isInterruptedRef.current) {
+        addMessage({ sender: 'ai', text: `[Error]: ${errorMsg}` });
+      }
     });
 
     return () => {
@@ -179,7 +191,7 @@ export const useSocket = () => {
 
   const interruptStream = () => {
     if (socket) {
-      isInterruptedRef.current = true; 
+      isInterruptedRef.current = true;
       if (setIsInterrupted) setIsInterrupted(true);
       setAgentStatus(null);
       if (typeof stopSpeech === 'function') {
@@ -189,8 +201,14 @@ export const useSocket = () => {
       }
       speechCharCountRef.current = 0;
       suppressSpeechRef.current = false;
-      socket.emit('ai:stream:stop');   
-      markBotInterrupted?.();          
+      socket.emit('ai:stream:stop');
+      markBotInterrupted?.();
+      // Local terminal transition: the generation is over as far as the UI is
+      // concerned. Previously this relied on the server's terminal events,
+      // which are swallowed while interrupted — leaving "Stop Generating"
+      // stuck forever. finishBotStream is idempotent, so any late server
+      // terminal event is a harmless no-op.
+      finishBotStream();
     }
   };
 

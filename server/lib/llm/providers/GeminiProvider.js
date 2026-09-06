@@ -4,7 +4,8 @@ const {
   inferTaskProfile,
   normalizeGeminiToolCalls,
   toGeminiContents,
-  toGeminiTools
+  toGeminiTools,
+  toWellFormedUnicode
 } = require('../utils');
 
 class GeminiProvider {
@@ -55,8 +56,12 @@ class GeminiProvider {
   }
 
   buildConfig(request = {}) {
+    // System prompt is provider-bound: normalize to well-formed Unicode so a
+    // lone surrogate (e.g. from a truncated snippet) cannot invalidate the
+    // whole request body.
+    const systemInstruction = request.systemPrompt ? toWellFormedUnicode(String(request.systemPrompt)) : undefined;
     const config = {
-      systemInstruction: request.systemPrompt || undefined,
+      systemInstruction,
       temperature: typeof request.temperature === 'number' ? request.temperature : undefined,
       maxOutputTokens: typeof request.maxTokens === 'number' ? request.maxTokens : undefined,
       abortSignal: request.signal || undefined

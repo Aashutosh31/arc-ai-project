@@ -2,7 +2,8 @@ const { Mistral } = require('@mistralai/mistralai');
 const {
   extractResponseText,
   inferTaskProfile,
-  normalizeMistralToolCalls
+  normalizeMistralToolCalls,
+  toWellFormedUnicode
 } = require('../utils');
 
 class MistralProvider {
@@ -51,10 +52,13 @@ class MistralProvider {
   }
 
   buildMessages(request = {}) {
+    // All content is normalized to well-formed Unicode: a single lone
+    // surrogate anywhere in the payload makes Mistral reject the whole
+    // request with HTTP 400 ("Invalid JSON payload").
     const messages = [];
 
     if (request.systemPrompt) {
-      messages.push({ role: 'system', content: request.systemPrompt });
+      messages.push({ role: 'system', content: toWellFormedUnicode(String(request.systemPrompt)) });
     }
 
     for (const message of request.messages || []) {
@@ -67,7 +71,7 @@ class MistralProvider {
           name: message?.name,
           toolCallId,
           tool_call_id: toolCallId,
-          content: String(message?.content || '')
+          content: toWellFormedUnicode(String(message?.content || ''))
         });
         continue;
       }
@@ -75,14 +79,14 @@ class MistralProvider {
       if (role === 'assistant' && Array.isArray(message?.toolCalls) && message.toolCalls.length > 0) {
         messages.push({
           role: 'assistant',
-          content: String(message?.content || ''),
+          content: toWellFormedUnicode(String(message?.content || '')),
           toolCalls: message.toolCalls,
           tool_calls: message.toolCalls
         });
         continue;
       }
 
-      messages.push({ role, content: String(message?.content || '') });
+      messages.push({ role, content: toWellFormedUnicode(String(message?.content || '')) });
     }
 
     return messages;

@@ -235,6 +235,16 @@ class LLMRouter {
         };
       } catch (error) {
         normalizeProviderError(error, provider.id);
+        // Stamp request-scoped diagnostics so downstream handlers (AIService
+        // catch) report a complete summary even though they lack the request.
+        try {
+          if (error.model == null) error.model = resolveProviderModel(provider, request);
+          if (error.keyConfigured == null && typeof provider.isAvailable === 'function') {
+            error.keyConfigured = Boolean(provider.isAvailable());
+          }
+        } catch {
+          // diagnostics must never break error propagation
+        }
         this.recordFailure(provider.id, error, telemetryRoute);
         lastError = error;
 

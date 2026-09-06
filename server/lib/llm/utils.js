@@ -5,15 +5,30 @@ const safeString = (value) => {
   return String(value);
 };
 
+// Replace lone surrogates (unpaired \uD800-\uDFFF) with U+FFFD so the result
+// is well-formed Unicode. Providers (Mistral, Gemini) strictly validate JSON
+// bodies as UTF-8: a single lone surrogate — e.g. from slicing an emoji in
+// half when truncating snippets, or pasted/scraped text — makes the whole
+// request fail with HTTP 400 ("Invalid JSON payload"). Stored data is never
+// touched; this applies only to provider-bound strings.
+const toWellFormedUnicode = (value) => {
+  const str = String(value ?? '');
+  if (typeof str.toWellFormed === 'function') return str.toWellFormed();
+  return str.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF])/g,
+    '\uFFFD'
+  );
+};
+
 const extractTextFromContent = (content) => {
   if (content === null || content === undefined) return '';
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map(extractTextFromContent).filter(Boolean).join(' ');
 
   if (typeof content === 'object') {
-    if (typeof content.text === 'string') return content.text;
-    if (typeof content.content === 'string') return content.content;
-    if (typeof content.message === 'string') return content.message;
+    if (typeof content.text === 'string') return toWellFormedUnicode(content.text);
+    if (typeof content.content === 'string') return toWellFormedUnicode(content.content);
+    if (typeof content.message === 'string') return toWellFormedUnicode(content.message);
     if (Array.isArray(content.parts)) {
       return content.parts.map(extractTextFromContent).filter(Boolean).join(' ');
     }
@@ -23,7 +38,7 @@ const extractTextFromContent = (content) => {
     return '';
   }
 
-  return safeString(content);
+  return toWellFormedUnicode(safeString(content));
 };
 
 const normalizeMessages = (messages = []) => {
@@ -59,12 +74,12 @@ const toGeminiContents = (messages = [], attachments = []) => {
           role: 'tool',
           output: text
         };
-        parts.push(createPartFromText(`[TOOL_RESULT] ${JSON.stringify(toolPayload)}`));
+        parts.push(createPartFromText(`[TOOL_RESULT] ${toWellFormedUnicode(JSON.stringify(toolPayload))}`));
         return { role: 'user', parts };
       }
 
       if (message.role === 'assistant' && Array.isArray(message.toolCalls) && message.toolCalls.length > 0) {
-        parts.push(createPartFromText(`[ASSISTANT_TOOL_CALLS] ${JSON.stringify(message.toolCalls)}`));
+        parts.push(createPartFromText(`[ASSISTANT_TOOL_CALLS] ${toWellFormedUnicode(JSON.stringify(message.toolCalls))}`));
       }
 
       if (text) {
@@ -78,7 +93,7 @@ const toGeminiContents = (messages = [], attachments = []) => {
           if (attachment.type === 'image' && attachment.data) {
             parts.push(createPartFromBase64(attachment.data, attachment.mimeType || 'image/jpeg'));
           } else if (attachment.type === 'text' && attachment.data) {
-            parts.push(createPartFromText(String(attachment.data)));
+            parts.push(createPartFromText(toWellFormedUnicode(String(attachment.data))));
           }
         }
       }
@@ -359,6 +374,7 @@ module.exports = {
   classifyProviderFailure,
   normalizeProviderError,
   describeProviderFailure,
+  toWellFormedUnicode,
   extractResponseText,
   extractTextFromContent,
   inferTaskProfile,

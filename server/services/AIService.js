@@ -421,6 +421,18 @@ class AIService {
             }
         }
         const { key, controller } = this.beginRequest(socket, userId);
+        // Declared outside try: the catch handler below reads these for abort
+        // persistence and diagnostics, and try-block-scoped let/const are in
+        // TDZ there — referencing them threw a secondary ReferenceError that
+        // swallowed the real error and left the client generating forever.
+        const assistantResponseMeta = {
+            provider: null,
+            model: null,
+            tokens: { input: 0, output: 0 }
+        };
+        let assistantDraftMessageId = null;
+        let assistantDraftContent = '';
+        let finalOutputText = '';
         try {
             console.log(`[Planner] Incoming user command: ${String(text || '').trim()}`);
             const now = new Date();
@@ -433,14 +445,6 @@ class AIService {
             const isGuest = isGuestActorId(userId);
             const user = isGuest ? null : await User.findById(userId).select('preferences.memoryLearningEnabled preferences.voice preferences.accentColor').lean();
             const memoryLearningEnabled = user?.preferences?.memoryLearningEnabled !== false;
-            const assistantResponseMeta = {
-                provider: null,
-                model: null,
-                tokens: { input: 0, output: 0 }
-            };
-
-            let assistantDraftMessageId = null;
-            let assistantDraftContent = '';
 
             const persistAssistantDraft = async (nextContent, { interrupted = false, state = 'streaming' } = {}) => {
                 if (isGuestActorId(userId) || !conversationId) return;
@@ -735,7 +739,7 @@ class AIService {
             assistantResponseMeta.model = response?.model || null;
             assistantResponseMeta.tokens = response?.tokens || { input: 0, output: 0 };
 
-            let finalOutputText = response?.text || "";
+            finalOutputText = response?.text || "";
             const toolCalls = response?.toolCalls || [];
             const assistantToolMessage = {
                 role: 'assistant',
@@ -1165,11 +1169,13 @@ class AIService {
             // provider code, request-shape metadata. Message truncated; never
             // includes keys, tokens, or message content.
             console.error("[AIService] provider failure summary", describeProviderFailure(error, {
-                providerId: assistantResponseMeta.provider || null,
-                model: assistantResponseMeta.model || null,
+                providerId: assistantResponseMeta.provider || error?.providerId || null,
+                model: assistantResponseMeta.model || error?.model || null,
                 operation: 'processQuery',
-                // `tools` is try-block scoped; typeof-guard avoids a
-                // ReferenceError inside the error handler itself.
+                keyConfigured: error?.keyConfigured ?? null,
+                // `tools` lives in a nested block; typeof-guard keeps this
+                // diagnostic from throwing when it is out of scope here.
+                // (The router's own structured log always carries the count.)
                 tools: (typeof tools !== 'undefined' && Array.isArray(tools)) ? tools.length : null,
                 hasAttachments: Boolean(imageBase64 || (document && (document.data || document.url))),
                 stream: false
@@ -1190,7 +1196,11 @@ class AIService {
                      : "The AI provider could not process that request. Please try again.";
             }
             
+            // Emit BOTH terminal signals (mirrors the credit-failure path):
+            // the UI terminates generation on either one, so a dropped event
+            // can never wedge it in "generating" forever.
             if (socket) socket.emit('bot_error', userFriendlyError);
+            if (socket) socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
             return "Error";
         } finally {
             this.endRequest(key, controller);
