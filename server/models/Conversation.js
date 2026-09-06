@@ -42,6 +42,7 @@ const ConversationSchema = new mongoose.Schema({
     providerUsage: {
       gemini: { type: Number, default: 0 },
       mistral: { type: Number, default: 0 },
+      groq: { type: Number, default: 0 },
       other: { type: Number, default: 0 }
     },
     multimodal: {

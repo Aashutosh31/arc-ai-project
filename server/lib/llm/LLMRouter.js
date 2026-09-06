@@ -127,7 +127,7 @@ class LLMRouter {
       if (needsMultimodal) {
         throw new Error('No multimodal-capable LLM providers are available for this request.');
       }
-      throw new Error('No LLM providers are available. Configure GEMINI_API_KEY or MISTRAL_API_KEY.');
+      throw new Error('No LLM providers are available. Configure GROQ_API_KEY, GEMINI_API_KEY or MISTRAL_API_KEY.');
     }
 
     return order;
@@ -146,22 +146,32 @@ class LLMRouter {
       return { providerId: this.defaultProvider, route };
     }
 
-    // Use Gemini for heavy workloads: complex reasoning, multimodal, tool orchestration, long context
-    if (taskProfile === 'multimodal' || taskProfile === 'tool_orchestration' || taskProfile === 'long_context') {
+    // Auto-routing: prefer Groq for heavy workloads (complex reasoning,
+    // tool orchestration, long context). Multimodal requests are routed to
+    // Gemini since Groq gpt-oss-120b is text-only via the OpenAI endpoint.
+    // Fall back to the existing lightweight providers for simple tasks.
+    const groqAvailable = Boolean(process.env.GROQ_API_KEY);
+
+    // Complex reasoning, tool orchestration, long context → Groq
+    if (taskProfile === 'reasoning' || taskProfile === 'tool_orchestration' || taskProfile === 'long_context') {
+      if (groqAvailable) return { providerId: 'groq', route };
       return { providerId: 'gemini', route };
     }
 
-    // Use Mistral for reasoning tasks (fast, reliable, cost-effective for most reasoning)
-    // Use Gemini only if this is marked as truly complex
-    if (taskProfile === 'reasoning') {
-      return { providerId: 'mistral', route };
+    // Multimodal → only providers with genuine multimodal support
+    if (taskProfile === 'multimodal') {
+      return { providerId: 'gemini', route };
     }
 
-    // Default to Mistral for lightweight and memory compression
+    // Lightweight and memory compression → Groq if available,
+    // otherwise the existing cheap provider
     if (taskProfile === 'lightweight' || taskProfile === 'memory_compression') {
+      if (groqAvailable) return { providerId: 'groq', route };
       return { providerId: 'mistral', route };
     }
 
+    // Default: Groq if available, otherwise Mistral
+    if (groqAvailable) return { providerId: 'groq', route };
     return { providerId: 'mistral', route };
   }
 

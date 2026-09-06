@@ -64,8 +64,8 @@ const listProviders = () => {
   }
 
   return Array.from(uniqueProviders.values()).sort((left, right) => {
-    const leftPriority = Number(right?.priority || 0);
-    const rightPriority = Number(left?.priority || 0);
+    const leftPriority = Number(left?.priority || 0);
+    const rightPriority = Number(right?.priority || 0);
     return rightPriority - leftPriority;
   });
 };

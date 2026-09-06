@@ -142,6 +142,23 @@ const normalizeMistralToolCalls = (message) => {
   }));
 };
 
+const normalizeGroqToolCalls = (message) => {
+  const toolCalls = message?.toolCalls || message?.tool_calls || [];
+  return toolCalls.map((toolCall, index) => {
+    const rawArgs = toolCall?.function?.arguments || {};
+    const parsedArgs = typeof rawArgs === 'string'
+      ? (() => { try { return JSON.parse(rawArgs); } catch { return {}; } })()
+      : rawArgs;
+    return {
+      id: toolCall?.id || `groq-tool-call-${index}`,
+      function: {
+        name: toolCall?.function?.name,
+        arguments: parsedArgs
+      }
+    };
+  });
+};
+
 const isAssistantToolCallMessage = (message) => {
   return (message?.role || '').toLowerCase() === 'assistant' && Array.isArray(message?.toolCalls) && message.toolCalls.length > 0;
 };
@@ -297,8 +314,18 @@ const classifyProviderFailure = (error) => {
     message.includes('resource_exhausted') ||
     message.includes('too many requests');
 
-  // Treat API key errors (400) as transient to trigger provider fallback
-  const isApiKeyError = status === 400 && message.includes('api key');
+  // Treat API key errors (400/401) as transient to trigger provider fallback.
+  // OpenAI-compatible providers (Groq) report invalid keys as 401
+  // ("Invalid API Key", "Unauthorized"); Mistral uses 401 "Unauthorized".
+  // Extending to 401 lets these providers fail over to a healthy backup
+  // instead of hard-failing.
+  const isApiKeyError =
+    (status === 400 || status === 401) &&
+    (message.includes('api key') ||
+      message.includes('unauthorized') ||
+      message.includes('token expired') ||
+      message.includes('invalid api key') ||
+      message.includes('authentication'));
 
   // Provider-side model/config rejections (e.g. Mistral "invalid_model"):
   // the request itself may be fine, so a healthy backup provider deserves a
@@ -379,8 +406,9 @@ module.exports = {
   extractTextFromContent,
   inferTaskProfile,
   normalizeGeminiToolCalls,
-  normalizeMessages,
   normalizeMistralToolCalls,
+  normalizeGroqToolCalls,
+  normalizeMessages,
   buildProviderContinuationMessages,
   toGeminiContents,
   toGeminiTools
