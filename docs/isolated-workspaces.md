@@ -1,36 +1,67 @@
 ---
-title: Isolated Workspaces — v0.13.0-beta
+title: Isolated Workspaces
 ---
 
-# 🔥  MAJOR RELEASE: v0.13.0-beta
+# ARC-AI Workspaces
 
-**Release date:** 2026-05-22
-
-### *Isolated Multi-Workspace Execution & Runtime Orchestration*
-
-ARC-AI has officially evolved beyond a single persistent AI workspace into a **true multi-workspace autonomous runtime environment**. This release introduces isolated execution environments, workspace-aware frontend orchestration, and runtime-safe synchronization while strictly preserving realtime streaming, provider continuity, and execution integrity.
-
-#### 🧠 Multi-Workspace Runtime System & Scoped Conversations
-
-Each workspace now behaves as an isolated intelligent runtime environment.
-
-* **Global Active Workspace State:** Workspace-aware frontend orchestration and scoped retrieval synchronization.
-* **Isolated Conversations:** Features scoped real-time conversation synchronization and runtime-safe switching. Conversation state now safely resets/rebinds during workspace transitions without stale context leakage.
-
-#### ⚡ Workspace-Aware Execution & Socket Synchronization
-
-The execution and socket runtime cleanly separate workspace logic, provider orchestration, and streaming internals.
-
-* **Execution Runtime:** Supports isolated execution buckets, scoped execution tracking, and runtime-safe rendering/rebinding. Executions remain correctly scoped during workspace switches and autonomous lifecycles.
-* **Socket Safety:** Implemented workspace-safe socket synchronization and isolated real-time event routing. Prevents socket duplication, stale listeners, and cross-workspace execution contamination.
-
-#### 🏗️ Production-Grade Lifecycle & UX Integration
-
-Browser prompt flows have been completely replaced with a polished, execution-aware UX.
-
-* **Workspace Management:** Native modal-based management UI (Create, Rename, Archive/Delete) with inline validation and responsive interaction flows.
-* **Platform Direction:** ARC-AI now visually and behaviorally acts as an enterprise-ready, execution-aware operating environment rather than a single conversational thread.
+This document describes the **current** workspace model: ownership, scoping, and isolation.
 
 ---
 
-For implementation details and architecture notes related to isolated runtimes, see `docs/architecture-and-runtime.md` and the `server/WorkspaceRuntimeManager.js` implementation.
+## Ownership Model
+
+- `Workspace.owner` is an **ObjectId reference to a real user**. Only signed-in users own workspaces.
+- **Guests** (`guest_<uuid>` actors) are short-circuited out of workspace routes and resolve to `null` workspace context — they get a from-guest-scoped conversation experience but no persistent workspace or long-term memory.
+- The canonical actor abstraction (`server/lib/actor.js`) guarantees REST and Socket.IO agree on whose workspace is active.
+
+---
+
+## Resolution
+
+`WorkspaceRuntimeManager.resolveWorkspace()` (`server/services/WorkspaceRuntimeManager.js`) resolves the active workspace per request/socket:
+
+1. explicit `workspaceId` (ownership-validated)
+2. user's oldest non-archived workspace
+3. auto-created **Default Workspace** (with `vectorNamespace = workspace_<id>`, plus background migration of legacy unscoped documents)
+
+`injectWorkspaceContext()` exposes `{ workspaceId, vectorNamespace, settings, metadata }` to the AI pipeline.
+
+---
+
+## Isolation & Scoping
+
+Every major runtime entity carries `workspaceId`:
+
+- conversations
+- messages
+- memories (`AIMemory`, `UserFact`)
+- executions
+- search / retrieval
+- vector indexing (Pinecone namespaces `workspace_<id>`)
+
+No cross-workspace leakage is permitted: retrieval, memory writes, and search are always scoped to the active workspace.
+
+---
+
+## Runtime Safety
+
+- Switching workspaces rebinds execution + conversation state without stale-context leakage.
+- Socket listeners are workspace-aware (`workspace:switch` broadcasts to all of the user's sockets).
+- Execution buckets (`TaskPlanner`, `TaskExecutor`, `ToolRecoveryManager`) remain workspace-scoped; retries and replans never leave the workspace boundary.
+
+---
+
+## Routes (all `protect`)
+
+- `GET /api/workspaces/` — list non-archived workspaces
+- `GET /api/workspaces/active` — resolve active workspace
+- `POST /api/workspaces/` — create (generates `vectorNamespace`)
+- `PUT /api/workspaces/:workspaceId` — rename / visibility / settings
+- `DELETE /api/workspaces/:workspaceId` — soft-delete (archive)
+
+---
+
+## Relations
+
+- Runtime + persistence: [`architecture-and-runtime.md`](./architecture-and-runtime.md)
+- Memory scoping: [`memory-and-rag.md`](./memory-and-rag.md)

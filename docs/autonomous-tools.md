@@ -1,91 +1,70 @@
 # ARC-AI Autonomous Tools
 
-This document covers ARC-AI's autonomous tool ecosystem for research, automation, communication, and direct interface actuation.
+This document describes the **current** tool system: the provider-independent registry, the 22 registered tools, and how tools execute inside the AI pipeline.
 
 ---
 
-## Live Web Research
+## Tool Registry (22 tools)
 
-ARC-AI performs realtime web intelligence gathering through scraping and API-backed lookup.
+`server/tools/index.js` auto-discovers every `{ schema, execute }` module in the tools directory. The registry is **provider-independent** — tools are defined once and exposed to Groq, Gemini, and Mistral; per-provider translation happens only at the provider adapter boundary.
 
-### Capabilities
+Current registered tools:
 
-- realtime scraping using Cheerio
-- API-based search
-- weather retrieval
-- news retrieval
+| Category | Tools |
+| --- | --- |
+| **Communication** | `sendEmail` (Google Apps Script webhook), `sendWhatsAppMessage` |
+| **Calendar & time** | `checkCalendar`, `scheduleMeeting`, `getTime`, `createReminder`, `setReminder`, `stopReminder` |
+| **Research** | `webSearch`, `getTopNews`, `getWeather`, `scrapeWebsite`, `deepResearchSwarm` |
+| **Memory** | `memorize`, `recallMemory`, `storeUserFact` |
+| **UI actuation** | `changeTheme`, `openWebsite`, `copyToClipboard`, `playMedia`, `stopMedia` |
+| **Computation** | `executeCode` (QuickJS/WASM sandbox) |
 
-Demo: https://www.instagram.com/aashutosh_vaishnav.31/reel/DW31J3bEbu9/
-
----
-
-## Proactive Routine Engine (Cron)
-
-ARC-AI supports autonomous task scheduling and background execution.
-
-### Capabilities
-
-- natural language to cron translation
-- recurring and delayed routine execution
-- planner-driven background task flow
-
-Demo: https://www.instagram.com/aashutosh_vaishnav.31/reel/DW7DQ8lE-Wr/
+> Not every provider is guaranteed identical tool/capability behavior. The registry is neutral; provider-specific behavior lives in the adapters (`server/lib/llm/providers/*`).
 
 ---
 
-## WhatsApp Automation
+## Execution Model
 
-ARC-AI automates message dispatch workflows through integrated WhatsApp tooling.
-
-### Capabilities
-
-- send messages to contacts
-- autonomous message composition and delivery
-- agent workflow integration
-
-Demo: https://www.instagram.com/aashutosh_vaishnav.31/reel/DYH4hoYR1gC/
+1. **Offering tools** — `AIService` passes `getSchemas()` (all 22 schemas) into the LLM request.
+2. **Tool calling** — if the response contains `toolCalls`, ARC-AI routes to a planner path or an inline path:
+   - **Planner path** (`shouldUsePlanner`) — multiple tools or heavy research tools go through `TaskPlanner.createPlan()` + `executePlan()`, with `execution.*` progress events and cancellation.
+   - **Inline path** — tools execute sequentially via `TaskExecutor.executeTool()`.
+3. **Execution** — `TaskExecutor` charges ARC-AI credits (per-tool cost), packages `{ actor, signal, workspaceId, conversationId }`, and invokes `tool.execute(args, context, socket)`.
+4. **Multi-step + follow-up** — tool results are normalized (tool-call continuation chain rebuilt by `buildProviderContinuationMessages`) and **fed back to the model** for a streaming follow-up synthesis pass.
+5. **Client actions** — tool results carrying a `clientAction` payload are emitted over `ai:client:action` so the frontend can change the theme, open a URL, copy to clipboard, or control media/reminders.
 
 ---
 
-## External Communication (Email + Webhooks)
+## Recovery (`ToolRecoveryManager`)
 
-ARC-AI handles outbound communication through serverless integration patterns.
-
-### Capabilities
-
-- autonomous email sending
-- serverless webhook integration
-- workflow-triggered outbound communication
-
-### Engineering Highlight
-
-- Google Apps Script webhook path
-- SMTP bypass design for high delivery reliability
+- `classifyFailure` → `blocked`, `auth`, `parse`, `transient`, `http_404`, `not_found`, `malformed`, `unknown`.
+- Retry (up to 2×, no extra credit) for transient/parse failures.
+- Scrape fallback on 404 (alternative URL candidates, then `webSearch`).
+- Replan suggestions for unrecoverable failures; `blocked` (credit exhaustion) propagates without retry.
 
 ---
 
-## UI Actuation
+## Autonomous Capabilities at a Glance
 
-ARC-AI can directly actuate the user interface for command execution outcomes.
-
-### Capabilities
-
-- change theme
-- open websites
-- play media
-- copy to clipboard
-
-Demo: https://www.instagram.com/aashutosh_vaishnav.31/reel/DWzcz9YE797/
+- **Live web research** — `webSearch`, `getTopNews`, `getWeather`, `scrapeWebsite` (Cheerio), `deepResearchSwarm`.
+- **Proactive scheduling** — natural-language meeting/reminder parsing and scheduling through the calendar pipeline + cron.
+- **WhatsApp automation** — `sendWhatsAppMessage` (driven by the WhatsApp provider, `server/providers/whatsapp/`).
+- **Email / webhooks** — `sendEmail` via the Google Apps Script webhook (SMTP-bypass design).
+- **UI actuation** — `changeTheme`, `openWebsite`, `copyToClipboard`, `playMedia`, `stopMedia`.
+- **Code sandboxing** — `executeCode` runs in a QuickJS WebAssembly sandbox (no `vm2`).
 
 ---
 
 ## Tooling Runtime Notes
 
-ARC-AI tool execution remains integrated with provider-aware runtime orchestration.
-
-### Preserved Behaviors
-
 - streaming-compatible tool execution
 - interrupt-safe execution lifecycle
 - Socket.IO realtime UX continuity
-- modular tool registration and execution routing
+- modular registration: adding a tool = one file in `server/tools/`
+
+---
+
+## Relations
+
+- Provider/capability model: [`llm-providers.md`](./llm-providers.md)
+- Streaming/persistence runtime: [`architecture-and-runtime.md`](./architecture-and-runtime.md)

@@ -1,136 +1,76 @@
 # ARC-AI Memory and RAG
 
-This document covers ARC-AI's memory stack, semantic retrieval architecture, and workspace-ready memory governance.
+This document describes the **current** memory stack, retrieval architecture, and workspace-scoped memory governance.
 
 ---
 
-## Infinite Memory (RAG)
+## Memory Stack
 
-ARC-AI's memory system provides long-term contextual continuity using embeddings and retrieval.
+ARC-AI combines two persistence layers:
 
-### Core Capabilities
+| Layer | Backend | Purpose |
+| --- | --- | --- |
+| **Structured memory** | MongoDB (`AIMemory`, `UserFact`) | Long-term, queryable records; user facts; pinned/editable entries |
+| **Semantic memory** | Pinecone vectors + Mistral `mistral-embed` | Similarity retrieval over conversation snippets |
 
-- vector embeddings via Mistral
-- semantic lookup through Pinecone
-- long-term personalized memory recall
-
-Demo: https://www.instagram.com/aashutosh_vaishnav.31/reel/DW83J1HESyQ/
-
----
-
-## Memory Separation Architecture
-
-ARC-AI explicitly separates memory domains to prevent contamination and improve retrieval precision.
-
-1. Conversation History
-2. Working Context
-3. Semantic Memory
-4. Long-Term User Facts
-
-### Why This Matters
-
-- isolates short-term conversation noise from durable memory
-- improves relevance quality during retrieval
-- supports deterministic future workspace partitioning
+- **Embeddings** — `embeddingService` (Mistral `mistral-embed`) with an SHA1-based LRU cache (max ~200 entries), text truncated/normalized before embedding.
+- **Vector writes** — `workspaceIndexService.upsertTextVector()` is called *in the background* after exchanges; never blocks streaming.
 
 ---
 
-## Semantic Workspace Search
+## Memory Learning
 
-ARC-AI supports search across historical interactions and memory artifacts.
-
-### Implemented Search Modes
-
-- keyword search
-- semantic retrieval
-- hybrid conversation discovery
-- message-level retrieval
-- conversation snippet matching
-
-### Search Surfaces
-
-- conversation titles
-- historical messages
-- semantic memory recall
-- contextual discussion retrieval
-
-Example queries:
-
-- "mongodb architecture discussion"
-- "websocket scaling idea"
-- "pinecone memory retrieval"
+- After each successful exchange ARC may write an `AIMemory` document `{ userId, query, response, source }`.
+- Learning is gated by the user's `memoryLearningEnabled` preference (memory route: `PATCH /api/memory/preferences`).
+- **Guest limitation:** guest sessions do **not** write `AIMemory`/`UserFact`, do **not** upsert vectors, and receive **no** memory-search results (search short-circuits to empty for guest actors). Guests keep only conversation-scoped state.
 
 ---
 
-## Retrieval Orchestration Layer
+## Memory Separation
 
-ARC-AI retrieval includes ranking and context-assembly controls.
+1. **Conversation History** — the current conversation's messages (short-term context).
+2. **Working Context** — the recent in-flight exchange assembled by `WorkspaceContextManager`.
+3. **Semantic Memory** — Pinecone vector recall.
+4. **Long-Term User Facts** — `UserFact` documents injected as "CRITICAL CONTEXT" into the system prompt (up to 12 most recent, non-guest only).
 
-### Retrieval Intelligence
+This separation isolates short-term conversation noise from durable memory.
 
-- relevance scoring
-- recency weighting
-- semantic ranking
-- duplicate suppression
-- memory prioritization
-- selective context assembly
+---
 
-### Operational Outcome
+## Workspace-Aware Retrieval
 
-The system retrieves prioritized, low-noise context instead of naive context dumping.
+`WorkspaceSearchService` (`server/services/workspaceSearchService.js`) runs these searches in parallel:
+
+| Source | Notes |
+| --- | --- |
+| Conversations | Title + last-message keyword match |
+| Messages | Content keyword match |
+| Structured memory | `UserFact.fact` + `AIMemory.query/response/tags` keyword match |
+| Semantic vectors | Pinecone similarity (cosine) |
+
+Ranking combines relevance scoring, **recency weighting** (`1/(1+ageDays/14)`), and **duplicate suppression**; `WorkspaceContextManager` then merges long-term + short-term items with a momentum-adjusted score and returns the top items.
+
+Everything is scoped by **workspace**: Pinecone namespaces are `workspace_<id>` / `user_<id>`, and search/retrieval never crosses workspaces.
 
 ---
 
 ## Memory Management System
 
-ARC-AI provides professional memory governance controls.
-
-### Added Controls
-
-- remembered facts UI
-- semantic memory inspection
-- pinned memory system
-- editable long-term memory
-- memory deletion workflows
-- memory learning controls
+- remembered-facts dashboard (`GET /api/memory/`; guests get an empty dashboard)
+- editable / pinnable / deletable long-term memory (`PATCH`/`DELETE` on `/api/memory/facts/:memoryId`, `/api/memory/semantic/:memoryId`)
+- memory-learning preferences
 
 ---
 
-## Pinecone and Namespace Strategy
+## Design Notes & Guardrails
 
-ARC-AI uses Pinecone as the semantic retrieval backend.
-
-### Current Design
-
-- selective embedding strategy
-- chunked semantic indexing
-- retrieval orchestration pipeline
-- cached retrieval flows
-
-### Workspace Isolation Direction
-
-As part of multi-workspace runtime evolution:
-
-- each workspace receives isolated vector namespaces
-- semantic indexing remains workspace-scoped
-- semantic search remains workspace-scoped
-- background indexing remains forward-compatible
-
----
-
-## Performance and Safety
-
-### Optimizations
-
-- debounced retrieval
-- selective embedding
-- lazy loading
-- cached retrieval
+- selective embedding (minimum text length, background writes)
 - non-blocking retrieval orchestration
+- no cross-workspace leakage
 
-### Explicitly Avoided
+---
 
-- aggressive embedding spam
-- oversized context injection
-- blocking retrieval pipelines
-- unnecessary Pinecone writes
+## Relations
+
+- Provider routing / models: [`llm-providers.md`](./llm-providers.md)
+- Workspace ownership/isolation: [`isolated-workspaces.md`](./isolated-workspaces.md)
