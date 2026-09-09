@@ -130,7 +130,7 @@ export default function WhatsAppConnectModal({ isOpen, onClose, onConnected }) {
 
         <Row>
           <Info>
-            Status: <strong style={{color: status === 'ready' ? '#7df7ff' : '#ffdca3'}}>{status}</strong>
+            Status: <strong style={{color: status === 'ready' ? 'var(--accent-soft)' : '#ffdca3'}}>{status}</strong>
             <br />
             {mode === 'pairing'
               ? 'Enter the pairing code in WhatsApp → Linked devices → Link with phone number. ARC will remember your session.'

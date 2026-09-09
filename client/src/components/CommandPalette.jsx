@@ -47,22 +47,22 @@ const ResultItem = styled.button`
   padding: 10px 12px;
   border-radius: 8px;
   border: none;
-  background: ${({ $focused }) => ($focused ? 'rgba(0, 255, 255, 0.08)' : 'transparent')};
+  background: ${({ $focused }) => ($focused ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent')};
   color: #e2e8f0;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 12px;
   transition: background 0.15s;
-  &:hover { background: rgba(0, 255, 255, 0.06); }
+  &:hover { background: rgba(var(--primary-rgb), 0.06); }
 `;
 
 const ResultIcon = styled.span`
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: rgba(0, 255, 255, 0.08);
-  border: 1px solid rgba(0, 255, 255, 0.15);
+  background: rgba(var(--primary-rgb), 0.08);
+  border: 1px solid rgba(var(--primary-rgb), 0.15);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -101,7 +101,7 @@ const SectionLabel = styled.div`
   font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(125, 247, 255, 0.5);
+  color: rgba(var(--accent-soft-rgb), 0.5);
   font-weight: 700;
 `;
 

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useChat } from '../contexts/ChatContext';
+import { THEMES, THEME_CHANGE_EVENT, applyTheme, getStoredTheme } from '../utils/theme';
 
 const SECTIONS = [
   { id: 'account', label: 'Account', icon: '👤' },
@@ -13,12 +14,6 @@ const SECTIONS = [
   { id: 'integrations', label: 'Integrations', icon: '🔗' },
   { id: 'credits', label: 'Credits / Usage', icon: '💳' },
   { id: 'security', label: 'Security', icon: '🔒' },
-];
-
-const THEMES = [
-  { id: 'default', label: 'ARC (cyan / purple)', hint: 'Default futuristic theme' },
-  { id: 'hacker', label: 'Hacker (green)', hint: 'Monochrome terminal green' },
-  { id: 'alert', label: 'Alert (red)', hint: 'High-contrast red theme' },
 ];
 
 const Overlay = styled.div`
@@ -73,7 +68,7 @@ const NavItem = styled.button`
   padding: 9px 12px;
   border-radius: 8px;
   border: none;
-  background: ${({ $active }) => ($active ? 'rgba(0, 255, 255, 0.08)' : 'transparent')};
+  background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent')};
   color: ${({ $active }) => ($active ? '#eafcff' : 'rgba(255, 255, 255, 0.55)')};
   font-size: 13px;
   font-weight: ${({ $active }) => ($active ? '600' : '400')};
@@ -146,15 +141,15 @@ const Pill = styled.span`
 const ActionButton = styled.button`
   padding: 8px 16px;
   border-radius: 8px;
-  border: 1px solid rgba(0, 255, 255, 0.25);
-  background: rgba(0, 255, 255, 0.07);
-  color: #7df7ff;
+  border: 1px solid rgba(var(--primary-rgb), 0.25);
+  background: rgba(var(--primary-rgb), 0.07);
+  color: var(--accent-soft);
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
   white-space: nowrap;
-  &:hover { background: rgba(0, 255, 255, 0.13); }
+  &:hover { background: rgba(var(--primary-rgb), 0.13); }
   &:disabled { opacity: 0.5; cursor: not-allowed; }
 `;
 
@@ -176,8 +171,8 @@ const Toggle = styled.button`
   width: 42px;
   height: 24px;
   border-radius: 999px;
-  border: 1px solid ${({ $on }) => ($on ? 'rgba(0,255,255,0.4)' : 'rgba(255,255,255,0.15)')};
-  background: ${({ $on }) => ($on ? 'rgba(0,255,255,0.25)' : 'rgba(255,255,255,0.06)')};
+  border: 1px solid ${({ $on }) => ($on ? 'rgba(var(--primary-rgb),0.4)' : 'rgba(255,255,255,0.15)')};
+  background: ${({ $on }) => ($on ? 'rgba(var(--primary-rgb),0.25)' : 'rgba(255,255,255,0.06)')};
   cursor: pointer;
   position: relative;
   flex-shrink: 0;
@@ -190,7 +185,7 @@ const Toggle = styled.button`
     width: 18px;
     height: 18px;
     border-radius: 50%;
-    background: ${({ $on }) => ($on ? '#00ffff' : 'rgba(255,255,255,0.4)')};
+    background: ${({ $on }) => ($on ? 'var(--primary-hex)' : 'rgba(255,255,255,0.4)')};
     transition: all 0.2s;
   }
 `;
@@ -200,13 +195,13 @@ const ThemeCard = styled.button`
   text-align: left;
   padding: 12px 14px;
   border-radius: 10px;
-  border: 1px solid ${({ $active }) => ($active ? 'rgba(0,255,255,0.35)' : 'rgba(255,255,255,0.08)')};
-  background: ${({ $active }) => ($active ? 'rgba(0,255,255,0.05)' : 'rgba(255,255,255,0.02)')};
+  border: 1px solid ${({ $active }) => ($active ? 'rgba(var(--primary-rgb),0.35)' : 'rgba(255,255,255,0.08)')};
+  background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb),0.05)' : 'rgba(255,255,255,0.02)')};
   color: #e2e8f0;
   cursor: pointer;
   margin-bottom: 8px;
   transition: all 0.15s;
-  &:hover { border-color: rgba(0, 255, 255, 0.25); }
+  &:hover { border-color: rgba(var(--primary-rgb), 0.25); }
 `;
 
 const CloseButton = styled.button`
@@ -246,11 +241,18 @@ const SettingsModal = ({
   const { workspaces, activeWorkspaceId, switchWorkspace } = useWorkspace();
   const { providerInfo: providerInfoCtx } = useChat();
   const providerInfo = providerInfoProp ?? providerInfoCtx;
-  const [theme, setTheme] = useState(() => localStorage.getItem('arc-theme') || 'default');
+  const [theme, setTheme] = useState(() => getStoredTheme());
 
   useEffect(() => {
     if (isOpen) setSection(initialSection);
   }, [isOpen, initialSection]);
+
+  // Stay in sync when the theme changes elsewhere (e.g. AI changeTheme tool).
+  useEffect(() => {
+    const sync = (e) => setTheme(e?.detail || getStoredTheme());
+    window.addEventListener(THEME_CHANGE_EVENT, sync);
+    return () => window.removeEventListener(THEME_CHANGE_EVENT, sync);
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -263,11 +265,8 @@ const SettingsModal = ({
 
   const isGuest = authInfo?.authType === 'guest';
 
-  const applyTheme = (id) => {
-    setTheme(id);
-    localStorage.setItem('arc-theme', id);
-    if (id === 'default') document.documentElement.removeAttribute('data-theme');
-    else document.documentElement.setAttribute('data-theme', id);
+  const handleSelectTheme = (id) => {
+    setTheme(applyTheme(id));
   };
 
   return (
@@ -319,7 +318,7 @@ const SettingsModal = ({
                 <SectionTitle>Appearance</SectionTitle>
                 <SectionDesc>ARC-AI visual theme. Applied instantly on this device.</SectionDesc>
                 {THEMES.map(t => (
-                  <ThemeCard key={t.id} $active={theme === t.id} onClick={() => applyTheme(t.id)}>
+                  <ThemeCard key={t.id} $active={theme === t.id} onClick={() => handleSelectTheme(t.id)} aria-pressed={theme === t.id} aria-label={`${t.label} theme`}>
                     <RowLabel>{t.label}</RowLabel>
                     <RowHint>{t.hint}</RowHint>
                   </ThemeCard>

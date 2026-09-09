@@ -108,7 +108,7 @@ const QuestionForm = styled.form`
   border-radius: 11px;
   padding: 5px 5px 5px 10px;
   transition: border-color 0.15s;
-  &:focus-within { border-color: rgba(0, 255, 255, 0.3); }
+  &:focus-within { border-color: rgba(var(--primary-rgb), 0.3); }
 `;
 
 const QuestionInput = styled.input`
@@ -128,7 +128,7 @@ const SmallButton = styled.button`
   height: 30px;
   border-radius: 8px;
   border: none;
-  background: ${({ $primary }) => ($primary ? '#00e5e5' : 'transparent')};
+  background: ${({ $primary }) => ($primary ? 'var(--primary-hex)' : 'transparent')};
   color: ${({ $primary }) => ($primary ? '#050510' : 'rgba(255, 255, 255, 0.5)')};
   font-size: 13px;
   cursor: pointer;
@@ -136,7 +136,7 @@ const SmallButton = styled.button`
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  &:hover { filter: brightness(1.1); background: ${({ $primary }) => ($primary ? '#00e5e5' : 'rgba(255, 255, 255, 0.06)')}; }
+  &:hover { filter: brightness(1.1); background: ${({ $primary }) => ($primary ? 'var(--primary-hex)' : 'rgba(255, 255, 255, 0.06)')}; }
   &:disabled { opacity: 0.35; cursor: not-allowed; }
 `;
 

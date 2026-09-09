@@ -32,7 +32,7 @@ const Title = styled.h3`
   font-size: 14px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #7df7ff;
+  color: var(--accent-soft);
 `;
 
 const Subtitle = styled.p`

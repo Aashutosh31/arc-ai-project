@@ -12,7 +12,7 @@ const AvatarButton = styled.button`
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: ${({ $guest }) => ($guest
     ? 'rgba(255, 207, 112, 0.12)'
-    : 'linear-gradient(135deg, rgba(0,255,255,0.25), rgba(184,135,255,0.25))')};
+    : 'linear-gradient(135deg, rgba(var(--primary-rgb),0.25), rgba(184,135,255,0.25))')};
   color: ${({ $guest }) => ($guest ? '#ffcf70' : '#eafcff')};
   font-size: 13px;
   font-weight: 700;
@@ -82,7 +82,7 @@ const MenuRow = styled.div`
 `;
 
 const MenuValue = styled.span`
-  color: #7df7ff;
+  color: var(--accent-soft);
   font-weight: 600;
 `;
 
@@ -112,7 +112,7 @@ const GuestNote = styled.div`
   line-height: 1.55;
   color: rgba(255, 255, 255, 0.4);
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  a { color: #7df7ff; }
+  a { color: var(--accent-soft); }
 `;
 
 const AccountMenu = ({ authInfo, googleConnected, whatsappConnected, onOpenSettings, onSignOut }) => {

@@ -82,9 +82,9 @@ const RoundButton = styled.button`
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  border: 1px solid ${({ $active }) => ($active ? 'rgba(0, 255, 255, 0.45)' : 'rgba(255, 255, 255, 0.12)')};
-  background: ${({ $active }) => ($active ? 'rgba(0, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.04)')};
-  color: ${({ $active }) => ($active ? '#00ffff' : 'rgba(255, 255, 255, 0.6)')};
+  border: 1px solid ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.45)' : 'rgba(255, 255, 255, 0.12)')};
+  background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.12)' : 'rgba(255, 255, 255, 0.04)')};
+  color: ${({ $active }) => ($active ? 'var(--primary-hex)' : 'rgba(255, 255, 255, 0.6)')};
   font-size: 14px;
   cursor: pointer;
   display: inline-flex;
@@ -92,7 +92,7 @@ const RoundButton = styled.button`
   justify-content: center;
   flex-shrink: 0;
   transition: all 0.15s;
-  &:hover { border-color: rgba(0, 255, 255, 0.4); color: #fff; }
+  &:hover { border-color: rgba(var(--primary-rgb), 0.4); color: #fff; }
   &:disabled { opacity: 0.35; cursor: default; }
   &:disabled:hover { border-color: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.6); }
 `;
@@ -120,10 +120,10 @@ const ExpandedCard = styled.div`
   gap: 10px;
   padding: 16px 18px 14px;
   border-radius: 18px;
-  border: 1px solid rgba(0, 255, 255, 0.16);
+  border: 1px solid rgba(var(--primary-rgb), 0.16);
   background: rgba(8, 8, 22, 0.94);
   backdrop-filter: blur(12px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 24px rgba(0, 255, 255, 0.06);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 24px rgba(var(--primary-rgb), 0.06);
   width: 240px;
   max-width: 100%;
 `;
@@ -141,7 +141,7 @@ const OrbGlow = styled.div`
   position: absolute;
   inset: 0;
   border-radius: 999px;
-  background: #22d3ee;
+  background: var(--primary-hex);
   opacity: 0.3;
   box-shadow: 0 0 30px rgba(34, 211, 238, 0.55);
   animation: ${pulse} 1.8s cubic-bezier(0.2, 0, 0.2, 1) infinite;
@@ -158,7 +158,7 @@ const OrbButton = styled.button`
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #22d3ee;
+  background: var(--primary-hex);
   box-shadow: 0 0 24px rgba(34, 211, 238, 0.5);
   color: #fff;
   transition: filter 0.15s;
@@ -176,7 +176,7 @@ const Transcript = styled.p`
   margin: 0;
   font-size: 12px;
   font-style: italic;
-  color: rgba(125, 247, 255, 0.85);
+  color: rgba(var(--accent-soft-rgb), 0.85);
   text-align: center;
   max-width: 100%;
   overflow: hidden;

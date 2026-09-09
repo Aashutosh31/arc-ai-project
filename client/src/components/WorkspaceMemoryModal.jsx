@@ -41,7 +41,7 @@ const Title = styled.h3`
   font-size: 18px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #7df7ff;
+  color: var(--accent-soft);
 `;
 
 const Subtext = styled.p`
@@ -113,7 +113,7 @@ const MemoryCard = styled.div`
 
 const SectionTitle = styled.h4`
   margin: 0 0 10px;
-  color: #7df7ff;
+  color: var(--accent-soft);
   letter-spacing: 0.06em;
   font-size: 12px;
   text-transform: uppercase;

@@ -83,7 +83,7 @@ const ModalHeader = styled.div`
 
 const ModalTitle = styled.h4`
   margin: 0;
-  color: #7df7ff;
+  color: var(--accent-soft);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   font-size: 13px;
@@ -189,7 +189,7 @@ const InlineError = styled.div`
 `;
 
 const CurrentName = styled.div`
-  color: #7df7ff;
+  color: var(--accent-soft);
   font-size: 13px;
   font-weight: 700;
   overflow: hidden;

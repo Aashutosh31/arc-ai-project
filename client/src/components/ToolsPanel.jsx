@@ -105,7 +105,7 @@ const SearchInput = styled.input`
   color: #e2e8f0;
   font-size: 13px;
   outline: none;
-  &:focus { border-color: rgba(0, 255, 255, 0.25); }
+  &:focus { border-color: rgba(var(--primary-rgb), 0.25); }
   &::placeholder { color: rgba(255, 255, 255, 0.25); }
 `;
 
@@ -122,7 +122,7 @@ const CategoryLabel = styled.div`
   font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(125, 247, 255, 0.5);
+  color: rgba(var(--accent-soft-rgb), 0.5);
   font-weight: 700;
   &:first-child { padding-top: 4px; }
 `;
@@ -142,8 +142,8 @@ const ToolIcon = styled.span`
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: rgba(0, 255, 255, 0.07);
-  border: 1px solid rgba(0, 255, 255, 0.14);
+  background: rgba(var(--primary-rgb), 0.07);
+  border: 1px solid rgba(var(--primary-rgb), 0.14);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -190,14 +190,14 @@ const TryButton = styled.button`
   margin-top: 2px;
   padding: 6px 12px;
   border-radius: 7px;
-  border: 1px solid rgba(0, 255, 255, 0.2);
-  background: rgba(0, 255, 255, 0.06);
-  color: #7df7ff;
+  border: 1px solid rgba(var(--primary-rgb), 0.2);
+  background: rgba(var(--primary-rgb), 0.06);
+  color: var(--accent-soft);
   font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
-  &:hover { background: rgba(0, 255, 255, 0.12); }
+  &:hover { background: rgba(var(--primary-rgb), 0.12); }
 `;
 
 const CATEGORY_ICONS = {

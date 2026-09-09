@@ -6,6 +6,11 @@ import { ChatProvider } from './contexts/ChatContext';
 import { ExecutionProvider } from './contexts/ExecutionContext';
 import styled, { createGlobalStyle } from 'styled-components';
 import { Analytics } from "@vercel/analytics/react"
+import { applyTheme, getStoredTheme } from './utils/theme';
+
+// Apply the persisted theme before first render so reloads never flash
+// the default theme and every mount starts from the single source of truth.
+applyTheme(getStoredTheme());
 
 const AuthPage = lazy(() => import('./pages/AuthPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
@@ -23,6 +28,10 @@ const GlobalStyle = createGlobalStyle`
     --primary-rgb: 0, 255, 255;
     --secondary-hex: #ff00ff;
     --secondary-rgb: 255, 0, 255;
+    --accent-soft: #7df7ff;
+    --accent-soft-rgb: 125, 247, 255;
+    --violet: #b887ff;
+    --violet-rgb: 184, 135, 255;
     --bg-color: #020314;
     --chat-bg: rgba(10, 10, 30, 0.7);
   }
@@ -32,6 +41,10 @@ const GlobalStyle = createGlobalStyle`
     --primary-rgb: 0, 255, 0;
     --secondary-hex: #00aa00;
     --secondary-rgb: 0, 170, 0;
+    --accent-soft: #7dffb0;
+    --accent-soft-rgb: 125, 255, 176;
+    --violet: #4ade80;
+    --violet-rgb: 74, 222, 128;
     --bg-color: #001100;
     --chat-bg: rgba(0, 20, 0, 0.8);
   }
@@ -41,6 +54,10 @@ const GlobalStyle = createGlobalStyle`
     --primary-rgb: 255, 0, 0;
     --secondary-hex: #ff5555;
     --secondary-rgb: 255, 85, 85;
+    --accent-soft: #ffa1a1;
+    --accent-soft-rgb: 255, 161, 161;
+    --violet: #f87171;
+    --violet-rgb: 248, 113, 113;
     --bg-color: #1a0000;
     --chat-bg: rgba(30, 0, 0, 0.8);
   }

@@ -56,7 +56,7 @@ const MarkdownBody = styled.div`
   }
   h1 { font-size: 1.4em; padding-bottom: 0.3em; border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
   h2 { font-size: 1.22em; padding-bottom: 0.25em; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
-  h3 { font-size: 1.1em; color: #7df7ff; }
+  h3 { font-size: 1.1em; color: var(--accent-soft); }
   h4 { font-size: 1em; }
   h5, h6 { font-size: 0.92em; color: #9fb0cc; }
 
@@ -65,11 +65,11 @@ const MarkdownBody = styled.div`
   del { color: rgba(255, 255, 255, 0.4); }
 
   a {
-    color: #7df7ff;
+    color: var(--accent-soft);
     text-decoration: none;
-    border-bottom: 1px solid rgba(125, 247, 255, 0.35);
+    border-bottom: 1px solid rgba(var(--accent-soft-rgb), 0.35);
     transition: border-color 0.2s;
-    &:hover { border-color: #7df7ff; }
+    &:hover { border-color: var(--accent-soft); }
   }
 
   ul, ol {
@@ -81,7 +81,7 @@ const MarkdownBody = styled.div`
     line-height: 1.7;
     padding-left: 0.15em;
   }
-  li::marker { color: rgba(125, 247, 255, 0.6); }
+  li::marker { color: rgba(var(--accent-soft-rgb), 0.6); }
   li > ul, li > ol {
     margin: 0.3em 0 0.3em;
   }
@@ -94,8 +94,8 @@ const MarkdownBody = styled.div`
   blockquote {
     margin: 1em 0;
     padding: 0.7em 1.1em;
-    border-left: 3px solid rgba(125, 247, 255, 0.5);
-    background: rgba(125, 247, 255, 0.03);
+    border-left: 3px solid rgba(var(--accent-soft-rgb), 0.5);
+    background: rgba(var(--accent-soft-rgb), 0.03);
     border-radius: 0 8px 8px 0;
     color: #a9b6cf;
     p { margin: 0.35em 0; }
@@ -116,12 +116,12 @@ const MarkdownBody = styled.div`
     font-size: 13.5px;
     line-height: 1.55;
   }
-  thead { background: rgba(125, 247, 255, 0.05); }
+  thead { background: rgba(var(--accent-soft-rgb), 0.05); }
   th {
     padding: 9px 14px;
     text-align: left;
     font-weight: 650;
-    color: #b9a5ff;
+    color: var(--violet);
     border-bottom: 1px solid rgba(185, 165, 255, 0.25);
     white-space: nowrap;
   }
@@ -137,11 +137,11 @@ const MarkdownBody = styled.div`
   code {
     font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
     font-size: 0.86em;
-    background: rgba(125, 247, 255, 0.07);
-    color: #8ef4ff;
+    background: rgba(var(--accent-soft-rgb), 0.07);
+    color: var(--accent-soft);
     padding: 0.15em 0.45em;
     border-radius: 5px;
-    border: 1px solid rgba(125, 247, 255, 0.1);
+    border: 1px solid rgba(var(--accent-soft-rgb), 0.1);
     white-space: nowrap;
   }
 
@@ -180,7 +180,7 @@ const MarkdownBody = styled.div`
 
   input[type="checkbox"] {
     margin-right: 8px;
-    accent-color: #00ffff;
+    accent-color: var(--primary-hex);
     width: 14px;
     height: 14px;
     vertical-align: -2px;
@@ -235,7 +235,7 @@ const CopyButton = styled.button`
   font-family: inherit;
   cursor: pointer;
   transition: all 0.15s;
-  &:hover { background: rgba(125, 247, 255, 0.1); color: #7df7ff; border-color: rgba(125, 247, 255, 0.25); }
+  &:hover { background: rgba(var(--accent-soft-rgb), 0.1); color: var(--accent-soft); border-color: rgba(var(--accent-soft-rgb), 0.25); }
 `;
 
 const CollapsibleWrap = styled.div`
@@ -260,16 +260,16 @@ const FadeMask = styled.div`
 
 const ExpandToggle = styled.button`
   margin-top: 10px;
-  border: 1px solid rgba(125, 247, 255, 0.18);
-  background: rgba(125, 247, 255, 0.05);
-  color: #7df7ff;
+  border: 1px solid rgba(var(--accent-soft-rgb), 0.18);
+  background: rgba(var(--accent-soft-rgb), 0.05);
+  color: var(--accent-soft);
   border-radius: 999px;
   padding: 6px 16px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
-  &:hover { background: rgba(125, 247, 255, 0.1); }
+  &:hover { background: rgba(var(--accent-soft-rgb), 0.1); }
 `;
 
 /** Strip react-markdown's internal `node` (hast) prop before spreading onto DOM. */

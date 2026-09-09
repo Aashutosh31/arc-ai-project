@@ -76,8 +76,8 @@ const MessageRow = styled.div`
 const UserBubble = styled.div`
   padding: 9px 15px;
   border-radius: 18px 18px 5px 18px;
-  background: rgba(0, 255, 255, 0.09);
-  border: 1px solid rgba(0, 255, 255, 0.16);
+  background: rgba(var(--primary-rgb), 0.09);
+  border: 1px solid rgba(var(--primary-rgb), 0.16);
   width: fit-content;
   max-width: min(720px, 100%);
   overflow-wrap: anywhere;
@@ -107,7 +107,7 @@ const AssistantLabel = styled.div`
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(125, 247, 255, 0.55);
+  color: rgba(var(--accent-soft-rgb), 0.55);
 `;
 
 const AssistantAvatar = styled.span`
@@ -121,7 +121,7 @@ const AssistantAvatar = styled.span`
   font-weight: 800;
   letter-spacing: 0;
   color: #050510;
-  background: linear-gradient(135deg, #00ffff, #b887ff);
+  background: linear-gradient(135deg, var(--primary-hex), var(--violet));
 `;
 
 const BubbleImage = styled.img`
@@ -172,7 +172,7 @@ const TypingIndicator = styled.div`
   span {
     width: 5px;
     height: 5px;
-    background: rgba(0, 255, 255, 0.5);
+    background: rgba(var(--primary-rgb), 0.5);
     border-radius: 50%;
     animation: ${typing} 1.4s infinite ease-in-out both;
   }
@@ -196,16 +196,16 @@ const StopButton = styled.button`
 
 const HistoryButton = styled.button`
   align-self: center;
-  border: 1px solid rgba(0, 255, 255, 0.12);
+  border: 1px solid rgba(var(--primary-rgb), 0.12);
   background: transparent;
-  color: rgba(0, 255, 255, 0.6);
+  color: rgba(var(--primary-rgb), 0.6);
   border-radius: 999px;
   padding: 6px 14px;
   font-size: 12px;
   cursor: pointer;
   margin-bottom: 8px;
   transition: all 0.2s;
-  &:hover { background: rgba(0, 255, 255, 0.06); color: #00ffff; }
+  &:hover { background: rgba(var(--primary-rgb), 0.06); color: var(--primary-hex); }
   &:disabled { opacity: 0.4; cursor: not-allowed; }
 `;
 
@@ -227,8 +227,8 @@ const ComposerInner = styled.div`
   padding: 8px;
   transition: border-color 0.2s, box-shadow 0.2s;
   &:focus-within {
-    border-color: rgba(0, 255, 255, 0.28);
-    box-shadow: 0 0 0 3px rgba(0, 255, 255, 0.05);
+    border-color: rgba(var(--primary-rgb), 0.28);
+    box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.05);
   }
 `;
 
@@ -314,8 +314,8 @@ const SendButton = styled.button`
   height: 34px;
   border-radius: 10px;
   border: none;
-  background: ${({ $disabled }) => ($disabled ? 'rgba(0, 255, 255, 0.1)' : '#00e5e5')};
-  color: ${({ $disabled }) => ($disabled ? 'rgba(0, 255, 255, 0.35)' : '#050510')};
+  background: ${({ $disabled }) => ($disabled ? 'rgba(var(--primary-rgb), 0.1)' : 'var(--primary-hex)')};
+  color: ${({ $disabled }) => ($disabled ? 'rgba(var(--primary-rgb), 0.35)' : '#050510')};
   cursor: ${({ $disabled }) => ($disabled ? 'not-allowed' : 'pointer')};
   display: flex;
   align-items: center;
@@ -408,8 +408,8 @@ const SuggestionChip = styled.button`
   align-items: center;
   gap: 7px;
   &:hover {
-    border-color: rgba(0, 255, 255, 0.3);
-    background: rgba(0, 255, 255, 0.06);
+    border-color: rgba(var(--primary-rgb), 0.3);
+    background: rgba(var(--primary-rgb), 0.06);
     color: #d9fbff;
   }
   &:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -431,7 +431,7 @@ const PresenceDot = styled.span`
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: ${({ $status }) => ($status === 'Completed' ? '#4dffb0' : $status === 'Failed' ? '#ff7070' : '#00ffff')};
+  background: ${({ $status }) => ($status === 'Completed' ? '#4dffb0' : $status === 'Failed' ? '#ff7070' : 'var(--primary-hex)')};
 `;
 
 const INITIAL_MESSAGES = 60;

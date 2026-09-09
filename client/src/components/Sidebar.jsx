@@ -52,7 +52,7 @@ const Logo = styled.div`
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  background: linear-gradient(135deg, #00ffff, #b887ff);
+  background: linear-gradient(135deg, var(--primary-hex), var(--violet));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -65,15 +65,15 @@ const RailLogo = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, rgba(0, 255, 255, 0.12), rgba(184, 135, 255, 0.08));
-  border: 1px solid rgba(0, 255, 255, 0.18);
-  color: #00ffff;
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.12), rgba(var(--violet-rgb), 0.08));
+  border: 1px solid rgba(var(--primary-rgb), 0.18);
+  color: var(--primary-hex);
   font-weight: 800;
   font-size: 12px;
   letter-spacing: 0.06em;
   cursor: pointer;
   transition: all 0.2s;
-  &:hover { border-color: rgba(0, 255, 255, 0.35); }
+  &:hover { border-color: rgba(var(--primary-rgb), 0.35); }
 `;
 
 const ToggleButton = styled.button`
@@ -126,14 +126,14 @@ const NewChatButton = styled.button`
   width: 100%;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid rgba(0, 255, 255, 0.2);
-  background: rgba(0, 255, 255, 0.06);
-  color: #00ffff;
+  border: 1px solid rgba(var(--primary-rgb), 0.2);
+  background: rgba(var(--primary-rgb), 0.06);
+  color: var(--primary-hex);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  &:hover { background: rgba(0, 255, 255, 0.12); border-color: rgba(0, 255, 255, 0.35); }
+  &:hover { background: rgba(var(--primary-rgb), 0.12); border-color: rgba(var(--primary-rgb), 0.35); }
   ${({ $collapsed }) => $collapsed && `
     padding: 10px 0;
     font-size: 18px;
@@ -158,7 +158,7 @@ const SearchInput = styled.input`
   outline: none;
   transition: border-color 0.2s;
   &::placeholder { color: rgba(255, 255, 255, 0.25); }
-  &:focus { border-color: rgba(0, 255, 255, 0.25); }
+  &:focus { border-color: rgba(var(--primary-rgb), 0.25); }
 `;
 
 const SearchDropdown = styled.div`
@@ -219,7 +219,7 @@ const ConversationItem = styled.button`
   padding: 8px 10px;
   border-radius: 6px;
   border: none;
-  background: ${({ $active }) => ($active ? 'rgba(0, 255, 255, 0.06)' : 'transparent')};
+  background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.06)' : 'transparent')};
   cursor: pointer;
   transition: background 0.15s;
   display: flex;
@@ -393,9 +393,9 @@ const RailConvButton = styled.button`
   width: 44px;
   height: 44px;
   border-radius: 10px;
-  border: 1px solid ${({ $active }) => ($active ? 'rgba(0, 255, 255, 0.35)' : 'rgba(255, 255, 255, 0.06)')};
-  background: ${({ $active }) => ($active ? 'rgba(0, 255, 255, 0.08)' : 'transparent')};
-  color: ${({ $active }) => ($active ? '#00ffff' : 'rgba(255, 255, 255, 0.5)')};
+  border: 1px solid ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.35)' : 'rgba(255, 255, 255, 0.06)')};
+  background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent')};
+  color: ${({ $active }) => ($active ? 'var(--primary-hex)' : 'rgba(255, 255, 255, 0.5)')};
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -661,7 +661,7 @@ export const Sidebar = ({
               )}
               {searchResults.map(item => (
                 <SearchItem key={item.id} onClick={() => handleSearchSelect(item)}>
-                  <SearchItemType style={{ color: item.type === 'conversation' ? '#00ffff' : item.type === 'message' ? '#ffcf70' : '#b887ff' }}>
+                  <SearchItemType style={{ color: item.type === 'conversation' ? 'var(--primary-hex)' : item.type === 'message' ? '#ffcf70' : 'var(--violet)' }}>
                     {item.type}
                   </SearchItemType>
                   <div style={{ fontWeight: 600, fontSize: 13 }}>{item.title || item.snippet || 'Result'}</div>
