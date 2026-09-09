@@ -5,16 +5,8 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 const Panel = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 12px 12px;
-  border-bottom: 1px solid rgba(var(--primary-rgb), 0.15);
-`;
-
-const Label = styled.div`
-  color: #a8b5d8;
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  gap: 8px;
+  padding: 0;
 `;
 
 const Select = styled.select`
@@ -311,7 +303,6 @@ const WorkspaceSwitcher = () => {
 
   return (
     <Panel>
-      <Label>Workspace</Label>
       <CurrentName title={activeWorkspace?.name || 'Workspace'}>
         {activeWorkspace?.name || 'No active workspace'}
       </CurrentName>

@@ -714,6 +714,12 @@ class AIService {
                     6. CALENDAR: Use 'checkCalendar' to inspect availability and 'scheduleMeeting' to create or update meetings when the user asks to manage Google Calendar.
                     7. WHATSAPP: Use 'sendWhatsAppMessage' only when the user explicitly asks to send, message, text, forward, or deliver content on WhatsApp. Do not trigger the WhatsApp tool for vague references, questions, contact checks, or phrases like 'can you see', 'is Mummy there', or similar unless the user clearly wants a message sent. Ask a follow-up if the recipient is ambiguous or the request is not an explicit send action.
 
+                    RESPONSE FORMATTING:
+                    Format answers with GitHub-flavored markdown so they render cleanly: short paragraphs, \`##\` headings for sections of longer answers, bullet lists for collections, numbered lists for procedures, tables for comparisons, and fenced code blocks with a language tag for code. Keep short answers concise without unnecessary headings. Never emit raw markdown partially inside a sentence; keep constructs (fences, tables, lists) complete and well-formed.
+
+                    RESPONSE STYLE CONTRACT:
+                    Answer the user's actual question directly first, then support it. Be concise by default and expand only when the question needs depth. Match structure to intent: short factual question -> short answer; explanation -> concise prose; comparison -> table; procedure or tutorial -> numbered steps; debugging -> cause, fix, code, brief verification; code request -> code-first answer. Never repeat the same information in multiple forms, never restate the introduction as a conclusion, and skip generic offers or next steps unless genuinely useful.
+
                     MEMORY DIRECTIVE:
                     Use the ranked retrieval context below only when it is relevant. Prefer the most recent and semantically matching items. Ignore duplicates.
 
@@ -1081,16 +1087,15 @@ class AIService {
 
                 if (conversationId) {
                     try {
-                        // Sanitize final text for storage to remove markdown artefacts and normalize spacing
+                        // Normalize stored text without destroying markdown structure:
+                        // the chat UI renders history through a markdown renderer,
+                        // and speech has its own dedicated stripper (ttsService).
                         const sanitizeForStorage = (t) => {
                             if (!t || typeof t !== 'string') return t;
                             let s = String(t);
-                            s = s.replace(/\*{1,2}/g, '');
-                            s = s.replace(/`+/g, '');
-                            s = s.replace(/([.,!?:;])(?=\S)/g, '$1 ');
-                            s = s.replace(/(\S)([—–-])/g, '$1 $2');
-                            s = s.replace(/([—–-])(\S)/g, '$1 $2');
-                            s = s.replace(/\s{2,}/g, ' ');
+                            s = s.replace(/\r\n|\r/g, '\n');
+                            s = s.replace(/[ \t]+$/gm, '');
+                            s = s.replace(/\n{3,}/g, '\n\n');
                             return s.trim();
                         };
 
