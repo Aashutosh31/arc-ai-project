@@ -149,6 +149,33 @@ with sync_playwright() as p:
     page.keyboard.press("Escape")
     page.wait_for_timeout(400)
     check("tools closes on Escape", page.get_by_role("dialog").count() == 0)
+    # --- voice dock: opens compact, conversation stays visible, Escape closes ---
+    page.keyboard.press("Control+k")
+    page.wait_for_timeout(400)
+    page.get_by_text("Open voice mode").click()
+    page.wait_for_timeout(600)
+    check("voice dock opens", page.get_by_role("region", name="Voice control").count() > 0)
+    check("voice dock is compact", page.evaluate(
+        "() => { const d = document.querySelector('[aria-label=\"Voice control\"]');"
+        " return d ? d.getBoundingClientRect().height < 400 : false; }"))
+    check("conversation visible with dock", page.get_by_text(TAIL).count() > 0)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
+    check("voice dock closes on Escape",
+          page.get_by_role("region", name="Voice control").count() == 0)
+    # --- vision card: opens with composer, conversation stays visible ---
+    page.keyboard.press("Control+k")
+    page.wait_for_timeout(400)
+    page.get_by_text("Open vision camera").click()
+    page.wait_for_timeout(600)
+    check("vision card opens", page.get_by_role("region", name="Live vision").count() > 0)
+    check("vision question composer present",
+          page.get_by_label("Ask about the camera view").count() > 0)
+    check("conversation visible with card", page.get_by_text(TAIL).count() > 0)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
+    check("vision card closes on Escape",
+          page.get_by_role("region", name="Live vision").count() == 0)
     page.close()
     browser.close()
 

@@ -125,8 +125,10 @@ const AssistantAvatar = styled.span`
 `;
 
 const BubbleImage = styled.img`
+  display: block;
   max-width: 100%;
-  max-height: 300px;
+  max-height: 220px;
+  width: auto;
   border-radius: 8px;
   margin-top: 8px;
 `;

@@ -13,8 +13,8 @@ import WhatsAppModal from '../components/WhatsAppModal.jsx';
 import WhatsAppConnectModal from '../components/WhatsAppConnectModal.jsx';
 import WorkspaceMemoryModal from '../components/WorkspaceMemoryModal.jsx';
 import CommandPalette from '../components/CommandPalette.jsx';
-import VoiceOverlay from '../components/VoiceOverlay.jsx';
-import VisionOverlay from '../components/VisionOverlay.jsx';
+import VoiceDock from '../components/VoiceDock.jsx';
+import VisionCard from '../components/VisionCard.jsx';
 import ToolsPanel from '../components/ToolsPanel.jsx';
 import SettingsModal from '../components/SettingsModal.jsx';
 import AccountMenu from '../components/AccountMenu.jsx';
@@ -170,7 +170,7 @@ const SidebarOverlay = styled.div`
 
 const ExecutionDrawer = styled.div`
   position: fixed;
-  bottom: 80px;
+  bottom: ${({ $lifted }) => ($lifted ? '230px' : '80px')};
   right: 16px;
   width: min(340px, calc(100vw - 32px));
   max-height: 50vh;
@@ -196,8 +196,9 @@ const DashboardPageContent = () => {
   const [showTestUserModal, setShowTestUserModal] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [showWhatsAppConnect, setShowWhatsAppConnect] = useState(false);
-  const [showVoiceOverlay, setShowVoiceOverlay] = useState(false);
-  const [showVisionOverlay, setShowVisionOverlay] = useState(false);
+  const [showVoice, setShowVoice] = useState(false);
+  const [showVision, setShowVision] = useState(false);
+  const [voiceSignal, setVoiceSignal] = useState(0);
   const [showTools, setShowTools] = useState(false);
   const [settingsView, setSettingsView] = useState(null); // null | sectionId
   const [memoryLearningEnabled, setMemoryLearningEnabled] = useState(true);
@@ -379,8 +380,8 @@ const DashboardPageContent = () => {
 
         <ChatArea>
           <ChatInterface
-            onOpenVoice={() => setShowVoiceOverlay(true)}
-            onOpenVision={() => setShowVisionOverlay(true)}
+            onOpenVoice={() => setShowVoice(true)}
+            onOpenVision={() => setShowVision(true)}
             onOpenTools={() => setShowTools(true)}
             seedText={seedText}
           />
@@ -388,7 +389,7 @@ const DashboardPageContent = () => {
       </MainContent>
 
       {activeExecution && (
-        <ExecutionDrawer>
+        <ExecutionDrawer $lifted={showVoice}>
           <ExecutionPanel />
         </ExecutionDrawer>
       )}
@@ -405,8 +406,8 @@ const DashboardPageContent = () => {
         onOpenTools={() => setShowTools(true)}
         onOpenMemory={() => setShowMemoryModal(true)}
         onToggleMemoryLearning={handleToggleMemoryLearning}
-        onOpenVoice={() => setShowVoiceOverlay(true)}
-        onOpenVision={() => setShowVisionOverlay(true)}
+        onOpenVoice={() => setShowVoice(true)}
+        onOpenVision={() => setShowVision(true)}
         onOpenSettings={openSettings}
         onOpenAccount={() => openSettings('account')}
         onOpenIntegrations={() => openSettings('integrations')}
@@ -438,16 +439,19 @@ const DashboardPageContent = () => {
           onLinkAccount: handleGoogleLinkAccount,
         }}
         whatsapp={{ connected: whatsappConnected, onConnect: handleWhatsAppConnect }}
-        onOpenVoice={() => setShowVoiceOverlay(true)}
+        onOpenVoice={() => setShowVoice(true)}
         onSignOut={handleSignOut}
       />
 
-      <VoiceOverlay isOpen={showVoiceOverlay} onClose={() => setShowVoiceOverlay(false)} />
-      <VisionOverlay
-        isOpen={showVisionOverlay}
-        onClose={() => setShowVisionOverlay(false)}
-        onCaptureReady={() => {}}
-      />
+      {showVoice && (
+        <VoiceDock onClose={() => setShowVoice(false)} activateSignal={voiceSignal} />
+      )}
+      {showVision && (
+        <VisionCard
+          onClose={() => setShowVision(false)}
+          onRequestVoice={() => { setShowVoice(true); setVoiceSignal(Date.now()); }}
+        />
+      )}
 
       <TestUserAccessModal isOpen={showTestUserModal} onClose={() => setShowTestUserModal(false)} onProceed={handleProceedAsTestUser} />
       <WhatsAppModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />

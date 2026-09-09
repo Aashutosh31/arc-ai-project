@@ -92,12 +92,12 @@ const HiddenCanvas = styled.canvas`
   display: none;
 `;
 
-const LiveVisionCamera = ({ onCaptureReady }) => {
+const LiveVisionCamera = ({ onCaptureReady, initialEnabled = false, onStatusChange = null }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const devicesRef = useRef([]);
-  const [isEnabled, setIsEnabled] = useState(false);
+  const [isEnabled, setIsEnabled] = useState(initialEnabled);
   const [isReady, setIsReady] = useState(false);
   const [errorText, setErrorText] = useState('');
   const [devices, setDevices] = useState([]);
@@ -192,6 +192,10 @@ const LiveVisionCamera = ({ onCaptureReady }) => {
   useEffect(() => {
     onCaptureReady?.(captureFrame);
   }, [captureFrame, onCaptureReady]);
+
+  useEffect(() => {
+    onStatusChange?.(isReady && isEnabled);
+  }, [isReady, isEnabled, onStatusChange]);
 
   useEffect(() => {
     if (!isEnabled) {

@@ -38,6 +38,10 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
   const [voiceMode, setVoiceMode] = useState(null);
   const [voiceError, setVoiceError] = useState(null);
   const [voiceInteractionState, setVoiceInteractionState] = useState('idle');
+  // Independent mic mute: session stays active, capture is simply not started.
+  // TTS playback is unaffected, so ARC can still speak while muted.
+  const [micMuted, setMicMuted] = useState(false);
+  const micMutedRef = useRef(false);
   const { setIsVoiceListening, isSpeaking, isProcessing } = useChat();
 
   const recognitionRef = useRef(null);
@@ -472,6 +476,12 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
   const startCaptureRef = useRef(null);
   useEffect(() => {
     startCaptureRef.current = (turn) => {
+      // Muted sessions never capture: no mic, no VAD, no transcription.
+      // Machine state is untouched, so speaking/processing still flow.
+      if (micMutedRef.current) {
+        setIsVoiceListening(false);
+        return;
+      }
       const mode = voiceModeRef.current;
       if (mode === 'native') {
         const started = startNativeRecognition(turn);
@@ -535,6 +545,8 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
     voiceModeRef.current = null;
     setVoiceMode(null);
     setLiveTranscript('');
+    micMutedRef.current = false;
+    setMicMuted(false);
   }, [clearRestartTimer, setIsVoiceListening]);
 
   // Cleanup on unmount: release microphone and all resources.
@@ -552,8 +564,28 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
     };
   }, [stopServerCycle, clearRestartTimer]);
 
-  const toggleAdvancedVoice = () => {
+  // Independent microphone mute. Session and machine state are untouched:
+  // muting stops capture now; unmuting re-arms capture only if the machine
+  // is still in a listening turn. TTS/speaking flows are unaffected.
+  const toggleMicMuted = useCallback(() => {
     const machine = machineRef.current;
+    const next = !micMutedRef.current;
+    micMutedRef.current = next;
+    setMicMuted(next);
+    if (next) {
+      try {
+        stopCaptureInternalRef.current?.('muted');
+      } catch {
+        // ignore teardown failures
+      }
+      setIsVoiceListening(false);
+    } else if (machine.state === 'listening') {
+      machine.restartListening('unmuted');
+    }
+    return next;
+  }, [setIsVoiceListening]);
+
+  const toggleAdvancedVoice = () => {    const machine = machineRef.current;
     if (!isVoiceModeActiveRef.current || machine.state === 'idle') {
       clearRestartTimer();
       clearError();
@@ -580,5 +612,5 @@ export const useAdvancedVoice = (onFinalCommand, onInterrupt) => {
     }
   };
 
-  return { isVoiceModeActive, liveTranscript, voiceMode, voiceError, voiceInteractionState, toggleAdvancedVoice };
+  return { isVoiceModeActive, liveTranscript, voiceMode, voiceError, voiceInteractionState, toggleAdvancedVoice, micMuted, toggleMicMuted };
 };
