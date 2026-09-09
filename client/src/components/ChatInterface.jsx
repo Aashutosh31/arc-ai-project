@@ -41,7 +41,13 @@ const MessageArea = styled.div`
   justify-content: ${({ $empty }) => ($empty ? 'center' : 'flex-start')};
   align-items: ${({ $empty }) => ($empty ? 'center' : 'stretch')};
   scroll-behavior: smooth;
-  overscroll-behavior: contain;
+  /* 'contain' only where this area is itself the scroller (desktop).
+     Below the shell breakpoint the page scrolls instead, and 'contain'
+     on this content-sized box traps wheel/touch so the page never scrolls. */
+  overscroll-behavior: auto;
+  @media (min-width: 1000px) {
+    overscroll-behavior: contain;
+  }
   &::-webkit-scrollbar { width: 5px; }
   &::-webkit-scrollbar-track { background: transparent; }
   &::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 4px; }

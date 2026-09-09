@@ -20,7 +20,9 @@ import SettingsModal from '../components/SettingsModal.jsx';
 import AccountMenu from '../components/AccountMenu.jsx';
 
 const Page = styled.div`
+  min-height: 100vh;
   min-height: 100dvh;
+  height: 100vh;
   height: 100dvh;
   background: #050510;
   color: #fff;

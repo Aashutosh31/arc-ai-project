@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 
 /**
@@ -211,6 +211,13 @@ const CATEGORY_ICONS = {
 
 const ToolsPanel = ({ isOpen, onClose, onUseExample, googleConnected, whatsappConnected }) => {
   const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
 
   const grouped = useMemo(() => {
     const q = query.trim().toLowerCase();

@@ -248,7 +248,7 @@ const ConvDate = styled.span`
   flex-shrink: 0;
 `;
 
-const DeleteButton = styled.button`
+const DeleteButton = styled.span`
   position: absolute;
   right: 4px;
   top: 50%;
@@ -256,7 +256,6 @@ const DeleteButton = styled.button`
   width: 22px;
   height: 22px;
   border-radius: 4px;
-  border: none;
   background: rgba(255, 60, 60, 0.15);
   color: #ff6b6b;
   font-size: 11px;
@@ -270,6 +269,12 @@ const DeleteButton = styled.button`
   ${ConversationItem}:hover & {
     opacity: 1;
     pointer-events: auto;
+  }
+  &:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+    outline: 2px solid rgba(255, 60, 60, 0.6);
+    outline-offset: 1px;
   }
   &:hover { background: rgba(255, 60, 60, 0.25); }
 `;
@@ -684,7 +689,14 @@ export const Sidebar = ({
             >
               <ConvTitle $active={activeConversationId === conv._id}>{conv.title}</ConvTitle>
               <ConvDate>{formatDate(conv.updatedAt)}</ConvDate>
-              <DeleteButton onClick={e => handleDelete(e, conv)} title="Delete">×</DeleteButton>
+              <DeleteButton
+                role="button"
+                tabIndex={0}
+                aria-label={`Delete ${conv.title || 'conversation'}`}
+                onClick={e => handleDelete(e, conv)}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setPendingDelete(conv); } }}
+                title="Delete"
+              >×</DeleteButton>
             </ConversationItem>
           ))}
         </ConversationSection>
