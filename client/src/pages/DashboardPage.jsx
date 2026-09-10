@@ -24,8 +24,8 @@ const Page = styled.div`
   min-height: 100dvh;
   height: 100vh;
   height: 100dvh;
-  background: #050510;
-  color: #fff;
+  background: var(--background-subtle);
+  color: var(--foreground);
   display: flex;
   flex-direction: row;
   width: 100%;
@@ -58,8 +58,8 @@ const ChatHeader = styled.header`
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(5, 5, 16, 0.95);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-overlay);
   backdrop-filter: blur(8px);
   gap: 12px;
   z-index: 10;
@@ -76,16 +76,16 @@ const Hamburger = styled.button`
   display: none;
   width: 36px;
   height: 36px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: transparent;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--foreground-muted);
   font-size: 18px;
   cursor: pointer;
   align-items: center;
   justify-content: center;
   transition: all 0.2s;
-  &:hover { color: #fff; background: rgba(255, 255, 255, 0.04); }
+  &:hover { color: var(--foreground); background: rgba(255, 255, 255, 0.04); }
   @media (max-width: 999px) { display: flex; }
 `;
 
@@ -97,7 +97,7 @@ const HeaderName = styled.h1`
   margin: 0;
   font-size: 13.5px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--foreground);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -105,7 +105,7 @@ const HeaderName = styled.h1`
 
 const HeaderMeta = styled.span`
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--foreground-subtle);
 `;
 
 const PaletteButton = styled.button`
@@ -116,11 +116,11 @@ const PaletteButton = styled.button`
   border-radius: 7px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: transparent;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--foreground-subtle);
   font-size: 11px;
   cursor: pointer;
   transition: all 0.15s;
-  &:hover { color: rgba(255, 255, 255, 0.75); border-color: rgba(255, 255, 255, 0.16); }
+  &:hover { color: var(--foreground); border-color: var(--border); }
   @media (max-width: 640px) { display: none; }
 `;
 
@@ -149,7 +149,7 @@ const StatusDot = styled.span`
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: ${({ $on }) => ($on ? '#4dffb0' : '#ff7070')};
+  background: ${({ $on }) => ($on ? 'var(--success)' : 'var(--destructive)')});
 `;
 
 const ChatArea = styled.div`
@@ -176,10 +176,10 @@ const ExecutionDrawer = styled.div`
   max-height: 50vh;
   overflow-y: auto;
   z-index: 100;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+  scrollbar-color: var(--border-strong) transparent;
 `;
 
 const DashboardPageContent = () => {

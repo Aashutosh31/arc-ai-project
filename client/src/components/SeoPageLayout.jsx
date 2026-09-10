@@ -24,8 +24,8 @@ const drift = keyframes`
 `;
 
 const pulse = keyframes`
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(38, 255, 138, 0.5); }
-  50% { opacity: 0.6; box-shadow: 0 0 0 5px rgba(38, 255, 138, 0); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(var(--success-rgb), 0.5); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 5px rgba(var(--success-rgb), 0); }
 `;
 
 const blink = keyframes`
@@ -43,7 +43,7 @@ const GlobalSeoStyle = createGlobalStyle`
     overflow-x: hidden;
   }
   body {
-    background: #050511;
+    background: var(--background-subtle);
     overflow-x: hidden;
   }
   @media (prefers-reduced-motion: reduce) {
@@ -64,8 +64,8 @@ const Page = styled.div`
   position: relative;
   min-height: 100dvh;
   width: 100%;
-  background: radial-gradient(circle at top, #1a1a3a 0%, #050511 55%, #020208 100%);
-  color: #fff;
+  background: radial-gradient(circle at top, var(--surface-elevated) 0%, var(--background-subtle) 55%, var(--background) 100%);
+  color: var(--foreground);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   overflow-x: hidden;
 
@@ -109,7 +109,7 @@ const Glow = styled.div`
   animation: ${drift} 22s ease-in-out infinite;
 
   &.cyan { background: var(--primary-hex); top: -120px; left: -100px; }
-  &.violet { background: #8a2be2; top: 30%; right: -160px; animation-delay: -7s; }
+  &.violet { background: var(--accent); top: 30%; right: -160px; animation-delay: -7s; }
   &.magenta { background: var(--secondary-hex); bottom: -160px; left: 30%; animation-delay: -14s; opacity: 0.18; }
 
   @media (max-width: 700px) {
@@ -128,7 +128,7 @@ const HeaderWrap = styled.div`
   top: 0;
   z-index: 40;
   width: 100%;
-  background: rgba(5, 5, 17, 0.75);
+  background: color-mix(in srgb, var(--background) 78%, transparent);
   backdrop-filter: blur(16px) saturate(160%);
   -webkit-backdrop-filter: blur(16px) saturate(160%);
   border-bottom: 1px solid rgba(var(--primary-rgb), 0.12);
@@ -154,7 +154,7 @@ const Logo = styled(Link)`
   align-items: center;
   gap: 10px;
   text-decoration: none;
-  color: #fff;
+  color: var(--foreground);
   font-weight: 700;
   font-size: 18px;
   letter-spacing: 0.04em;
@@ -165,14 +165,14 @@ const Logo = styled(Link)`
     width: 9px;
     height: 9px;
     border-radius: 50%;
-    background: #26ff8a;
-    box-shadow: 0 0 10px rgba(38, 255, 138, 0.8);
+    background: var(--success);
+    box-shadow: 0 0 10px rgba(var(--success-rgb), 0.8);
     animation: ${pulse} 2.4s ease-in-out infinite;
     flex-shrink: 0;
   }
 
   span.text {
-    background: linear-gradient(135deg, var(--primary-hex) 0%, #8a2be2 60%, var(--secondary-hex) 100%);
+    background: linear-gradient(135deg, var(--primary-hex) 0%, var(--accent) 60%, var(--secondary-hex) 100%);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -196,7 +196,7 @@ const NavLinks = styled.nav`
 const NavItem = styled(Link)`
   position: relative;
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -241,8 +241,8 @@ const GhostLink = styled.a`
   gap: 6px;
   padding: 9px 14px;
   border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--border-strong);
+  color: var(--foreground);
   font-size: 13px;
   font-weight: 600;
   text-decoration: none;
@@ -266,8 +266,8 @@ const SolidLink = styled.a`
   gap: 6px;
   padding: 9px 16px;
   border-radius: 9px;
-  background: linear-gradient(135deg, var(--primary-hex), #8a2be2);
-  color: #04040f;
+  background: linear-gradient(135deg, var(--primary-hex), var(--accent));
+  color: var(--primary-foreground);
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;
@@ -294,9 +294,9 @@ const MenuButton = styled.button`
   width: 38px;
   height: 38px;
   border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid var(--border-strong);
   background: rgba(255, 255, 255, 0.04);
-  color: #fff;
+  color: var(--foreground);
   cursor: pointer;
   flex-shrink: 0;
 
@@ -314,8 +314,8 @@ const MobileMenu = styled.div`
 
   a {
     padding: 12px 10px;
-    border-radius: 8px;
-    color: rgba(255, 255, 255, 0.8);
+    border-radius: var(--radius-sm);
+    color: var(--foreground);
     text-decoration: none;
     font-size: 14px;
     font-weight: 600;
@@ -403,7 +403,7 @@ const HeroTitle = styled.h1`
   font-weight: 800;
   letter-spacing: -0.01em;
   margin: 0 0 18px;
-  background: linear-gradient(135deg, #ffffff 0%, #c9f9ff 35%, var(--violet) 75%, #ff9bf0 100%);
+  background: linear-gradient(135deg, var(--foreground) 0%, var(--foreground-muted) 35%, var(--violet) 75%, var(--secondary) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -420,7 +420,7 @@ const HeroTitle = styled.h1`
 const HeroLead = styled.p`
   font-size: 17px;
   line-height: 1.7;
-  color: rgba(255, 255, 255, 0.68);
+  color: var(--foreground-muted);
   max-width: 680px;
   margin: 0 auto;
 
@@ -461,7 +461,7 @@ const StatValue = styled.div`
 const StatLabel = styled.div`
   font-size: 13px;
   line-height: 1.5;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--foreground-subtle);
 `;
 
 /* ----------------------------------------------------------------------- */
@@ -528,7 +528,7 @@ export const SectionHeading = styled.h2`
   font-weight: 750;
   letter-spacing: -0.01em;
   margin: 0 0 14px;
-  color: #fff;
+  color: var(--foreground);
 
   @media (max-width: 600px) {
     font-size: 21px;
@@ -538,7 +538,7 @@ export const SectionHeading = styled.h2`
 export const SectionText = styled.p`
   font-size: 15.5px;
   line-height: 1.75;
-  color: rgba(255, 255, 255, 0.66);
+  color: var(--foreground-muted);
   max-width: 720px;
   margin: 0 0 18px;
 
@@ -561,7 +561,7 @@ export const BulletList = styled.ul`
     padding-left: 26px;
     font-size: 14.5px;
     line-height: 1.6;
-    color: rgba(255, 255, 255, 0.72);
+    color: var(--foreground-muted);
   }
 
   li::before {
@@ -572,7 +572,7 @@ export const BulletList = styled.ul`
     width: 8px;
     height: 8px;
     border-radius: 2px;
-    background: linear-gradient(135deg, var(--primary-hex), #8a2be2);
+    background: linear-gradient(135deg, var(--primary-hex), var(--accent));
     box-shadow: 0 0 8px rgba(var(--primary-rgb), 0.5);
     transform: rotate(45deg);
   }
@@ -610,7 +610,7 @@ export const CardTitle = styled.h3`
 export const CardText = styled.p`
   font-size: 14px;
   line-height: 1.65;
-  color: rgba(255, 255, 255, 0.62);
+  color: var(--foreground-muted);
   margin: 0;
 `;
 
@@ -652,9 +652,9 @@ const CtaWrap = styled.section`
   padding: 42px 36px;
   border-radius: 22px;
   text-align: center;
-  background: rgba(10, 10, 26, 0.7);
+  background: var(--surface-overlay);
   border: 1px solid rgba(var(--primary-rgb), 0.22);
-  box-shadow: 0 0 60px rgba(var(--primary-rgb), 0.08), inset 0 0 30px rgba(138, 43, 226, 0.06);
+  box-shadow: 0 0 60px rgba(var(--primary-rgb), 0.08), inset 0 0 30px rgba(var(--accent-rgb), 0.06);
 
   @media (max-width: 600px) {
     margin: 20px 14px 56px;
@@ -679,7 +679,7 @@ const CtaTitle = styled.h2`
 const CtaText = styled.p`
   font-size: 15px;
   line-height: 1.65;
-  color: rgba(255, 255, 255, 0.62);
+  color: var(--foreground-muted);
   max-width: 540px;
   margin: 0 auto 26px;
 `;
@@ -724,7 +724,7 @@ const FooterBrand = styled.div`
   h3 {
     font-size: 17px;
     margin: 0 0 8px;
-    background: linear-gradient(135deg, var(--primary-hex), #8a2be2, var(--secondary-hex));
+    background: linear-gradient(135deg, var(--primary-hex), var(--accent), var(--secondary-hex));
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -732,7 +732,7 @@ const FooterBrand = styled.div`
   p {
     font-size: 13.5px;
     line-height: 1.6;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--foreground-subtle);
     max-width: 320px;
     margin: 0;
   }
@@ -743,7 +743,7 @@ const FooterCol = styled.div`
     font-size: 11px;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--foreground-subtle);
     margin: 0 0 14px;
     font-weight: 700;
   }
@@ -753,7 +753,7 @@ const FooterCol = styled.div`
 
   a {
     font-size: 13.5px;
-    color: rgba(255, 255, 255, 0.65);
+    color: var(--foreground-muted);
     text-decoration: none;
     display: inline-flex;
     align-items: center;
@@ -767,16 +767,16 @@ const FooterBottom = styled.div`
   max-width: 1080px;
   margin: 36px auto 0;
   padding-top: 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
   font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--foreground-subtle);
 
-  a { color: rgba(255, 255, 255, 0.55); text-decoration: none; }
+  a { color: var(--foreground-subtle); text-decoration: none; }
   a:hover { color: var(--primary-hex); }
 `;
 

@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useChat } from '../contexts/ChatContext';
-import { THEMES, THEME_CHANGE_EVENT, applyTheme, getStoredTheme } from '../utils/theme';
+import { THEME_CHANGE_EVENT, applyTheme, getStoredTheme } from '../utils/theme';
+import { listThemes } from '../theme/themes';
 
 const SECTIONS = [
   { id: 'account', label: 'Account', icon: '👤' },
@@ -34,7 +35,7 @@ const Modal = styled.div`
   display: flex;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.09);
-  background: linear-gradient(180deg, rgba(13, 14, 32, 0.98), rgba(8, 10, 22, 0.98));
+  background: linear-gradient(180deg, var(--surface-elevated), var(--surface));
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
   overflow: hidden;
 
@@ -47,14 +48,14 @@ const Modal = styled.div`
 const Nav = styled.nav`
   width: 210px;
   flex-shrink: 0;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  border-right: 1px solid var(--border-subtle);
   padding: 14px 10px;
   overflow-y: auto;
 
   @media (max-width: 640px) {
     width: 100%;
     border-right: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--border-subtle);
     display: flex;
     gap: 4px;
     overflow-x: auto;
@@ -66,10 +67,10 @@ const NavItem = styled.button`
   width: 100%;
   text-align: left;
   padding: 9px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: none;
   background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent')};
-  color: ${({ $active }) => ($active ? '#eafcff' : 'rgba(255, 255, 255, 0.55)')};
+  color: ${({ $active }) => ($active ? 'var(--foreground)' : 'var(--foreground-muted)')};
   font-size: 13px;
   font-weight: ${({ $active }) => ($active ? '600' : '400')};
   cursor: pointer;
@@ -78,7 +79,7 @@ const NavItem = styled.button`
   gap: 10px;
   transition: all 0.15s;
   white-space: nowrap;
-  &:hover { background: rgba(255, 255, 255, 0.04); color: #fff; }
+  &:hover { background: rgba(255, 255, 255, 0.04); color: var(--foreground); }
 `;
 
 const Body = styled.div`
@@ -92,13 +93,13 @@ const SectionTitle = styled.h3`
   margin: 0 0 4px;
   font-size: 16px;
   font-weight: 700;
-  color: #f1f5f9;
+  color: var(--foreground);
 `;
 
 const SectionDesc = styled.p`
   margin: 0 0 18px;
   font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--foreground-subtle);
   line-height: 1.6;
 `;
 
@@ -114,13 +115,13 @@ const Row = styled.div`
 
 const RowLabel = styled.div`
   font-size: 13px;
-  color: #dbe3f0;
+  color: var(--foreground-muted);
   font-weight: 550;
 `;
 
 const RowHint = styled.div`
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--foreground-subtle);
   margin-top: 3px;
   line-height: 1.5;
 `;
@@ -132,15 +133,15 @@ const Pill = styled.span`
   text-transform: uppercase;
   padding: 4px 10px;
   border-radius: 999px;
-  color: ${({ $tone }) => ($tone === 'ok' ? '#4dffb0' : $tone === 'warn' ? '#ffcf70' : 'rgba(255,255,255,0.5)')};
-  border: 1px solid ${({ $tone }) => ($tone === 'ok' ? 'rgba(77,255,176,0.3)' : $tone === 'warn' ? 'rgba(255,207,112,0.3)' : 'rgba(255,255,255,0.12)')};
-  background: ${({ $tone }) => ($tone === 'ok' ? 'rgba(77,255,176,0.06)' : $tone === 'warn' ? 'rgba(255,207,112,0.06)' : 'rgba(255,255,255,0.03)')};
+  color: ${({ $tone }) => ($tone === 'ok' ? 'var(--success)' : $tone === 'warn' ? 'var(--warning)' : 'var(--foreground-subtle)')};
+  border: 1px solid ${({ $tone }) => ($tone === 'ok' ? 'rgba(var(--success-rgb),0.3)' : $tone === 'warn' ? 'rgba(var(--warning-rgb),0.3)' : 'var(--border)')};
+  background: ${({ $tone }) => ($tone === 'ok' ? 'rgba(var(--success-rgb),0.06)' : $tone === 'warn' ? 'rgba(var(--warning-rgb),0.06)' : 'rgba(255,255,255,0.03)')};
   white-space: nowrap;
 `;
 
 const ActionButton = styled.button`
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid rgba(var(--primary-rgb), 0.25);
   background: rgba(var(--primary-rgb), 0.07);
   color: var(--accent-soft);
@@ -154,16 +155,16 @@ const ActionButton = styled.button`
 `;
 
 const GhostButton = styled(ActionButton)`
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: var(--border);
   background: transparent;
-  color: rgba(255, 255, 255, 0.65);
-  &:hover { background: rgba(255, 255, 255, 0.05); color: #fff; }
+  color: var(--foreground-muted);
+  &:hover { background: rgba(255, 255, 255, 0.05); color: var(--foreground); }
 `;
 
 const DangerButton = styled(ActionButton)`
   border-color: rgba(255, 70, 70, 0.4);
   background: rgba(255, 70, 70, 0.08);
-  color: #ff9f9f;
+  color: var(--destructive-soft);
   &:hover { background: rgba(255, 70, 70, 0.15); }
 `;
 
@@ -197,12 +198,15 @@ const ThemeCard = styled.button`
   border-radius: 10px;
   border: 1px solid ${({ $active }) => ($active ? 'rgba(var(--primary-rgb),0.35)' : 'rgba(255,255,255,0.08)')};
   background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb),0.05)' : 'rgba(255,255,255,0.02)')};
-  color: #e2e8f0;
+  color: var(--foreground);
   cursor: pointer;
   margin-bottom: 8px;
   transition: all 0.15s;
   &:hover { border-color: rgba(var(--primary-rgb), 0.25); }
 `;
+
+/* Gallery foundation: swatch row renders straight from registry preview data.
+   Implemented with Tailwind utilities (first surface on the new stack). */
 
 const CloseButton = styled.button`
   position: absolute;
@@ -210,18 +214,18 @@ const CloseButton = styled.button`
   right: 14px;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
   background: transparent;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--foreground-muted);
   font-size: 16px;
   cursor: pointer;
-  &:hover { color: #fff; background: rgba(255, 255, 255, 0.05); }
+  &:hover { color: var(--foreground); background: rgba(255, 255, 255, 0.05); }
 `;
 
 const Note = styled.p`
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--foreground-subtle);
   line-height: 1.6;
   margin: 12px 0 0;
 `;
@@ -317,10 +321,14 @@ const SettingsModal = ({
               <>
                 <SectionTitle>Appearance</SectionTitle>
                 <SectionDesc>ARC-AI visual theme. Applied instantly on this device.</SectionDesc>
-                {THEMES.map(t => (
-                  <ThemeCard key={t.id} $active={theme === t.id} onClick={() => handleSelectTheme(t.id)} aria-pressed={theme === t.id} aria-label={`${t.label} theme`}>
-                    <RowLabel>{t.label}</RowLabel>
-                    <RowHint>{t.hint}</RowHint>
+                {listThemes().map(t => (
+                  <ThemeCard key={t.id} $active={theme === t.id} onClick={() => handleSelectTheme(t.id)} aria-pressed={theme === t.id} aria-label={`${t.name} theme`}>
+                    <RowLabel>{t.name}
+                      <span aria-hidden="true" className="inline-flex gap-1.5 ml-2 align-middle">
+                        {t.preview.map(c => <span key={c} style={{ background: c }} className="inline-block w-3.5 h-3.5 rounded-full border border-white/25" />)}
+                      </span>
+                    </RowLabel>
+                    <RowHint>{t.description}</RowHint>
                   </ThemeCard>
                 ))}
               </>

@@ -11,10 +11,10 @@ const Panel = styled.div`
 
 const Select = styled.select`
   width: 100%;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   border: 1px solid rgba(var(--primary-rgb), 0.22);
   background: rgba(0, 0, 0, 0.22);
-  color: #f4fbff;
+  color: var(--foreground);
   padding: 11px 12px;
   font-size: 13px;
   outline: none;
@@ -29,7 +29,7 @@ const ActionRow = styled.div`
 const ActionButton = styled.button`
   border: 1px solid rgba(var(--primary-rgb), 0.18);
   background: rgba(255, 255, 255, 0.04);
-  color: #eefcff;
+  color: var(--foreground);
   border-radius: 10px;
   padding: 9px 10px;
   font-size: 12px;
@@ -50,7 +50,7 @@ const ActionButton = styled.button`
 `;
 
 const WorkspaceMeta = styled.div`
-  color: #8fa2cf;
+  color: var(--foreground-muted);
   font-size: 12px;
   line-height: 1.45;
 `;
@@ -91,7 +91,7 @@ const ModalTitle = styled.h4`
 
 const ModalSubtitle = styled.p`
   margin: 6px 0 0;
-  color: #aeb8d9;
+  color: var(--foreground-muted);
   font-size: 12px;
 `;
 
@@ -106,7 +106,7 @@ const FieldLabel = styled.label`
   display: flex;
   flex-direction: column;
   gap: 6px;
-  color: #d8e5ff;
+  color: var(--foreground);
   font-size: 12px;
 `;
 
@@ -115,7 +115,7 @@ const Input = styled.input`
   border-radius: 10px;
   border: 1px solid rgba(var(--primary-rgb), 0.24);
   background: rgba(255, 255, 255, 0.04);
-  color: #f4fbff;
+  color: var(--foreground);
   padding: 10px 12px;
   font-size: 13px;
   outline: none;
@@ -133,7 +133,7 @@ const Textarea = styled.textarea`
   border-radius: 10px;
   border: 1px solid rgba(var(--primary-rgb), 0.24);
   background: rgba(255, 255, 255, 0.04);
-  color: #f4fbff;
+  color: var(--foreground);
   padding: 10px 12px;
   font-size: 13px;
   outline: none;
@@ -154,7 +154,7 @@ const ModalActions = styled.div`
 const SecondaryButton = styled.button`
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.04);
-  color: #e8ecff;
+  color: var(--foreground);
   border-radius: 10px;
   padding: 9px 12px;
   font-size: 12px;
@@ -164,7 +164,7 @@ const SecondaryButton = styled.button`
 const PrimaryButton = styled.button`
   border: 1px solid rgba(var(--primary-rgb), 0.36);
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.24), rgba(var(--secondary-rgb), 0.18));
-  color: #eafcff;
+  color: var(--foreground);
   border-radius: 10px;
   padding: 9px 12px;
   font-size: 12px;
@@ -180,12 +180,12 @@ const PrimaryButton = styled.button`
 const DangerButton = styled(PrimaryButton)`
   border-color: rgba(255, 70, 70, 0.5);
   background: rgba(255, 70, 70, 0.16);
-  color: #ffb8b8;
+  color: var(--destructive-soft);
 `;
 
 const InlineError = styled.div`
   font-size: 12px;
-  color: #ff9f9f;
+  color: var(--destructive-soft);
 `;
 
 const CurrentName = styled.div`

@@ -23,10 +23,10 @@ const Card = styled.div`
   width: 300px;
   max-width: calc(100vw - 32px);
   border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(8, 8, 22, 0.95);
+  border: 1px solid var(--border);
+  background: var(--surface-overlay);
   backdrop-filter: blur(12px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
 
   @media (max-width: 640px) {
@@ -42,19 +42,19 @@ const Header = styled.div`
   align-items: center;
   gap: 8px;
   padding: 9px 8px 9px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: ${({ $live }) => ($live ? '#4dffb0' : 'rgba(255, 255, 255, 0.45)')};
+  color: ${({ $live }) => ($live ? 'var(--success)' : 'rgba(255, 255, 255, 0.45)')};
 `;
 
 const LiveDot = styled.span`
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: ${({ $live }) => ($live ? '#4dffb0' : 'rgba(255,255,255,0.25)')};
+  background: ${({ $live }) => ($live ? 'var(--success)' : 'rgba(255,255,255,0.25)')};
   box-shadow: ${({ $live }) => ($live ? '0 0 8px rgba(77,255,176,0.8)' : 'none')};
   flex-shrink: 0;
 `;
@@ -64,12 +64,12 @@ const HeaderSpacer = styled.span` flex: 1; `;
 const HeaderButton = styled.button`
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--foreground-subtle);
   font-size: 13px;
   cursor: pointer;
   padding: 4px 6px;
   border-radius: 6px;
-  &:hover { color: #fff; background: rgba(255, 255, 255, 0.07); }
+  &:hover { color: var(--foreground); background: rgba(255, 255, 255, 0.07); }
 `;
 
 const Body = styled.div`
@@ -85,7 +85,7 @@ const PreviewBox = styled.div`
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid rgba(110, 132, 177, 0.25);
-  background: #0c1327;
+  background: var(--surface);
   & video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
 `;
 
@@ -96,7 +96,7 @@ const CollapsedBar = styled.div`
   padding: 9px 12px;
   font-size: 12px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--foreground-muted);
 `;
 
 const QuestionForm = styled.form`
@@ -117,19 +117,19 @@ const QuestionInput = styled.input`
   background: transparent;
   border: none;
   outline: none;
-  color: #eef2f9;
+  color: var(--foreground);
   font-size: 13px;
   font-family: inherit;
-  &::placeholder { color: rgba(255, 255, 255, 0.28); }
+  &::placeholder { color: var(--foreground-subtle); }
 `;
 
 const SmallButton = styled.button`
   width: 30px;
   height: 30px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: none;
   background: ${({ $primary }) => ($primary ? 'var(--primary-hex)' : 'transparent')};
-  color: ${({ $primary }) => ($primary ? '#050510' : 'rgba(255, 255, 255, 0.5)')};
+  color: ${({ $primary }) => ($primary ? 'var(--primary-foreground)' : 'rgba(255, 255, 255, 0.5)')};
   font-size: 13px;
   cursor: pointer;
   display: inline-flex;
@@ -142,7 +142,7 @@ const SmallButton = styled.button`
 
 const FrameHint = styled.div`
   font-size: 11px;
-  color: ${({ $ready, $warn }) => ($warn ? '#ffcf70' : $ready ? 'rgba(77, 255, 176, 0.75)' : 'rgba(255, 255, 255, 0.35)')};
+  color: ${({ $ready, $warn }) => ($warn ? 'var(--warning)' : $ready ? 'rgba(var(--success-rgb), 0.75)' : 'rgba(255, 255, 255, 0.35)')};
   text-align: center;
 `;
 

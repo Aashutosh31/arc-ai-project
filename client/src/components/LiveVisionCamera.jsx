@@ -30,7 +30,7 @@ const ControlsGrid = styled.div`
 const ToggleButton = styled.button`
   border: 1px solid rgba(95, 146, 255, 0.5);
   background: ${({ $active }) => ($active ? 'rgba(38, 127, 255, 0.22)' : 'rgba(11, 22, 46, 0.72)')};
-  color: ${({ $active }) => ($active ? '#bfe1ff' : '#8ca5cc')};
+  color: ${({ $active }) => ($active ? 'var(--foreground)' : 'var(--foreground-muted)')};
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -44,7 +44,7 @@ const Preview = styled.video`
   width: 100%;
   aspect-ratio: 16 / 9;
   border-radius: 10px;
-  background: #0c1327;
+  background: var(--surface);
   object-fit: cover;
   border: 1px solid rgba(110, 132, 177, 0.35);
 `;
@@ -58,10 +58,10 @@ const MetaRow = styled.div`
 
 const DeviceSelect = styled.select`
   background: rgba(10,18,38,0.6);
-  color: #cfe6ff;
+  color: var(--foreground);
   border: 1px solid rgba(110,132,177,0.25);
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
 `;
 
@@ -70,17 +70,17 @@ const StateChip = styled.span`
   letter-spacing: 0.07em;
   text-transform: uppercase;
   font-weight: 700;
-  color: ${({ $ok }) => ($ok ? '#34d399' : '#fca5a5')};
+  color: ${({ $ok }) => ($ok ? 'var(--success)' : 'var(--destructive-soft)')};
 `;
 
 const Note = styled.span`
   font-size: 10px;
-  color: #8aa6d9;
+  color: var(--foreground-muted);
 `;
 
 const OffNote = styled.div`
   font-size: 11px;
-  color: #8aa6d9;
+  color: var(--foreground-muted);
   text-align: center;
   border: 1px dashed rgba(116, 146, 202, 0.35);
   border-radius: 10px;

@@ -52,12 +52,12 @@ const Pill = styled.div`
   gap: 10px;
   padding: 9px 10px 9px 12px;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(8, 8, 22, 0.94);
+  border: 1px solid var(--border);
+  background: var(--surface-overlay);
   backdrop-filter: blur(12px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-md);
   font-size: 12.5px;
-  color: #dbe3f0;
+  color: var(--foreground-muted);
   max-width: 100%;
 `;
 
@@ -92,9 +92,9 @@ const RoundButton = styled.button`
   justify-content: center;
   flex-shrink: 0;
   transition: all 0.15s;
-  &:hover { border-color: rgba(var(--primary-rgb), 0.4); color: #fff; }
+  &:hover { border-color: rgba(var(--primary-rgb), 0.4); color: var(--foreground); }
   &:disabled { opacity: 0.35; cursor: default; }
-  &:disabled:hover { border-color: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.6); }
+  &:disabled:hover { border-color: var(--border); color: var(--foreground-muted); }
 `;
 
 const CloseButton = styled.button`
@@ -103,14 +103,14 @@ const CloseButton = styled.button`
   border-radius: 50%;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--foreground-subtle);
   font-size: 13px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  &:hover { color: #fff; background: rgba(255, 255, 255, 0.07); }
+  &:hover { color: var(--foreground); background: rgba(255, 255, 255, 0.07); }
 `;
 
 const ExpandedCard = styled.div`
@@ -121,9 +121,9 @@ const ExpandedCard = styled.div`
   padding: 16px 18px 14px;
   border-radius: 18px;
   border: 1px solid rgba(var(--primary-rgb), 0.16);
-  background: rgba(8, 8, 22, 0.94);
+  background: var(--surface-overlay);
   backdrop-filter: blur(12px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 24px rgba(var(--primary-rgb), 0.06);
+  box-shadow: var(--shadow-md), 0 0 24px rgba(var(--primary-rgb), 0.06);
   width: 240px;
   max-width: 100%;
 `;
@@ -143,7 +143,7 @@ const OrbGlow = styled.div`
   border-radius: 999px;
   background: var(--primary-hex);
   opacity: 0.3;
-  box-shadow: 0 0 30px rgba(34, 211, 238, 0.55);
+  box-shadow: 0 0 30px rgba(var(--primary-rgb), 0.55);
   animation: ${pulse} 1.8s cubic-bezier(0.2, 0, 0.2, 1) infinite;
 `;
 
@@ -159,8 +159,8 @@ const OrbButton = styled.button`
   align-items: center;
   justify-content: center;
   background: var(--primary-hex);
-  box-shadow: 0 0 24px rgba(34, 211, 238, 0.5);
-  color: #fff;
+  box-shadow: 0 0 24px rgba(var(--primary-rgb), 0.5);
+  color: var(--foreground);
   transition: filter 0.15s;
   &:hover { filter: brightness(1.12); }
 `;
@@ -168,7 +168,7 @@ const OrbButton = styled.button`
 const StopSquare = styled.span`
   width: 16px;
   height: 16px;
-  background: #fff;
+  background: var(--foreground);
   border-radius: 3px;
 `;
 
@@ -197,14 +197,14 @@ const MuteButton = styled.button`
   gap: 6px;
   padding: 6px 12px;
   border-radius: 999px;
-  border: 1px solid ${({ $muted }) => ($muted ? 'rgba(255, 207, 112, 0.4)' : 'rgba(255, 255, 255, 0.12)')};
-  background: ${({ $muted }) => ($muted ? 'rgba(255, 207, 112, 0.08)' : 'rgba(255, 255, 255, 0.04)')};
-  color: ${({ $muted }) => ($muted ? '#ffcf70' : 'rgba(255, 255, 255, 0.6)')};
+  border: 1px solid ${({ $muted }) => ($muted ? 'rgba(var(--warning-rgb), 0.4)' : 'rgba(255, 255, 255, 0.12)')};
+  background: ${({ $muted }) => ($muted ? 'rgba(var(--warning-rgb), 0.08)' : 'rgba(255, 255, 255, 0.04)')};
+  color: ${({ $muted }) => ($muted ? 'var(--warning)' : 'rgba(255, 255, 255, 0.6)')};
   font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
-  &:hover { border-color: rgba(255, 255, 255, 0.25); color: #fff; }
+  &:hover { border-color: var(--border); color: var(--foreground); }
   &:disabled { opacity: 0.35; cursor: default; }
 `;
 
@@ -297,17 +297,20 @@ const VoiceDock = ({ onClose, activateSignal }) => {
   }
 
   const pill = (() => {
+    // Status-dot colors are semantic tokens (behavior unchanged):
+    // speaking -> violet accent, processing/muted -> warning,
+    // error -> destructive, idle -> subtle foreground.
     switch (state) {
       case 'speaking':
-        return { dot: '#a855f7', pulse: true, text: 'ARC speaking — tap to stop', action: toggleAdvancedVoice, label: 'Interrupt ARC and listen' };
+        return { dot: 'var(--violet)', pulse: true, text: 'ARC speaking — tap to stop', action: toggleAdvancedVoice, label: 'Interrupt ARC and listen' };
       case 'processing':
-        return { dot: '#facc15', pulse: true, text: agentStatus || 'Thinking…', action: toggleAdvancedVoice, label: 'Cancel generation' };
+        return { dot: 'var(--warning)', pulse: true, text: agentStatus || 'Thinking…', action: toggleAdvancedVoice, label: 'Cancel generation' };
       case 'muted':
-        return { dot: '#ffcf70', pulse: false, text: 'Mic muted', action: toggleMicMuted, label: 'Unmute microphone' };
+        return { dot: 'var(--warning)', pulse: false, text: 'Mic muted', action: toggleMicMuted, label: 'Unmute microphone' };
       case 'error':
-        return { dot: '#ff7070', pulse: false, text: voiceError || 'Voice error', action: toggleAdvancedVoice, label: 'Retry voice mode' };
+        return { dot: 'var(--destructive)', pulse: false, text: voiceError || 'Voice error', action: toggleAdvancedVoice, label: 'Retry voice mode' };
       default:
-        return { dot: '#384055', pulse: false, text: 'Voice ready — tap mic to talk', action: toggleAdvancedVoice, label: 'Start voice mode' };
+        return { dot: 'var(--foreground-subtle)', pulse: false, text: 'Voice ready — tap mic to talk', action: toggleAdvancedVoice, label: 'Start voice mode' };
     }
   })();
 
@@ -329,7 +332,7 @@ const VoiceDock = ({ onClose, activateSignal }) => {
           </RoundButton>
         )}
         {state === 'muted' && (
-          <PillText style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>
+          <PillText style={{ fontSize: 11, color: 'var(--foreground-subtle)' }}>
             Session active
           </PillText>
         )}

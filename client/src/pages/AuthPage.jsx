@@ -49,7 +49,7 @@ const PageWrapper = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(ellipse at bottom, #0d1b2a 0%, #000000 100%);
+  background: radial-gradient(ellipse at bottom, var(--background-subtle) 0%, var(--background) 100%);
   position: relative;
   overflow: hidden;
   padding: 20px;
@@ -60,8 +60,8 @@ const PageWrapper = styled.div`
     width: 200%;
     height: 200%;
     background: 
-      linear-gradient(90deg, transparent 0%, rgba(0, 255, 255, 0.03) 50%, transparent 100%),
-      linear-gradient(0deg, transparent 0%, rgba(138, 43, 226, 0.03) 50%, transparent 100%);
+      linear-gradient(90deg, transparent 0%, rgba(var(--primary-rgb), 0.03) 50%, transparent 100%),
+      linear-gradient(0deg, transparent 0%, rgba(var(--accent-rgb), 0.03) 50%, transparent 100%);
     animation: ${shimmer} 20s linear infinite;
   }
 
@@ -82,13 +82,13 @@ const Particle = styled.div`
   position: absolute;
   width: ${props => props.size || 4}px;
   height: ${props => props.size || 4}px;
-  background: ${props => props.color || 'rgba(0, 255, 255, 0.6)'};
+  background: ${props => props.color || 'rgba(var(--primary-rgb), 0.6)'};
   border-radius: 50%;
   bottom: -10px;
   left: ${props => props.left || 0}%;
   animation: ${particleFloat} ${props => props.duration || 15}s linear infinite;
   animation-delay: ${props => props.delay || 0}s;
-  box-shadow: 0 0 20px ${props => props.color || 'rgba(0, 255, 255, 0.8)'};
+  box-shadow: 0 0 20px ${props => props.color || 'rgba(var(--primary-rgb), 0.8)'};
   pointer-events: none;
 `;
 
@@ -102,19 +102,19 @@ const ParticleContainer = styled.div`
 
 // Glassmorphic Auth Container
 const AuthContainer = styled.div`
-  background: rgba(10, 10, 26, 0.85);
+  background: var(--surface-overlay);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   padding: 50px 40px;
-  border-radius: 24px;
-  border: 1px solid rgba(0, 255, 255, 0.2);
+  border-radius: var(--radius-xl);
+  border: 1px solid rgba(var(--primary-rgb), 0.2);
   box-shadow: 
     0 8px 32px 0 rgba(0, 0, 0, 0.5),
-    0 0 80px rgba(0, 255, 255, 0.15),
-    inset 0 0 20px rgba(138, 43, 226, 0.1);
+    0 0 80px rgba(var(--primary-rgb), 0.15),
+    inset 0 0 20px rgba(var(--accent-rgb), 0.1);
   max-width: 440px;
   width: 100%;
-  color: #fff;
+  color: var(--foreground);
   position: relative;
   z-index: 10;
   animation: ${float} 8s ease-in-out infinite;
@@ -126,7 +126,7 @@ const AuthContainer = styled.div`
     left: -2px;
     right: -2px;
     bottom: -2px;
-    background: linear-gradient(45deg, #00ffff, #8a2be2, #ff00ff, #00ffff);
+    background: linear-gradient(45deg, var(--primary), var(--accent), var(--secondary), var(--primary));
     border-radius: 24px;
     z-index: -1;
     opacity: 0;
@@ -157,11 +157,11 @@ const Title = styled.h1`
   font-weight: 700;
   text-align: center;
   margin-bottom: 8px;
-  background: linear-gradient(135deg, #00ffff 0%, #8a2be2 50%, #ff00ff 100%);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 50%, var(--secondary) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  filter: drop-shadow(0 0 20px rgba(0, 255, 255, 0.5));
+  filter: drop-shadow(0 0 20px rgba(var(--primary-rgb), 0.5));
   letter-spacing: 3px;
   animation: ${glow} 4s ease-in-out infinite;
 
@@ -177,7 +177,7 @@ const Title = styled.h1`
 
 const Subtitle = styled.p`
   text-align: center;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--foreground-muted);
   font-size: 14px;
   margin-bottom: 35px;
   letter-spacing: 1px;
@@ -207,7 +207,7 @@ const InputGroup = styled.div`
 
 const InputLabel = styled.label`
   display: block;
-  color: rgba(0, 255, 255, 0.9);
+  color: rgba(var(--primary-rgb), 0.9);
   font-size: 12px;
   margin-bottom: 10px;
   text-transform: uppercase;
@@ -226,34 +226,34 @@ const Input = styled.input`
   padding: 16px 18px;
   padding-right: ${props => props.hasIcon ? '50px' : '18px'};
   border: 2px solid ${props => 
-    props.error ? 'rgba(255, 0, 100, 0.5)' : 
-    props.success ? 'rgba(0, 255, 100, 0.5)' : 
-    'rgba(0, 191, 255, 0.3)'};
+    props.error ? 'rgba(var(--destructive-rgb), 0.5)' : 
+    props.success ? 'rgba(var(--success-rgb), 0.5)' : 
+    'rgba(var(--primary-rgb), 0.3)'};
   background: rgba(0, 0, 0, 0.4);
-  color: #00ffff;
-  border-radius: 12px;
+  color: var(--primary);
+  border-radius: var(--radius-md);
   font-size: 15px;
   transition: all 0.3s ease;
   outline: none;
   
   &::placeholder {
-    color: rgba(255, 255, 255, 0.3);
+    color: var(--foreground-subtle);
   }
   
   &:focus {
     border-color: ${props => 
-      props.error ? 'rgba(255, 0, 100, 0.8)' : '#00ffff'};
+      props.error ? 'rgba(var(--destructive-rgb), 0.8)' : 'var(--primary)'};
     background: rgba(0, 0, 0, 0.6);
     box-shadow: 
       0 0 25px ${props => 
-        props.error ? 'rgba(255, 0, 100, 0.3)' : 'rgba(0, 255, 255, 0.3)'},
+        props.error ? 'rgba(var(--destructive-rgb), 0.3)' : 'rgba(var(--primary-rgb), 0.3)'},
       inset 0 0 15px ${props => 
-        props.error ? 'rgba(255, 0, 100, 0.1)' : 'rgba(0, 255, 255, 0.1)'};
+        props.error ? 'rgba(var(--destructive-rgb), 0.1)' : 'rgba(var(--primary-rgb), 0.1)'};
     transform: translateY(-2px);
   }
   
   &:hover:not(:focus) {
-    border-color: rgba(138, 43, 226, 0.5);
+    border-color: rgba(var(--accent-rgb), 0.5);
   }
 
   @media (max-width: 480px) {
@@ -270,7 +270,7 @@ const PasswordToggle = styled.button`
   transform: translateY(-50%);
   background: none;
   border: none;
-  color: rgba(0, 255, 255, 0.6);
+  color: rgba(var(--primary-rgb), 0.6);
   cursor: pointer;
   padding: 8px;
   display: flex;
@@ -280,12 +280,12 @@ const PasswordToggle = styled.button`
   font-size: 18px;
   
   &:hover {
-    color: #00ffff;
+    color: var(--primary);
     transform: translateY(-50%) scale(1.1);
   }
 
   &:focus {
-    outline: 2px solid rgba(0, 255, 255, 0.5);
+    outline: 2px solid rgba(var(--primary-rgb), 0.5);
     outline-offset: 2px;
     border-radius: 4px;
   }
@@ -310,24 +310,24 @@ const PasswordStrengthBar = styled.div`
     top: 0;
     height: 100%;
     width: ${props => props.strength}%;
-    background: ${props => 
-      props.strength < 33 ? 'linear-gradient(90deg, #ff0050, #ff3366)' :
-      props.strength < 66 ? 'linear-gradient(90deg, #ffa500, #ffcc00)' :
-      'linear-gradient(90deg, #00ff88, #00ffcc)'};
+    background: ${props =>
+      props.strength < 33 ? 'var(--destructive)' :
+      props.strength < 66 ? 'var(--warning)' :
+      'var(--success)'};
     transition: all 0.3s ease;
     box-shadow: 0 0 10px ${props => 
-      props.strength < 33 ? 'rgba(255, 0, 80, 0.5)' :
-      props.strength < 66 ? 'rgba(255, 165, 0, 0.5)' :
-      'rgba(0, 255, 136, 0.5)'};
+      props.strength < 33 ? 'rgba(var(--destructive-rgb), 0.5)' :
+      props.strength < 66 ? 'rgba(var(--warning-rgb), 0.5)' :
+      'rgba(var(--success-rgb), 0.5)'};
   }
 `;
 
 const PasswordStrengthText = styled.span`
   font-size: 11px;
   color: ${props => 
-    props.strength < 33 ? '#ff3366' :
-    props.strength < 66 ? '#ffcc00' :
-    '#00ff88'};
+    props.strength < 33 ? 'var(--destructive)' :
+    props.strength < 66 ? 'var(--warning)' :
+    'var(--success)'};
   margin-top: 6px;
   display: block;
   letter-spacing: 0.5px;
@@ -344,30 +344,30 @@ const Checkbox = styled.input`
   width: 18px;
   height: 18px;
   cursor: pointer;
-  accent-color: #00ffff;
+  accent-color: var(--primary);
   
   &:focus {
-    outline: 2px solid rgba(0, 255, 255, 0.5);
+    outline: 2px solid rgba(var(--primary-rgb), 0.5);
     outline-offset: 2px;
   }
 `;
 
 const CheckboxLabel = styled.label`
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--foreground-muted);
   font-size: 14px;
   cursor: pointer;
   user-select: none;
   transition: color 0.3s ease;
 
   &:hover {
-    color: #00ffff;
+    color: var(--primary);
   }
 `;
 
 const ErrorMessage = styled.div`
-  background: rgba(255, 0, 80, 0.15);
-  border: 1px solid rgba(255, 0, 80, 0.4);
-  color: #ff3366;
+  background: rgba(var(--destructive-rgb), 0.15);
+  border: 1px solid rgba(var(--destructive-rgb), 0.4);
+  color: var(--destructive);
   padding: 14px 16px;
   border-radius: 10px;
   font-size: 14px;
@@ -376,7 +376,7 @@ const ErrorMessage = styled.div`
   display: flex;
   align-items: center;
   gap: 10px;
-  box-shadow: 0 0 15px rgba(255, 0, 80, 0.2);
+  box-shadow: 0 0 15px rgba(var(--destructive-rgb), 0.2);
 
   &::before {
     content: '⚠';
@@ -395,13 +395,13 @@ const Button = styled.button`
   margin-top: 10px;
   background: ${props => props.disabled ? 
     'rgba(100, 100, 100, 0.3)' : 
-    'linear-gradient(135deg, #00ffff 0%, #8a2be2 50%, #ff00ff 100%)'};
+    'linear-gradient(135deg, var(--primary) 0%, var(--accent) 50%, var(--secondary) 100%)'};
   background-size: 200% 200%;
-  color: ${props => props.disabled ? 'rgba(255, 255, 255, 0.3)' : '#000'};
+  color: ${props => props.disabled ? 'rgba(255, 255, 255, 0.3)' : 'var(--primary-foreground)'};
   font-weight: 700;
   font-size: 16px;
   border: none;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   cursor: ${props => props.disabled ? 'not-allowed' : 'pointer'};
   text-transform: uppercase;
   letter-spacing: 2px;
@@ -410,7 +410,7 @@ const Button = styled.button`
   transition: all 0.3s ease;
   box-shadow: ${props => props.disabled ? 
     'none' : 
-    '0 4px 20px rgba(0, 255, 255, 0.4)'};
+    '0 4px 20px rgba(var(--primary-rgb), 0.4)'};
   display: flex;
   align-items: center;
   justify-content: center;
@@ -430,7 +430,7 @@ const Button = styled.button`
   
   &:hover:not(:disabled) {
     transform: translateY(-3px);
-    box-shadow: 0 8px 30px rgba(138, 43, 226, 0.6);
+    box-shadow: 0 8px 30px rgba(var(--accent-rgb), 0.6);
     background-position: 100% 0;
   }
   
@@ -443,7 +443,7 @@ const Button = styled.button`
   }
 
   &:focus {
-    outline: 3px solid rgba(0, 255, 255, 0.5);
+    outline: 3px solid rgba(var(--primary-rgb), 0.5);
     outline-offset: 3px;
   }
 
@@ -467,9 +467,9 @@ const ButtonGroup = styled.div`
 const SecondaryButton = styled.button`
   padding: 14px 18px;
   background: rgba(255, 255, 255, 0.06);
-  color: #dffbff;
-  border: 1px solid rgba(0, 255, 255, 0.22);
-  border-radius: 12px;
+  color: var(--foreground);
+  border: 1px solid rgba(var(--primary-rgb), 0.22);
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-weight: 700;
   letter-spacing: 1px;
@@ -478,8 +478,8 @@ const SecondaryButton = styled.button`
   transition: all 0.25s ease;
 
   &:hover:not(:disabled) {
-    background: rgba(0, 255, 255, 0.1);
-    box-shadow: 0 0 18px rgba(0, 255, 255, 0.16);
+    background: rgba(var(--primary-rgb), 0.1);
+    box-shadow: 0 0 18px rgba(var(--primary-rgb), 0.16);
   }
 
   &:disabled {
@@ -490,10 +490,10 @@ const SecondaryButton = styled.button`
 
 const GoogleButton = styled.button`
   padding: 14px 18px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(0, 255, 255, 0.08));
-  color: #e5fbff;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(var(--primary-rgb), 0.08));
+  color: var(--foreground);
   border: 1px solid rgba(125, 247, 255, 0.3);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-weight: 700;
   letter-spacing: 1px;
@@ -502,8 +502,8 @@ const GoogleButton = styled.button`
   transition: all 0.25s ease;
 
   &:hover:not(:disabled) {
-    background: rgba(0, 255, 255, 0.12);
-    box-shadow: 0 0 18px rgba(0, 255, 255, 0.18);
+    background: rgba(var(--primary-rgb), 0.12);
+    box-shadow: 0 0 18px rgba(var(--primary-rgb), 0.18);
   }
 
   &:disabled {
@@ -516,7 +516,7 @@ const Spinner = styled.div`
   width: 20px;
   height: 20px;
   border: 3px solid rgba(0, 0, 0, 0.3);
-  border-top-color: #000;
+  border-top-color: #000; /* fixed: contrast head on the bright gradient button */
   border-radius: 50%;
   animation: ${spin} 0.8s linear infinite;
 `;
@@ -524,7 +524,7 @@ const Spinner = styled.div`
 const ToggleText = styled.p`
   text-align: center;
   margin-top: 30px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--foreground-muted);
   font-size: 14px;
 
   @media (max-width: 480px) {
@@ -534,7 +534,7 @@ const ToggleText = styled.p`
 `;
 
 const ToggleLink = styled.span`
-  color: #00ffff;
+  color: var(--primary);
   cursor: pointer;
   font-weight: 600;
   text-decoration: none;
@@ -548,13 +548,13 @@ const ToggleLink = styled.span`
     left: 0;
     width: 0;
     height: 2px;
-    background: linear-gradient(90deg, #00ffff, #8a2be2);
+    background: linear-gradient(90deg, var(--primary), var(--accent));
     transition: width 0.3s ease;
   }
   
   &:hover {
-    color: #8a2be2;
-    text-shadow: 0 0 15px rgba(138, 43, 226, 0.8);
+    color: var(--accent);
+    text-shadow: 0 0 15px rgba(var(--accent-rgb), 0.8);
   }
 
   &:hover::after {
@@ -562,13 +562,13 @@ const ToggleLink = styled.span`
   }
 
   &:focus {
-    outline: 2px solid rgba(0, 255, 255, 0.5);
+    outline: 2px solid rgba(var(--primary-rgb), 0.5);
     outline-offset: 4px;
     border-radius: 2px;
   }
 
   &:focus-visible {
-    outline: 2px solid rgba(0, 255, 255, 0.7);
+    outline: 2px solid rgba(var(--primary-rgb), 0.7);
   }
 `;
 
@@ -578,8 +578,8 @@ const NeuralGrid = styled.div`
   width: 100%;
   height: 100%;
   background-image: 
-    linear-gradient(rgba(0, 255, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 255, 255, 0.05) 1px, transparent 1px);
+    linear-gradient(rgba(var(--primary-rgb), 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--primary-rgb), 0.05) 1px, transparent 1px);
   background-size: 50px 50px;
   opacity: 0.3;
   pointer-events: none;
@@ -752,7 +752,7 @@ const AuthPage = ({ isRegister }) => {
     left: Math.random() * 100,
     duration: Math.random() * 10 + 15,
     delay: Math.random() * 5,
-    color: i % 3 === 0 ? 'rgba(0, 255, 255, 0.6)' : i % 3 === 1 ? 'rgba(138, 43, 226, 0.6)' : 'rgba(255, 0, 255, 0.6)'
+    color: i % 3 === 0 ? 'rgba(var(--primary-rgb), 0.6)' : i % 3 === 1 ? 'rgba(var(--accent-rgb), 0.6)' : 'rgba(var(--secondary-rgb), 0.6)'
   }));
 
   return (

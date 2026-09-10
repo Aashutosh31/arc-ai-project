@@ -33,7 +33,7 @@ const Header = styled.div`
   gap: 12px;
   align-items: center;
   padding: 16px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
 `;
 
 const Title = styled.h3`
@@ -46,17 +46,17 @@ const Title = styled.h3`
 
 const Subtext = styled.p`
   margin: 6px 0 0;
-  color: #a8b5d8;
+  color: var(--foreground-muted);
   font-size: 12px;
 `;
 
 const CloseButton = styled.button`
   border: 1px solid rgba(var(--primary-rgb), 0.25);
   background: rgba(255, 255, 255, 0.03);
-  color: #f4fbff;
+  color: var(--foreground);
   width: 40px;
   height: 40px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   cursor: pointer;
 `;
 
@@ -99,7 +99,7 @@ const ToggleRow = styled.label`
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(var(--primary-rgb), 0.12);
-  color: #dbe5ff;
+  color: var(--foreground-muted);
   font-size: 13px;
 `;
 
@@ -120,7 +120,7 @@ const SectionTitle = styled.h4`
 `;
 
 const Text = styled.div`
-  color: #dbe5ff;
+  color: var(--foreground-muted);
   font-size: 13px;
   line-height: 1.55;
   white-space: pre-wrap;
@@ -129,7 +129,7 @@ const Text = styled.div`
 
 const ItemMeta = styled.div`
   margin-top: 8px;
-  color: #8fa2cf;
+  color: var(--foreground-muted);
   font-size: 11px;
 `;
 
@@ -143,7 +143,7 @@ const ActionRow = styled.div`
 const ActionButton = styled.button`
   border: 1px solid rgba(var(--primary-rgb), 0.22);
   background: rgba(0, 0, 0, 0.18);
-  color: #effcff;
+  color: var(--foreground);
   border-radius: 10px;
   padding: 8px 10px;
   font-size: 12px;
@@ -152,7 +152,7 @@ const ActionButton = styled.button`
 
 const EmptyState = styled.div`
   padding: 18px;
-  color: #94a4cb;
+  color: var(--foreground-muted);
   text-align: center;
 `;
 
@@ -246,7 +246,7 @@ const WorkspaceMemoryModal = ({ isOpen, onClose }) => {
               <span>Auto memory learning</span>
               <input type="checkbox" checked={Boolean(memoryData.preferences.memoryLearningEnabled)} onChange={handleToggleLearning} />
             </ToggleRow>
-            <div style={{ color: '#8fa2cf', fontSize: '12px', lineHeight: 1.55 }}>
+            <div style={{ color: 'var(--foreground-muted)', fontSize: '12px', lineHeight: 1.55 }}>
               Conversation history stays separate from user facts and semantic memories. Auto-learning only controls whether ARC-AI writes new memory entries from ongoing chats.
             </div>
           </Sidebar>
@@ -275,7 +275,7 @@ const WorkspaceMemoryModal = ({ isOpen, onClose }) => {
                   <MemoryCard key={memory._id}>
                     <Text>{memory.query}</Text>
                     <ItemMeta>{memory.pinned ? 'Pinned' : 'Unpinned'} · Tags: {(memory.tags || []).join(', ') || 'none'}</ItemMeta>
-                    <Text style={{ marginTop: '10px', color: '#cdd7f5' }}>{memory.response}</Text>
+                    <Text style={{ marginTop: '10px', color: 'var(--foreground)' }}>{memory.response}</Text>
                     <ActionRow>
                       <ActionButton type="button" onClick={async () => { await updateSemanticMemory(memory._id, { pinned: !memory.pinned }); await loadDashboard(); }}>
                         {memory.pinned ? 'Unpin' : 'Pin'}

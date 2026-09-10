@@ -21,47 +21,10 @@ const Automation = lazy(() => import('./pages/Automation'));
 const Architecture = lazy(() => import('./pages/Architecture'));
 const About = lazy(() => import('./pages/About'));
 
-// 🚀 UPGRADE: We define Global CSS Variables for our Themes!
+// Theme values come from styles/arc.css (Tailwind v4 + daisyUI custom themes
+// + ARC bridge). This GlobalStyle owns only structural/global CSS and the
+// loading fallback. Adding a theme never touches this file.
 const GlobalStyle = createGlobalStyle`
-  :root {
-    --primary-hex: #00ffff;
-    --primary-rgb: 0, 255, 255;
-    --secondary-hex: #ff00ff;
-    --secondary-rgb: 255, 0, 255;
-    --accent-soft: #7df7ff;
-    --accent-soft-rgb: 125, 247, 255;
-    --violet: #b887ff;
-    --violet-rgb: 184, 135, 255;
-    --bg-color: #020314;
-    --chat-bg: rgba(10, 10, 30, 0.7);
-  }
-
-  [data-theme="hacker"] {
-    --primary-hex: #00ff00;
-    --primary-rgb: 0, 255, 0;
-    --secondary-hex: #00aa00;
-    --secondary-rgb: 0, 170, 0;
-    --accent-soft: #7dffb0;
-    --accent-soft-rgb: 125, 255, 176;
-    --violet: #4ade80;
-    --violet-rgb: 74, 222, 128;
-    --bg-color: #001100;
-    --chat-bg: rgba(0, 20, 0, 0.8);
-  }
-
-  [data-theme="alert"] {
-    --primary-hex: #ff0000;
-    --primary-rgb: 255, 0, 0;
-    --secondary-hex: #ff5555;
-    --secondary-rgb: 255, 85, 85;
-    --accent-soft: #ffa1a1;
-    --accent-soft-rgb: 255, 161, 161;
-    --violet: #f87171;
-    --violet-rgb: 248, 113, 113;
-    --bg-color: #1a0000;
-    --chat-bg: rgba(30, 0, 0, 0.8);
-  }
-
   *, *::before, *::after {
     box-sizing: border-box;
   }
@@ -74,9 +37,9 @@ const GlobalStyle = createGlobalStyle`
   }
 
   body {
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--bg-color);
-    color: #f5f5f5;
+    font-family: var(--font-body);
+    background: var(--background);
+    color: var(--foreground);
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
     text-rendering: optimizeLegibility;
@@ -88,7 +51,7 @@ const GlobalStyle = createGlobalStyle`
   }
 
   :focus-visible {
-    outline: 2px solid rgba(0, 255, 255, 0.75);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 3px;
   }
 
@@ -113,19 +76,19 @@ const LoadingScreen = styled.div`
   display: grid;
   place-items: center;
   padding: 24px;
-  color: #d7faff;
+  color: var(--foreground-muted);
   background:
-    radial-gradient(circle at top, rgba(0, 255, 255, 0.08), transparent 30%),
-    linear-gradient(180deg, #030712 0%, #01040b 100%);
+    radial-gradient(circle at top, rgba(var(--primary-rgb), 0.08), transparent 30%),
+    linear-gradient(180deg, var(--background-subtle) 0%, var(--background) 100%);
 `;
 
 const LoadingCard = styled.div`
   width: min(92vw, 360px);
   padding: 24px;
-  border-radius: 18px;
-  border: 1px solid rgba(0, 255, 255, 0.22);
-  background: rgba(10, 10, 26, 0.8);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(var(--primary-rgb), 0.22);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-lg);
 `;
 
 const LoadingBar = styled.div`
@@ -133,7 +96,7 @@ const LoadingBar = styled.div`
   width: 100%;
   margin-top: 16px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--border);
   overflow: hidden;
 
   &::after {
@@ -142,7 +105,7 @@ const LoadingBar = styled.div`
     width: 40%;
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(90deg, #00ffff, #8a2be2, #ff00ff);
+    background: linear-gradient(90deg, var(--primary), var(--accent), var(--secondary));
     animation: loadingSlide 1.2s ease-in-out infinite;
   }
 

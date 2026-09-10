@@ -33,7 +33,7 @@ const extractLanguage = (className) => {
 const MarkdownBody = styled.div`
   font-size: 15px;
   line-height: 1.8;
-  color: #dbe3f0;
+  color: var(--foreground-muted);
   word-wrap: break-word;
   overflow-wrap: break-word;
   min-width: 0;
@@ -48,7 +48,7 @@ const MarkdownBody = styled.div`
 
   h1, h2, h3, h4, h5, h6 {
     margin: 1.5em 0 0.6em;
-    color: #f4f7ff;
+    color: var(--foreground);
     font-weight: 700;
     line-height: 1.35;
     letter-spacing: -0.01em;
@@ -58,11 +58,11 @@ const MarkdownBody = styled.div`
   h2 { font-size: 1.22em; padding-bottom: 0.25em; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
   h3 { font-size: 1.1em; color: var(--accent-soft); }
   h4 { font-size: 1em; }
-  h5, h6 { font-size: 0.92em; color: #9fb0cc; }
+  h5, h6 { font-size: 0.92em; color: var(--foreground-subtle); }
 
-  strong { color: #ffffff; font-weight: 650; }
+  strong { color: var(--foreground); font-weight: 650; }
   em { font-style: italic; }
-  del { color: rgba(255, 255, 255, 0.4); }
+  del { color: var(--foreground-subtle); }
 
   a {
     color: var(--accent-soft);
@@ -97,7 +97,7 @@ const MarkdownBody = styled.div`
     border-left: 3px solid rgba(var(--accent-soft-rgb), 0.5);
     background: rgba(var(--accent-soft-rgb), 0.03);
     border-radius: 0 8px 8px 0;
-    color: #a9b6cf;
+    color: var(--foreground-muted);
     p { margin: 0.35em 0; }
   }
 
@@ -122,13 +122,13 @@ const MarkdownBody = styled.div`
     text-align: left;
     font-weight: 650;
     color: var(--violet);
-    border-bottom: 1px solid rgba(185, 165, 255, 0.25);
+    border-bottom: 1px solid rgba(var(--violet-rgb), 0.25);
     white-space: nowrap;
   }
   td {
     padding: 9px 14px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    color: #c6d0e2;
+    color: var(--foreground-muted);
     vertical-align: top;
   }
   tbody tr:hover td { background: rgba(255, 255, 255, 0.02); }
@@ -145,9 +145,11 @@ const MarkdownBody = styled.div`
     white-space: nowrap;
   }
 
+  /* Intentionally fixed code surface: pairs with the static
+     highlight.js theme imported above so syntax colors stay readable. */
   pre {
     margin: 1.1em 0;
-    border-radius: 12px;
+    border-radius: var(--radius-md);
     overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(4, 6, 18, 0.92);
@@ -168,7 +170,7 @@ const MarkdownBody = styled.div`
     display: block;
     padding: 14px 16px;
     background: transparent;
-    color: #dbe3f0;
+    color: var(--foreground-muted);
     font-size: 13px;
     line-height: 1.65;
     overflow-x: auto;
@@ -200,9 +202,9 @@ const TableScroll = styled.div`
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.015);
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  scrollbar-color: var(--border-strong) transparent;
   &::-webkit-scrollbar { height: 6px; }
-  &::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
+  &::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
   /* Same wide-viewport breakout as code blocks (see MarkdownBody pre). */
   @media (min-width: 1100px) {
@@ -218,17 +220,17 @@ const CodeHeader = styled.div`
   justify-content: space-between;
   padding: 7px 12px;
   background: rgba(255, 255, 255, 0.03);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--foreground-subtle);
   font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
   letter-spacing: 0.04em;
 `;
 
 const CopyButton = styled.button`
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--border);
+  color: var(--foreground-muted);
   padding: 3px 10px;
   border-radius: 5px;
   font-size: 11px;
@@ -254,7 +256,7 @@ const FadeMask = styled.div`
   left: 0;
   right: 0;
   height: 120px;
-  background: linear-gradient(transparent, rgba(5, 5, 16, 0.96));
+  background: linear-gradient(transparent, var(--surface));
   pointer-events: none;
 `;
 
