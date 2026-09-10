@@ -37,9 +37,9 @@
       "id": "cyberpunk",
       "name": "Cyberpunk",
       "category": "neon",
-      "description": "High-voltage yellow and neon pink",
-      "colorScheme": "light",
-      "preview": ["#ff7598", "#00e5ff", "#ffee00"]
+      "description": "Burgundy underground with neon pink and cyan",
+      "colorScheme": "dark",
+      "preview": ["#ff6584", "#00e5ff", "#460d24"]
     },
     {
       "id": "dracula",
