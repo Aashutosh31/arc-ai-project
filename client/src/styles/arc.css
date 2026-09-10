@@ -1,0 +1,648 @@
+@import "tailwindcss";
+
+@plugin "daisyui" {
+  themes: false;
+}
+
+/* ==========================================================================
+   ARC-AI custom daisyUI themes.
+   default / hacker / alert preserve the redesign palettes (oklch values are
+   exact conversions of the previous hex tokens). cyberpunk / dracula / nord /
+   forest / synthwave adapt the official daisyUI palettes so ARC keeps its own
+   identity. arc-light is a deliberate light theme, not an inversion.
+   Adding theme #N = one more @plugin block + catalog entry. No component
+   changes required.
+   ========================================================================== */
+
+@plugin "daisyui/theme" {
+  name: "default";
+  default: true;
+  color-scheme: dark;
+  --color-base-100: oklch(11.187% 0.043 272.208);
+  --color-base-200: oklch(12.300% 0.027 281.723);
+  --color-base-300: oklch(15.830% 0.042 280.561);
+  --color-base-content: oklch(97.015% 0.000 89.876);
+  --color-primary: oklch(90.540% 0.155 194.769);
+  --color-primary-content: oklch(11.567% 0.028 281.001);
+  --color-secondary: oklch(70.167% 0.322 328.363);
+  --color-secondary-content: oklch(11.567% 0.028 281.001);
+  --color-accent: oklch(53.376% 0.250 301.375);
+  --color-accent-content: oklch(100.000% 0.000 89.876);
+  --color-neutral: oklch(20.564% 0.035 282.830);
+  --color-neutral-content: oklch(91.361% 0.020 260.169);
+  --color-info: oklch(75.351% 0.139 232.661);
+  --color-info-content: oklch(11.567% 0.028 281.001);
+  --color-success: oklch(89.189% 0.181 159.489);
+  --color-success-content: oklch(11.567% 0.028 281.001);
+  --color-warning: oklch(87.762% 0.125 82.879);
+  --color-warning-content: oklch(11.567% 0.028 281.001);
+  --color-error: oklch(71.904% 0.175 22.503);
+  --color-error-content: oklch(11.567% 0.028 281.001);
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "hacker";
+  color-scheme: dark;
+  --color-base-100: oklch(15.391% 0.052 142.495);
+  --color-base-200: oklch(16.067% 0.045 143.111);
+  --color-base-300: oklch(18.431% 0.052 143.107);
+  --color-base-content: oklch(97.899% 0.035 145.299);
+  --color-primary: oklch(86.644% 0.295 142.495);
+  --color-primary-content: oklch(15.391% 0.052 142.495);
+  --color-secondary: oklch(63.945% 0.218 142.495);
+  --color-secondary-content: oklch(15.391% 0.052 142.495);
+  --color-accent: oklch(80.035% 0.182 151.711);
+  --color-accent-content: oklch(15.391% 0.052 142.495);
+  --color-neutral: oklch(21.529% 0.048 143.689);
+  --color-neutral-content: oklch(85.323% 0.055 145.069);
+  --color-info: oklch(80.035% 0.182 151.711);
+  --color-info-content: oklch(15.391% 0.052 142.495);
+  --color-success: oklch(89.189% 0.181 159.489);
+  --color-success-content: oklch(15.391% 0.052 142.495);
+  --color-warning: oklch(87.762% 0.125 82.879);
+  --color-warning-content: oklch(15.391% 0.052 142.495);
+  --color-error: oklch(71.904% 0.175 22.503);
+  --color-error-content: oklch(15.391% 0.052 142.495);
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "alert";
+  color-scheme: dark;
+  --color-base-100: oklch(13.676% 0.056 29.234);
+  --color-base-200: oklch(16.980% 0.054 24.974);
+  --color-base-300: oklch(19.252% 0.061 24.869);
+  --color-base-content: oklch(96.913% 0.015 17.418);
+  --color-primary: oklch(62.796% 0.258 29.234);
+  --color-primary-content: oklch(100.000% 0.000 89.876);
+  --color-secondary: oklch(68.220% 0.206 24.431);
+  --color-secondary-content: oklch(100.000% 0.000 89.876);
+  --color-accent: oklch(71.063% 0.166 22.216);
+  --color-accent-content: oklch(13.676% 0.056 29.234);
+  --color-neutral: oklch(21.920% 0.066 24.402);
+  --color-neutral-content: oklch(84.935% 0.039 17.940);
+  --color-info: oklch(71.063% 0.166 22.216);
+  --color-info-content: oklch(13.676% 0.056 29.234);
+  --color-success: oklch(89.189% 0.181 159.489);
+  --color-success-content: oklch(13.676% 0.056 29.234);
+  --color-warning: oklch(87.762% 0.125 82.879);
+  --color-warning-content: oklch(13.676% 0.056 29.234);
+  --color-error: oklch(71.904% 0.175 22.503);
+  --color-error-content: oklch(100.000% 0.000 89.876);
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "arc-light";
+  color-scheme: light;
+  --color-base-100: oklch(95.758% 0.009 264.522);
+  --color-base-200: oklch(92.936% 0.015 260.729);
+  --color-base-300: oklch(100.000% 0.000 89.876);
+  --color-base-content: oklch(20.768% 0.040 265.755);
+  --color-primary: oklch(58.762% 0.139 241.966);
+  --color-primary-content: oklch(100.000% 0.000 89.876);
+  --color-secondary: oklch(51.802% 0.226 323.949);
+  --color-secondary-content: oklch(100.000% 0.000 89.876);
+  --color-accent: oklch(49.067% 0.241 292.581);
+  --color-accent-content: oklch(100.000% 0.000 89.876);
+  --color-neutral: oklch(37.170% 0.039 257.287);
+  --color-neutral-content: oklch(98.415% 0.003 247.858);
+  --color-info: oklch(58.762% 0.139 241.966);
+  --color-info-content: oklch(100.000% 0.000 89.876);
+  --color-success: oklch(52.730% 0.137 150.069);
+  --color-success-content: oklch(100.000% 0.000 89.876);
+  --color-warning: oklch(55.528% 0.146 48.998);
+  --color-warning-content: oklch(100.000% 0.000 89.876);
+  --color-error: oklch(57.710% 0.215 27.325);
+  --color-error-content: oklch(100.000% 0.000 89.876);
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "cyberpunk";
+  color-scheme: light;
+  --color-base-100: oklch(94.51% 0.179 104.32);
+  --color-base-200: oklch(91.51% 0.179 104.32);
+  --color-base-300: oklch(85.51% 0.179 104.32);
+  --color-base-content: oklch(0% 0 0);
+  --color-primary: oklch(74.22% 0.209 6.35);
+  --color-primary-content: oklch(14.844% 0.041 6.35);
+  --color-secondary: oklch(83.33% 0.184 204.72);
+  --color-secondary-content: oklch(16.666% 0.036 204.72);
+  --color-accent: oklch(71.86% 0.217 310.43);
+  --color-accent-content: oklch(14.372% 0.043 310.43);
+  --color-neutral: oklch(23.04% 0.065 269.31);
+  --color-neutral-content: oklch(94.51% 0.179 104.32);
+  --color-info: oklch(72.06% 0.191 231.6);
+  --color-info-content: oklch(0% 0 0);
+  --color-success: oklch(64.8% 0.15 160);
+  --color-success-content: oklch(0% 0 0);
+  --color-warning: oklch(84.71% 0.199 83.87);
+  --color-warning-content: oklch(0% 0 0);
+  --color-error: oklch(71.76% 0.221 22.18);
+  --color-error-content: oklch(0% 0 0);
+  --radius-selector: 0rem;
+  --radius-field: 0rem;
+  --radius-box: 0rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "dracula";
+  color-scheme: dark;
+  --color-base-100: oklch(28.822% 0.022 277.508);
+  --color-base-200: oklch(26.805% 0.02 277.508);
+  --color-base-300: oklch(24.787% 0.019 277.508);
+  --color-base-content: oklch(97.747% 0.007 106.545);
+  --color-primary: oklch(75.461% 0.183 346.812);
+  --color-primary-content: oklch(15.092% 0.036 346.812);
+  --color-secondary: oklch(74.202% 0.148 301.883);
+  --color-secondary-content: oklch(14.84% 0.029 301.883);
+  --color-accent: oklch(83.392% 0.124 66.558);
+  --color-accent-content: oklch(16.678% 0.024 66.558);
+  --color-neutral: oklch(39.445% 0.032 275.524);
+  --color-neutral-content: oklch(87.889% 0.006 275.524);
+  --color-info: oklch(88.263% 0.093 212.846);
+  --color-info-content: oklch(17.652% 0.018 212.846);
+  --color-success: oklch(87.099% 0.219 148.024);
+  --color-success-content: oklch(17.419% 0.043 148.024);
+  --color-warning: oklch(95.533% 0.134 112.757);
+  --color-warning-content: oklch(19.106% 0.026 112.757);
+  --color-error: oklch(68.22% 0.206 24.43);
+  --color-error-content: oklch(13.644% 0.041 24.43);
+  --radius-selector: 1rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "nord";
+  color-scheme: light;
+  --color-base-100: oklch(95.127% 0.007 260.731);
+  --color-base-200: oklch(93.299% 0.01 261.788);
+  --color-base-300: oklch(89.925% 0.016 262.749);
+  --color-base-content: oklch(32.437% 0.022 264.182);
+  --color-primary: oklch(59.435% 0.077 254.027);
+  --color-primary-content: oklch(11.887% 0.015 254.027);
+  --color-secondary: oklch(69.651% 0.059 248.687);
+  --color-secondary-content: oklch(13.93% 0.011 248.687);
+  --color-accent: oklch(77.464% 0.062 217.469);
+  --color-accent-content: oklch(15.492% 0.012 217.469);
+  --color-neutral: oklch(45.229% 0.035 264.131);
+  --color-neutral-content: oklch(89.925% 0.016 262.749);
+  --color-info: oklch(69.207% 0.062 332.664);
+  --color-info-content: oklch(13.841% 0.012 332.664);
+  --color-success: oklch(76.827% 0.074 131.063);
+  --color-success-content: oklch(15.365% 0.014 131.063);
+  --color-warning: oklch(85.486% 0.089 84.093);
+  --color-warning-content: oklch(17.097% 0.017 84.093);
+  --color-error: oklch(60.61% 0.12 15.341);
+  --color-error-content: oklch(12.122% 0.024 15.341);
+  --radius-selector: 1rem;
+  --radius-field: 0.25rem;
+  --radius-box: 0.5rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "forest";
+  color-scheme: dark;
+  --color-base-100: oklch(20.84% 0.008 17.911);
+  --color-base-200: oklch(18.522% 0.007 17.911);
+  --color-base-300: oklch(16.203% 0.007 17.911);
+  --color-base-content: oklch(83.768% 0.001 17.911);
+  --color-primary: oklch(68.628% 0.185 148.958);
+  --color-primary-content: oklch(0% 0 0);
+  --color-secondary: oklch(69.776% 0.135 168.327);
+  --color-secondary-content: oklch(13.955% 0.027 168.327);
+  --color-accent: oklch(70.628% 0.119 185.713);
+  --color-accent-content: oklch(14.125% 0.023 185.713);
+  --color-neutral: oklch(30.698% 0.039 171.364);
+  --color-neutral-content: oklch(86.139% 0.007 171.364);
+  --color-info: oklch(72.06% 0.191 231.6);
+  --color-info-content: oklch(0% 0 0);
+  --color-success: oklch(64.8% 0.15 160);
+  --color-success-content: oklch(0% 0 0);
+  --color-warning: oklch(84.71% 0.199 83.87);
+  --color-warning-content: oklch(0% 0 0);
+  --color-error: oklch(71.76% 0.221 22.18);
+  --color-error-content: oklch(0% 0 0);
+  --radius-selector: 1rem;
+  --radius-field: 2rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "synthwave";
+  color-scheme: dark;
+  --color-base-100: oklch(15% 0.09 281.288);
+  --color-base-200: oklch(20% 0.09 281.288);
+  --color-base-300: oklch(25% 0.09 281.288);
+  --color-base-content: oklch(78% 0.115 274.713);
+  --color-primary: oklch(71% 0.202 349.761);
+  --color-primary-content: oklch(28% 0.109 3.907);
+  --color-secondary: oklch(82% 0.111 230.318);
+  --color-secondary-content: oklch(29% 0.066 243.157);
+  --color-accent: oklch(75% 0.183 55.934);
+  --color-accent-content: oklch(26% 0.079 36.259);
+  --color-neutral: oklch(45% 0.24 277.023);
+  --color-neutral-content: oklch(87% 0.065 274.039);
+  --color-info: oklch(74% 0.16 232.661);
+  --color-info-content: oklch(29% 0.066 243.157);
+  --color-success: oklch(77% 0.152 181.912);
+  --color-success-content: oklch(27% 0.046 192.524);
+  --color-warning: oklch(90% 0.182 98.111);
+  --color-warning-content: oklch(42% 0.095 57.708);
+  --color-error: oklch(73.7% 0.121 32.639);
+  --color-error-content: oklch(23.501% 0.096 290.329);
+  --radius-selector: 1rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+/* ==========================================================================
+   ARC semantic bridge: daisyUI model -> ARC component tokens.
+   Plain CSS aliases resolve per active data-theme, so every current AND
+   future theme adapts automatically with zero component changes.
+   NOTE: our --border* are COLORS. daisyUI's --border (1px size) is shadowed
+   by these later, equal-specificity rules; daisyUI *components* are not used
+   yet, so nothing consumes the size var today (documented limitation).
+   ========================================================================== */
+
+:root,
+[data-theme] {
+  --background: var(--color-base-100);
+  --background-subtle: var(--color-base-200);
+  --foreground: var(--color-base-content);
+  --primary: var(--color-primary);
+  --primary-foreground: var(--color-primary-content);
+  --secondary: var(--color-secondary);
+  --secondary-foreground: var(--color-secondary-content);
+  --accent: var(--color-accent);
+  --accent-foreground: var(--color-accent-content);
+  --success: var(--color-success);
+  --warning: var(--color-warning);
+  --destructive: var(--color-error);
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: var(--surface-elevated);
+  --popover-foreground: var(--foreground);
+  --muted: var(--surface-elevated);
+  --muted-foreground: var(--foreground-muted);
+  --input: var(--border-strong);
+  --ring: var(--focus-ring);
+  --font-body: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* legacy anchors */
+  --primary-hex: var(--color-primary);
+  --secondary-hex: var(--color-secondary);
+  --bg-color: var(--color-base-100);
+}
+
+/* --------------------------------------------------------------------------
+   Per-theme ARC extras: glow triplets, soft accents, surfaces, elevation.
+   -------------------------------------------------------------------------- */
+
+:root,
+[data-theme='default'] {
+  --surface: #0a0a1e;
+  --surface-elevated: #12122b;
+  --surface-overlay: rgba(8, 8, 22, 0.94);
+  --foreground-muted: #dbe3f0;
+  --foreground-subtle: rgba(255, 255, 255, 0.55);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --accent-soft: #7df7ff;
+  --accent-soft-rgb: 125, 247, 255;
+  --violet: #b887ff;
+  --violet-rgb: 184, 135, 255;
+  --primary-rgb: 0, 255, 255;
+  --secondary-rgb: 255, 0, 255;
+  --accent-rgb: 138, 43, 226;
+  --success-rgb: 77, 255, 176;
+  --warning-rgb: 255, 207, 112;
+  --destructive-rgb: 255, 112, 112;
+  --destructive-soft: #ff9f9f;
+  --focus-ring: rgba(0, 255, 255, 0.75);
+  --chat-bg: rgba(10, 10, 30, 0.7);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme='hacker'] {
+  --surface: #031803;
+  --surface-elevated: #062006;
+  --surface-overlay: rgba(0, 16, 0, 0.94);
+  --foreground-muted: #b9d9b9;
+  --foreground-subtle: rgba(214, 255, 214, 0.55);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --accent-soft: #7dffb0;
+  --accent-soft-rgb: 125, 255, 176;
+  --violet: #4ade80;
+  --violet-rgb: 74, 222, 128;
+  --primary-rgb: 0, 255, 0;
+  --secondary-rgb: 0, 170, 0;
+  --accent-rgb: 74, 222, 128;
+  --success-rgb: 77, 255, 176;
+  --warning-rgb: 255, 207, 112;
+  --destructive-rgb: 255, 112, 112;
+  --destructive-soft: #ff9f9f;
+  --focus-ring: rgba(0, 255, 0, 0.7);
+  --chat-bg: rgba(0, 20, 0, 0.8);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme='alert'] {
+  --surface: #2a0606;
+  --surface-elevated: #3a0a0a;
+  --surface-overlay: rgba(26, 2, 2, 0.94);
+  --foreground-muted: #e6c4c4;
+  --foreground-subtle: rgba(255, 220, 220, 0.55);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --accent-soft: #ffa1a1;
+  --accent-soft-rgb: 255, 161, 161;
+  --violet: #f87171;
+  --violet-rgb: 248, 113, 113;
+  --primary-rgb: 255, 0, 0;
+  --secondary-rgb: 255, 85, 85;
+  --accent-rgb: 248, 113, 113;
+  --success-rgb: 77, 255, 176;
+  --warning-rgb: 255, 207, 112;
+  --destructive-rgb: 255, 112, 112;
+  --destructive-soft: #ff9f9f;
+  --focus-ring: rgba(255, 0, 0, 0.7);
+  --chat-bg: rgba(30, 0, 0, 0.8);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme='arc-light'] {
+  --surface: #ffffff;
+  --surface-elevated: #f8fafc;
+  --surface-overlay: rgba(255, 255, 255, 0.95);
+  --foreground-muted: #3b4a63;
+  --foreground-subtle: rgba(15, 23, 42, 0.6);
+  --border: rgba(15, 23, 42, 0.12);
+  --border-subtle: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.22);
+  --accent-soft: #0369a1;
+  --accent-soft-rgb: 3, 105, 161;
+  --violet: #7c3aed;
+  --violet-rgb: 124, 58, 237;
+  --primary-rgb: 2, 132, 199;
+  --secondary-rgb: 162, 28, 175;
+  --accent-rgb: 109, 40, 217;
+  --success-rgb: 21, 128, 61;
+  --warning-rgb: 180, 83, 9;
+  --destructive-rgb: 220, 38, 38;
+  --destructive-soft: #ef4444;
+  --focus-ring: rgba(2, 132, 199, 0.45);
+  --chat-bg: rgba(255, 255, 255, 0.75);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --shadow-md: 0 12px 28px rgba(15, 23, 42, 0.12);
+  --shadow-lg: 0 20px 48px rgba(15, 23, 42, 0.16);
+}
+
+[data-theme='cyberpunk'] {
+  --surface: oklch(91.51% 0.179 104.32);
+  --surface-elevated: oklch(94.51% 0.179 104.32);
+  --surface-overlay: rgba(255, 255, 255, 0.9);
+  --foreground-muted: rgba(0, 0, 0, 0.68);
+  --foreground-subtle: rgba(0, 0, 0, 0.55);
+  --border: rgba(0, 0, 0, 0.14);
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.24);
+  --accent-soft: #7df7ff;
+  --accent-soft-rgb: 125, 247, 255;
+  --violet: #7c3aed;
+  --violet-rgb: 124, 58, 237;
+  --primary-rgb: 255, 101, 150;
+  --secondary-rgb: 0, 232, 255;
+  --accent-rgb: 206, 116, 255;
+  --success-rgb: 0, 169, 110;
+  --warning-rgb: 255, 190, 0;
+  --destructive-rgb: 255, 88, 97;
+  --destructive-soft: #f87171;
+  --focus-ring: rgba(255, 101, 150, 0.5);
+  --chat-bg: rgba(255, 255, 255, 0.55);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --shadow-md: 0 12px 28px rgba(0, 0, 0, 0.18);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.22);
+}
+
+[data-theme='dracula'] {
+  --surface: #282a36;
+  --surface-elevated: #343746;
+  --surface-overlay: rgba(40, 42, 54, 0.94);
+  --foreground-muted: #b6bad2;
+  --foreground-subtle: rgba(248, 248, 242, 0.6);
+  --border: rgba(248, 248, 242, 0.12);
+  --border-subtle: rgba(248, 248, 242, 0.07);
+  --border-strong: rgba(248, 248, 242, 0.2);
+  --accent-soft: #8be9fd;
+  --accent-soft-rgb: 139, 233, 253;
+  --violet: #bd93f9;
+  --violet-rgb: 189, 147, 249;
+  --primary-rgb: 255, 121, 198;
+  --secondary-rgb: 189, 147, 249;
+  --accent-rgb: 255, 184, 108;
+  --success-rgb: 81, 250, 123;
+  --warning-rgb: 241, 250, 140;
+  --destructive-rgb: 255, 85, 85;
+  --destructive-soft: #ff8f8f;
+  --focus-ring: rgba(255, 121, 198, 0.5);
+  --chat-bg: rgba(40, 42, 54, 0.7);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme='nord'] {
+  --surface: #eceff4;
+  --surface-elevated: #ffffff;
+  --surface-overlay: rgba(255, 255, 255, 0.92);
+  --foreground-muted: #4c566a;
+  --foreground-subtle: rgba(46, 52, 64, 0.6);
+  --border: rgba(46, 52, 64, 0.14);
+  --border-subtle: rgba(46, 52, 64, 0.08);
+  --border-strong: rgba(46, 52, 64, 0.22);
+  --accent-soft: #88c0d0;
+  --accent-soft-rgb: 136, 192, 208;
+  --violet: #b48ead;
+  --violet-rgb: 180, 142, 173;
+  --primary-rgb: 94, 129, 172;
+  --secondary-rgb: 129, 161, 193;
+  --accent-rgb: 136, 192, 208;
+  --success-rgb: 163, 190, 141;
+  --warning-rgb: 235, 203, 139;
+  --destructive-rgb: 191, 97, 106;
+  --destructive-soft: #e8a2ad;
+  --focus-ring: rgba(94, 129, 172, 0.5);
+  --chat-bg: rgba(255, 255, 255, 0.65);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --shadow-md: 0 12px 28px rgba(46, 52, 64, 0.12);
+  --shadow-lg: 0 20px 48px rgba(46, 52, 64, 0.16);
+}
+
+[data-theme='forest'] {
+  --surface: oklch(20.84% 0.008 17.911);
+  --surface-elevated: #2c332a;
+  --surface-overlay: rgba(20, 24, 18, 0.94);
+  --foreground-muted: #aebba6;
+  --foreground-subtle: rgba(255, 255, 255, 0.55);
+  --border: rgba(255, 255, 255, 0.12);
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --accent-soft: #7dd3a8;
+  --accent-soft-rgb: 125, 211, 168;
+  --violet: #a78bfa;
+  --violet-rgb: 167, 139, 250;
+  --primary-rgb: 31, 184, 84;
+  --secondary-rgb: 30, 184, 142;
+  --accent-rgb: 31, 184, 171;
+  --success-rgb: 0, 169, 110;
+  --warning-rgb: 255, 190, 0;
+  --destructive-rgb: 255, 88, 97;
+  --destructive-soft: #fca5a5;
+  --focus-ring: rgba(31, 184, 84, 0.5);
+  --chat-bg: rgba(20, 24, 18, 0.7);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme='synthwave'] {
+  --surface: oklch(15% 0.09 281.288);
+  --surface-elevated: #2b1749;
+  --surface-overlay: rgba(24, 16, 52, 0.94);
+  --foreground-muted: #c3a6ec;
+  --foreground-subtle: rgba(255, 255, 255, 0.55);
+  --border: rgba(255, 255, 255, 0.12);
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --accent-soft: #6ee7f9;
+  --accent-soft-rgb: 110, 231, 249;
+  --violet: #b887ff;
+  --violet-rgb: 184, 135, 255;
+  --primary-rgb: 248, 97, 180;
+  --secondary-rgb: 113, 209, 254;
+  --accent-rgb: 255, 137, 4;
+  --success-rgb: 0, 211, 187;
+  --warning-rgb: 254, 222, 28;
+  --destructive-rgb: 236, 140, 120;
+  --destructive-soft: #fda4af;
+  --focus-ring: rgba(248, 97, 180, 0.5);
+  --chat-bg: rgba(24, 16, 52, 0.7);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+
+/* ==========================================================================
+   Tailwind v4 utilities for ARC tokens (documented @theme inline pattern).
+   Only ARC-unique names are exposed here; primary/secondary/accent/success/
+   warning/error utilities come from daisyUI itself.
+   Enables: bg-background text-foreground border-border bg-card bg-muted
+   text-muted-foreground ring-ring, etc.
+   ========================================================================== */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}

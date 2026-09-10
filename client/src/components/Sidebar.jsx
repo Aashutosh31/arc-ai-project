@@ -12,8 +12,8 @@ const SidebarWrapper = styled.div`
   width: ${({ $collapsed }) => ($collapsed ? `${SIDEBAR_RAIL_WIDTH}px` : `${SIDEBAR_FULL_WIDTH}px`)};
   height: 100%;
   min-height: 0;
-  background: rgba(8, 8, 20, 0.98);
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface);
+  border-right: 1px solid var(--border-subtle);
   transition: width 0.25s ease, transform 0.25s ease;
   overflow: hidden;
 
@@ -44,7 +44,7 @@ const SidebarHeader = styled.div`
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
 `;
 
 const Logo = styled.div`
@@ -82,14 +82,14 @@ const ToggleButton = styled.button`
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: transparent;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--foreground-subtle);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 14px;
   transition: all 0.2s;
-  &:hover { color: #fff; background: rgba(255, 255, 255, 0.05); }
+  &:hover { color: var(--foreground); background: rgba(255, 255, 255, 0.05); }
   @media (max-width: 999px) { display: none; }
 `;
 
@@ -97,12 +97,12 @@ const CloseButton = styled.button`
   display: none;
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--foreground-muted);
   font-size: 22px;
   cursor: pointer;
   padding: 0;
   transition: color 0.2s;
-  &:hover { color: #fff; }
+  &:hover { color: var(--foreground); }
   @media (max-width: 999px) { display: block; }
 `;
 
@@ -125,7 +125,7 @@ const NewChatButton = styled.button`
   gap: 8px;
   width: 100%;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid rgba(var(--primary-rgb), 0.2);
   background: rgba(var(--primary-rgb), 0.06);
   color: var(--primary-hex);
@@ -150,14 +150,14 @@ const SearchWrapper = styled.div`
 const SearchInput = styled.input`
   width: 100%;
   padding: 9px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
   background: rgba(255, 255, 255, 0.03);
-  color: #e2e8f0;
+  color: var(--foreground);
   font-size: 13px;
   outline: none;
   transition: border-color 0.2s;
-  &::placeholder { color: rgba(255, 255, 255, 0.25); }
+  &::placeholder { color: var(--foreground-subtle); }
   &:focus { border-color: rgba(var(--primary-rgb), 0.25); }
 `;
 
@@ -169,7 +169,7 @@ const SearchDropdown = styled.div`
   max-height: 300px;
   overflow-y: auto;
   z-index: 30;
-  background: rgba(10, 10, 24, 0.98);
+  background: var(--surface-overlay);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5);
@@ -182,7 +182,7 @@ const SearchItem = styled.button`
   background: transparent;
   border: none;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  color: #e2e8f0;
+  color: var(--foreground);
   cursor: pointer;
   transition: background 0.15s;
   &:hover { background: rgba(255, 255, 255, 0.04); }
@@ -208,9 +208,9 @@ const ConversationSection = styled.div`
   flex-direction: column;
   gap: 2px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+  scrollbar-color: var(--border-strong) transparent;
   &::-webkit-scrollbar { width: 4px; }
-  &::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
+  &::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 `;
 
 const ConversationItem = styled.button`
@@ -237,13 +237,13 @@ const ConvTitle = styled.span`
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  color: ${({ $active }) => ($active ? '#e2e8f0' : 'rgba(255, 255, 255, 0.65)')};
+  color: ${({ $active }) => ($active ? 'var(--foreground)' : 'rgba(255, 255, 255, 0.65)')};
   font-weight: ${({ $active }) => ($active ? '600' : '400')};
 `;
 
 const ConvDate = styled.span`
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--foreground-subtle);
   white-space: nowrap;
   flex-shrink: 0;
 `;
@@ -256,8 +256,8 @@ const DeleteButton = styled.span`
   width: 22px;
   height: 22px;
   border-radius: 4px;
-  background: rgba(255, 60, 60, 0.15);
-  color: #ff6b6b;
+  background: rgba(var(--destructive-rgb), 0.15);
+  color: var(--destructive);
   font-size: 11px;
   cursor: pointer;
   opacity: 0;
@@ -273,10 +273,10 @@ const DeleteButton = styled.span`
   &:focus-visible {
     opacity: 1;
     pointer-events: auto;
-    outline: 2px solid rgba(255, 60, 60, 0.6);
+    outline: 2px solid rgba(var(--destructive-rgb), 0.6);
     outline-offset: 1px;
   }
-  &:hover { background: rgba(255, 60, 60, 0.25); }
+  &:hover { background: rgba(var(--destructive-rgb), 0.25); }
 `;
 
 const EmptyState = styled.div`
@@ -287,7 +287,7 @@ const EmptyState = styled.div`
   justify-content: center;
   padding: 20px;
   text-align: center;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--foreground-subtle);
   font-size: 12px;
   line-height: 1.6;
 `;
@@ -297,7 +297,7 @@ const SectionLabel = styled.div`
   font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.28);
+  color: var(--foreground-subtle);
   font-weight: 700;
   flex-shrink: 0;
 `;
@@ -311,11 +311,11 @@ const NavButton = styled.button`
   border-radius: 6px;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--foreground-muted);
   font-size: 13px;
   cursor: pointer;
   transition: all 0.15s;
-  &:hover { background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.85); }
+  &:hover { background: rgba(255, 255, 255, 0.04); color: var(--foreground); }
 `;
 
 const NavDivider = styled.div`
@@ -335,7 +335,7 @@ const NavSection = styled.div`
 
 const BottomSection = styled.div`
   flex-shrink: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--border-subtle);
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -355,11 +355,11 @@ const BottomButton = styled.button`
   border-radius: 6px;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--foreground-muted);
   font-size: 13px;
   cursor: pointer;
   transition: all 0.15s;
-  &:hover { background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.8); }
+  &:hover { background: rgba(255, 255, 255, 0.04); color: var(--foreground); }
   ${({ $collapsed }) => $collapsed && `
     justify-content: center;
     padding: 10px 0;
@@ -386,7 +386,7 @@ const RailConversationList = styled.div`
   gap: 6px;
   padding: 8px 6px;
   &::-webkit-scrollbar { width: 4px; }
-  &::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 4px; }
+  &::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 `;
 
 const RailConvButton = styled.button`
@@ -404,7 +404,7 @@ const RailConvButton = styled.button`
   justify-content: center;
   transition: all 0.15s;
   position: relative;
-  &:hover { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.12); }
+  &:hover { background: rgba(255, 255, 255, 0.04); border-color: var(--border); }
 `;
 
 const RailTooltipHost = styled.div`
@@ -425,9 +425,9 @@ const RailTooltip = styled.span`
   white-space: nowrap;
   padding: 6px 10px;
   border-radius: 6px;
-  background: rgba(10, 10, 24, 0.98);
+  background: var(--surface-overlay);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #e2e8f0;
+  color: var(--foreground);
   font-size: 12px;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
   transition: opacity 0.15s, transform 0.15s;
@@ -447,22 +447,22 @@ const ConfirmOverlay = styled.div`
 
 const ConfirmModal = styled.div`
   width: min(340px, 100%);
-  background: rgba(12, 12, 28, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   padding: 20px;
 `;
 
 const ConfirmTitle = styled.h4`
   margin: 0;
   font-size: 15px;
-  color: #f1f5f9;
+  color: var(--foreground);
 `;
 
 const ConfirmText = styled.p`
   margin: 8px 0 0;
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--foreground-muted);
   line-height: 1.5;
 `;
 
@@ -476,9 +476,9 @@ const ConfirmActions = styled.div`
 const CancelBtn = styled.button`
   padding: 8px 14px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
   background: transparent;
-  color: #e2e8f0;
+  color: var(--foreground);
   font-size: 12px;
   cursor: pointer;
 `;
@@ -488,7 +488,7 @@ const DeleteBtn = styled.button`
   border-radius: 6px;
   border: 1px solid rgba(255, 70, 70, 0.4);
   background: rgba(255, 70, 70, 0.1);
-  color: #ff9f9f;
+  color: var(--destructive-soft);
   font-size: 12px;
   cursor: pointer;
 `;
@@ -661,7 +661,7 @@ export const Sidebar = ({
               )}
               {searchResults.map(item => (
                 <SearchItem key={item.id} onClick={() => handleSearchSelect(item)}>
-                  <SearchItemType style={{ color: item.type === 'conversation' ? 'var(--primary-hex)' : item.type === 'message' ? '#ffcf70' : 'var(--violet)' }}>
+                  <SearchItemType style={{ color: item.type === 'conversation' ? 'var(--primary-hex)' : item.type === 'message' ? 'var(--warning)' : 'var(--violet)' }}>
                     {item.type}
                   </SearchItemType>
                   <div style={{ fontWeight: 600, fontSize: 13 }}>{item.title || item.snippet || 'Result'}</div>

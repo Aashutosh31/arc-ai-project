@@ -27,7 +27,7 @@ const Timeline = styled.div`
   position: relative;
   margin-top: 26px;
   padding-left: 26px;
-  border-left: 2px solid rgba(0, 255, 255, 0.18);
+  border-left: 2px solid rgba(var(--primary-rgb), 0.18);
   display: flex;
   flex-direction: column;
   gap: 30px;
@@ -44,8 +44,8 @@ const TimelineItem = styled.div`
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #00ffff, #8a2be2);
-    box-shadow: 0 0 10px rgba(0, 255, 255, 0.6);
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    box-shadow: 0 0 10px rgba(var(--primary-rgb), 0.6);
   }
 `;
 
@@ -55,8 +55,8 @@ const TimelineVersion = styled.div`
   font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.05em;
-  color: #04040f;
-  background: linear-gradient(135deg, #00ffff, #8a2be2);
+  color: var(--primary-foreground);
+  background: linear-gradient(135deg, var(--primary), var(--accent));
   padding: 3px 9px;
   border-radius: 6px;
   margin-bottom: 8px;
@@ -65,14 +65,14 @@ const TimelineVersion = styled.div`
 const TimelineTitle = styled.h3`
   font-size: 16px;
   font-weight: 700;
-  color: #fff;
+  color: var(--foreground);
   margin: 0 0 6px;
 `;
 
 const TimelineText = styled.p`
   font-size: 14px;
   line-height: 1.65;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--foreground-muted);
   margin: 0;
   max-width: 600px;
 `;
@@ -109,7 +109,7 @@ const AuthorCard = styled.div`
   padding: 26px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(0, 255, 255, 0.16);
+  border: 1px solid rgba(var(--primary-rgb), 0.16);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -121,11 +121,11 @@ const AuthorInfo = styled.div`
   h3 {
     font-size: 18px;
     margin: 0 0 4px;
-    color: #fff;
+    color: var(--foreground);
   }
   p {
     font-size: 13.5px;
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--foreground-subtle);
     margin: 0;
     max-width: 440px;
     line-height: 1.6;
@@ -145,29 +145,29 @@ const IconButton = styled.a`
   padding: 9px 13px;
   border-radius: 9px;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--foreground);
   text-decoration: none;
   font-size: 12.5px;
   font-weight: 600;
   transition: all 0.2s ease;
 
   &:hover {
-    border-color: rgba(0, 255, 255, 0.5);
-    color: #00ffff;
+    border-color: rgba(var(--primary-rgb), 0.5);
+    color: var(--primary);
   }
 `;
 
 const LicenseNote = styled.div`
   margin-top: 18px;
   padding: 16px 18px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: rgba(184, 135, 255, 0.06);
   border: 1px solid rgba(184, 135, 255, 0.22);
   font-size: 13.5px;
   line-height: 1.65;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--foreground-muted);
 
-  strong { color: #b887ff; }
+  strong { color: var(--violet); }
 `;
 
 /* ----------------------------------------------------------------------- */
@@ -275,7 +275,7 @@ const About = () => (
       <LicenseNote>
         <strong>MIT Licensed, with attribution required.</strong> ARC-AI is open source — free to use, modify,
         and distribute. Any reuse must credit the original author and link back to the{' '}
-        <a href={LINKS.repo} target="_blank" rel="noopener noreferrer" style={{ color: '#b887ff' }}>
+        <a href={LINKS.repo} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--violet)' }}>
           source repository
         </a>{' '}
         without claiming the project as someone else's own work.

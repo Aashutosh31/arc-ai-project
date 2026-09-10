@@ -79,19 +79,19 @@ const Panel = styled.div`
 
 const Header = styled.div`
   padding: 18px 20px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
 `;
 
 const Title = styled.h3`
   margin: 0;
   font-size: 15px;
   font-weight: 700;
-  color: #f1f5f9;
+  color: var(--foreground);
 `;
 
 const Subtitle = styled.p`
   margin: 6px 0 0;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--foreground-subtle);
   font-size: 12.5px;
   line-height: 1.55;
 `;
@@ -102,11 +102,11 @@ const SearchInput = styled.input`
   border-radius: 9px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
-  color: #e2e8f0;
+  color: var(--foreground);
   font-size: 13px;
   outline: none;
   &:focus { border-color: rgba(var(--primary-rgb), 0.25); }
-  &::placeholder { color: rgba(255, 255, 255, 0.25); }
+  &::placeholder { color: var(--foreground-subtle); }
 `;
 
 const List = styled.div`
@@ -135,13 +135,13 @@ const ToolRow = styled.div`
   border-radius: 9px;
   border: 1px solid transparent;
   transition: all 0.15s;
-  &:hover { background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.06); }
+  &:hover { background: rgba(255, 255, 255, 0.03); border-color: var(--border-subtle); }
 `;
 
 const ToolIcon = styled.span`
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: rgba(var(--primary-rgb), 0.07);
   border: 1px solid rgba(var(--primary-rgb), 0.14);
   display: flex;
@@ -159,7 +159,7 @@ const ToolMain = styled.div`
 const ToolName = styled.div`
   font-size: 13px;
   font-weight: 650;
-  color: #eef2f9;
+  color: var(--foreground);
   font-family: 'SF Mono', Consolas, monospace;
   display: flex;
   align-items: center;
@@ -173,14 +173,14 @@ const RequireBadge = styled.span`
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 999px;
-  color: ${({ $ok }) => ($ok ? '#4dffb0' : '#ffcf70')};
+  color: ${({ $ok }) => ($ok ? 'var(--success)' : 'var(--warning)')};
   border: 1px solid ${({ $ok }) => ($ok ? 'rgba(77,255,176,0.3)' : 'rgba(255,207,112,0.3)')};
   background: ${({ $ok }) => ($ok ? 'rgba(77,255,176,0.06)' : 'rgba(255,207,112,0.06)')};
 `;
 
 const ToolAbout = styled.div`
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--foreground-muted);
   margin-top: 3px;
   line-height: 1.55;
 `;

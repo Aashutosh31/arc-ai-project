@@ -50,7 +50,7 @@ const MessageArea = styled.div`
   }
   &::-webkit-scrollbar { width: 5px; }
   &::-webkit-scrollbar-track { background: transparent; }
-  &::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 4px; }
+  &::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
   &::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.15); }
 
   @media (max-width: 640px) {
@@ -87,7 +87,7 @@ const UserBubble = styled.div`
 const UserText = styled.div`
   font-size: 14.5px;
   line-height: 1.6;
-  color: #e8eef7;
+  color: var(--foreground);
   white-space: pre-wrap;
 `;
 
@@ -120,7 +120,7 @@ const AssistantAvatar = styled.span`
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0;
-  color: #050510;
+  color: var(--primary-foreground);
   background: linear-gradient(135deg, var(--primary-hex), var(--violet));
 `;
 
@@ -129,7 +129,7 @@ const BubbleImage = styled.img`
   max-width: 100%;
   max-height: 220px;
   width: auto;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   margin-top: 8px;
 `;
 
@@ -139,10 +139,10 @@ const DocumentChip = styled.div`
   gap: 6px;
   padding: 6px 10px;
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--foreground-muted);
   margin-top: 8px;
 `;
 
@@ -182,16 +182,16 @@ const TypingIndicator = styled.div`
 
 const StopButton = styled.button`
   align-self: center;
-  background: rgba(255, 60, 60, 0.08);
-  border: 1px solid rgba(255, 60, 60, 0.25);
-  color: #ff7070;
+  background: rgba(var(--destructive-rgb), 0.08);
+  border: 1px solid rgba(var(--destructive-rgb), 0.25);
+  color: var(--destructive);
   padding: 6px 16px;
   border-radius: 999px;
   font-size: 12px;
   cursor: pointer;
   margin-top: 8px;
   transition: all 0.2s;
-  &:hover { background: rgba(255, 60, 60, 0.15); color: #ff9f9f; }
+  &:hover { background: rgba(var(--destructive-rgb), 0.15); color: var(--destructive-soft); }
 `;
 
 const HistoryButton = styled.button`
@@ -238,7 +238,7 @@ const IconButton = styled.button`
   border-radius: 10px;
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--foreground-subtle);
   font-size: 17px;
   cursor: pointer;
   display: flex;
@@ -247,16 +247,16 @@ const IconButton = styled.button`
   flex-shrink: 0;
   transition: all 0.15s;
   position: relative;
-  &:hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
+  &:hover { background: rgba(255, 255, 255, 0.06); color: var(--foreground); }
 `;
 
 const AttachMenu = styled.div`
   position: absolute;
   bottom: calc(100% + 10px);
   left: 0;
-  background: rgba(12, 12, 28, 0.98);
+  background: var(--surface-overlay);
   border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   padding: 6px;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.6);
   min-width: 200px;
@@ -270,7 +270,7 @@ const AttachOption = styled.button`
   border-radius: 7px;
   border: none;
   background: transparent;
-  color: #e2e8f0;
+  color: var(--foreground);
   font-size: 13px;
   cursor: pointer;
   display: flex;
@@ -283,7 +283,7 @@ const AttachOption = styled.button`
 const AttachOptionHint = styled.span`
   margin-left: auto;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--foreground-subtle);
 `;
 
 const AttachMenuDivider = styled.div`
@@ -297,7 +297,7 @@ const TextInput = styled.textarea`
   min-width: 0;
   background: transparent;
   border: none;
-  color: #eef2f9;
+  color: var(--foreground);
   font-size: 14.5px;
   line-height: 1.55;
   resize: none;
@@ -306,7 +306,7 @@ const TextInput = styled.textarea`
   max-height: 140px;
   padding: 5px 2px;
   font-family: inherit;
-  &::placeholder { color: rgba(255, 255, 255, 0.28); }
+  &::placeholder { color: var(--foreground-subtle); }
 `;
 
 const SendButton = styled.button`
@@ -315,7 +315,7 @@ const SendButton = styled.button`
   border-radius: 10px;
   border: none;
   background: ${({ $disabled }) => ($disabled ? 'rgba(var(--primary-rgb), 0.1)' : 'var(--primary-hex)')};
-  color: ${({ $disabled }) => ($disabled ? 'rgba(var(--primary-rgb), 0.35)' : '#050510')};
+  color: ${({ $disabled }) => ($disabled ? 'rgba(var(--primary-rgb), 0.35)' : 'var(--primary-foreground)')};
   cursor: ${({ $disabled }) => ($disabled ? 'not-allowed' : 'pointer')};
   display: flex;
   align-items: center;
@@ -340,7 +340,7 @@ const PreviewItem = styled.div`
 const PreviewImg = styled.img`
   max-height: 48px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
 `;
 
 const RemovePreview = styled.button`
@@ -351,8 +351,8 @@ const RemovePreview = styled.button`
   height: 16px;
   border-radius: 50%;
   border: none;
-  background: rgba(255, 60, 60, 0.85);
-  color: #fff;
+  background: rgba(var(--destructive-rgb), 0.85);
+  color: var(--foreground);
   font-size: 9px;
   cursor: pointer;
   display: flex;
@@ -373,7 +373,7 @@ const EmptyState = styled.div`
 const EmptyTitle = styled.h2`
   margin: 0;
   font-size: clamp(24px, 3.2vw, 34px);
-  color: #f1f5f9;
+  color: var(--foreground);
   font-weight: 700;
   letter-spacing: -0.025em;
 `;
@@ -381,7 +381,7 @@ const EmptyTitle = styled.h2`
 const EmptySub = styled.p`
   margin: 0;
   font-size: 14.5px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--foreground-subtle);
   max-width: 440px;
   line-height: 1.65;
 `;
@@ -400,7 +400,7 @@ const SuggestionChip = styled.button`
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.09);
   background: rgba(255, 255, 255, 0.03);
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--foreground-muted);
   font-size: 13px;
   cursor: pointer;
   transition: all 0.15s;
@@ -410,7 +410,7 @@ const SuggestionChip = styled.button`
   &:hover {
     border-color: rgba(var(--primary-rgb), 0.3);
     background: rgba(var(--primary-rgb), 0.06);
-    color: #d9fbff;
+    color: var(--foreground);
   }
   &:disabled { opacity: 0.4; cursor: not-allowed; }
 `;
@@ -424,14 +424,14 @@ const PresenceBar = styled.div`
   max-width: ${CONTENT_MAX};
   width: 100%;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--foreground-muted);
 `;
 
 const PresenceDot = styled.span`
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: ${({ $status }) => ($status === 'Completed' ? '#4dffb0' : $status === 'Failed' ? '#ff7070' : 'var(--primary-hex)')};
+  background: ${({ $status }) => ($status === 'Completed' ? 'var(--success)' : $status === 'Failed' ? 'var(--destructive)' : 'var(--primary-hex)')};
 `;
 
 const INITIAL_MESSAGES = 60;

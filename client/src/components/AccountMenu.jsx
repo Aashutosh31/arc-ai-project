@@ -13,7 +13,7 @@ const AvatarButton = styled.button`
   background: ${({ $guest }) => ($guest
     ? 'rgba(255, 207, 112, 0.12)'
     : 'linear-gradient(135deg, rgba(var(--primary-rgb),0.25), rgba(184,135,255,0.25))')};
-  color: ${({ $guest }) => ($guest ? '#ffcf70' : '#eafcff')};
+  color: ${({ $guest }) => ($guest ? 'var(--warning)' : 'var(--foreground)')};
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -21,7 +21,7 @@ const AvatarButton = styled.button`
   align-items: center;
   justify-content: center;
   transition: all 0.15s;
-  &:hover { border-color: rgba(255, 255, 255, 0.25); }
+  &:hover { border-color: var(--border); }
 `;
 
 const Menu = styled.div`
@@ -29,9 +29,9 @@ const Menu = styled.div`
   top: calc(100% + 10px);
   right: 0;
   width: 264px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.09);
-  background: rgba(10, 10, 24, 0.98);
+  background: var(--surface-overlay);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
   overflow: hidden;
   z-index: 500;
@@ -39,13 +39,13 @@ const Menu = styled.div`
 
 const Identity = styled.div`
   padding: 14px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
 `;
 
 const Name = styled.div`
   font-size: 13.5px;
   font-weight: 650;
-  color: #f1f5f9;
+  color: var(--foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -53,7 +53,7 @@ const Name = styled.div`
 
 const Sub = styled.div`
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--foreground-subtle);
   margin-top: 3px;
 `;
 
@@ -66,7 +66,7 @@ const SessionBadge = styled.span`
   text-transform: uppercase;
   padding: 3px 9px;
   border-radius: 999px;
-  color: ${({ $guest }) => ($guest ? '#ffcf70' : '#4dffb0')};
+  color: ${({ $guest }) => ($guest ? 'var(--warning)' : 'var(--success)')};
   border: 1px solid ${({ $guest }) => ($guest ? 'rgba(255,207,112,0.3)' : 'rgba(77,255,176,0.3)')};
   background: ${({ $guest }) => ($guest ? 'rgba(255,207,112,0.06)' : 'rgba(77,255,176,0.06)')};
 `;
@@ -77,7 +77,7 @@ const MenuRow = styled.div`
   align-items: center;
   justify-content: space-between;
   font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--foreground-muted);
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 `;
 
@@ -92,7 +92,7 @@ const MenuButton = styled.button`
   padding: 10px 16px;
   border: none;
   background: transparent;
-  color: #dbe3f0;
+  color: var(--foreground-muted);
   font-size: 12.5px;
   cursor: pointer;
   display: flex;
@@ -103,14 +103,14 @@ const MenuButton = styled.button`
 `;
 
 const DangerButton = styled(MenuButton)`
-  color: #ff9f9f;
+  color: var(--destructive-soft);
 `;
 
 const GuestNote = styled.div`
   padding: 10px 16px;
   font-size: 11.5px;
   line-height: 1.55;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--foreground-subtle);
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   a { color: var(--accent-soft); }
 `;

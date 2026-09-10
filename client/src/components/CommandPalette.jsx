@@ -18,7 +18,7 @@ const Palette = styled.div`
   width: min(600px, 100%);
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.09);
-  background: linear-gradient(180deg, rgba(12, 12, 30, 0.98), rgba(8, 8, 20, 0.98));
+  background: linear-gradient(180deg, var(--surface-elevated), var(--surface));
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
   overflow: hidden;
 `;
@@ -28,11 +28,11 @@ const SearchInput = styled.input`
   padding: 16px 18px;
   background: transparent;
   border: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  color: #f1f5f9;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--foreground);
   font-size: 15px;
   outline: none;
-  &::placeholder { color: rgba(255, 255, 255, 0.3); }
+  &::placeholder { color: var(--foreground-subtle); }
 `;
 
 const ResultsList = styled.div`
@@ -45,10 +45,10 @@ const ResultItem = styled.button`
   width: 100%;
   text-align: left;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: none;
   background: ${({ $focused }) => ($focused ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent')};
-  color: #e2e8f0;
+  color: var(--foreground);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -60,7 +60,7 @@ const ResultItem = styled.button`
 const ResultIcon = styled.span`
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: rgba(var(--primary-rgb), 0.08);
   border: 1px solid rgba(var(--primary-rgb), 0.15);
   display: flex;
@@ -78,19 +78,19 @@ const ResultText = styled.div`
 const ResultLabel = styled.div`
   font-size: 13px;
   font-weight: 600;
-  color: #f1f5f9;
+  color: var(--foreground);
 `;
 
 const ResultHint = styled.div`
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--foreground-subtle);
   margin-top: 2px;
 `;
 
 const ActiveTag = styled.span`
   font-size: 10px;
   font-weight: 700;
-  color: #4dffb0;
+  color: var(--success);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   flex-shrink: 0;
@@ -107,12 +107,12 @@ const SectionLabel = styled.div`
 
 const Footer = styled.div`
   padding: 10px 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   gap: 12px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--foreground-subtle);
 `;
 
 const Shortcut = styled.kbd`
@@ -122,7 +122,7 @@ const Shortcut = styled.kbd`
   background: rgba(255, 255, 255, 0.05);
   font-size: 10px;
   font-family: inherit;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--foreground-muted);
 `;
 
 const CommandPalette = ({
