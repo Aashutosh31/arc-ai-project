@@ -63,9 +63,9 @@ const NodeCircle = styled.div`
   font-family: ui-monospace, SFMono-Regular, 'Fira Code', Menlo, Consolas, monospace;
   font-weight: 700;
   font-size: 14px;
-  color: #04040f;
-  background: linear-gradient(135deg, #00ffff, #8a2be2);
-  box-shadow: 0 0 18px rgba(0, 255, 255, 0.35);
+  color: var(--primary-foreground);
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  box-shadow: 0 0 18px rgba(var(--primary-rgb), 0.35);
   flex-shrink: 0;
   position: relative;
   z-index: 2;
@@ -76,7 +76,7 @@ const Connector = styled.div`
   height: 2px;
   margin-top: 23px;
   min-width: 24px;
-  background: linear-gradient(90deg, rgba(0, 255, 255, 0.5), rgba(138, 43, 226, 0.5));
+  background: linear-gradient(90deg, rgba(var(--primary-rgb), 0.5), rgba(var(--accent-rgb), 0.5));
   position: relative;
   overflow: hidden;
 
@@ -87,7 +87,7 @@ const Connector = styled.div`
     left: -30%;
     width: 30%;
     height: 100%;
-    background: linear-gradient(90deg, transparent, #ffffff, transparent);
+    background: linear-gradient(90deg, transparent, var(--foreground), transparent);
     animation: travel 2.6s linear infinite;
   }
 
@@ -107,7 +107,7 @@ const Connector = styled.div`
       left: 0;
       width: 100%;
       height: 30%;
-      background: linear-gradient(180deg, transparent, #ffffff, transparent);
+      background: linear-gradient(180deg, transparent, var(--foreground), transparent);
       animation: travel-v 2.6s linear infinite;
     }
     @keyframes travel-v {
@@ -121,7 +121,7 @@ const StageLabel = styled.div`
   margin-top: 12px;
   font-size: 13.5px;
   font-weight: 700;
-  color: #fff;
+  color: var(--foreground);
 
   @media (max-width: 760px) {
     margin-top: 2px;
@@ -132,7 +132,7 @@ const StageText = styled.div`
   margin-top: 4px;
   font-size: 12.5px;
   line-height: 1.5;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--foreground-subtle);
   max-width: 160px;
 
   @media (max-width: 760px) {

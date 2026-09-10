@@ -5,9 +5,47 @@ import { useChat } from '../contexts/ChatContext';
 import { useTextToSpeech } from './useTextToSpeech';
 import { useServerTtsAudio } from './useServerTtsAudio';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { applyTheme } from '../utils/theme';
 
 // 🚀 FIX: Global deduplication timer shared across all tabs and reloads
 let lastReminderTime = 0;
+
+// 🚀 FIX: multiple components consume useSocket simultaneously (chat,
+// dashboard, voice dock). Listener registration is reference-counted per
+// socket so unmounting one consumer (e.g. closing the voice dock) can not
+// strip the shared listeners out from under the others — which previously
+// silenced streaming, client actions, and status updates app-wide.
+const socketListenerRefs = new WeakMap();
+const SOCKET_EVENTS = [
+  'ai:tts:response:chunk',
+  'ai:tts:mode',
+  'ai:tts:audio',
+  'ai:tts:audio:stop',
+  'bot_error',
+  'ai:client:action',
+  'ai:agent:status',
+  'ai:provider:info',
+  'ai:credits:update',
+];
+
+const acquireSocketListeners = (socket) => {
+  const next = (socketListenerRefs.get(socket) || 0) + 1;
+  socketListenerRefs.set(socket, next);
+};
+
+const releaseSocketListeners = (socket) => {
+  const next = (socketListenerRefs.get(socket) || 1) - 1;
+  if (next <= 0) {
+    socketListenerRefs.delete(socket);
+    for (const event of SOCKET_EVENTS) {
+      try {
+        socket.off(event);
+      } catch {
+        // ignore teardown failures
+      }
+    }
+  }
+};
 
 export const useSocket = () => {
   const { socket, isConnected, authInfo, setAuthInfo } = useContext(SocketContext) || {}; 
@@ -25,6 +63,10 @@ export const useSocket = () => {
 
   useEffect(() => {
     if (!socket) return;
+
+    // Last setup wins so closures stay fresh; cleanup only detaches when
+    // no consumer remains (see socketListenerRefs).
+    acquireSocketListeners(socket);
 
     socket.off('ai:tts:response:chunk');
     socket.off('ai:tts:mode');
@@ -140,7 +182,8 @@ export const useSocket = () => {
         }
       }
       else if (action.type === 'CHANGE_THEME') {
-        document.documentElement.setAttribute('data-theme', action.theme);
+        // Single source of truth: validates, persists, and notifies Settings UI.
+        applyTheme(action.theme);
       }
       else if (action.type === 'PLAY_MEDIA') {
         setMediaData({ videoId: action.videoId, title: action.title });
@@ -181,15 +224,7 @@ export const useSocket = () => {
     });
 
     return () => {
-      socket.off('ai:tts:response:chunk');
-      socket.off('ai:tts:mode');
-      socket.off('ai:tts:audio');
-      socket.off('ai:tts:audio:stop');
-      socket.off('bot_error');
-      socket.off('ai:client:action');
-      socket.off('ai:agent:status');
-      socket.off('ai:provider:info');
-      socket.off('ai:credits:update');
+      releaseSocketListeners(socket);
     };
   }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, enqueueSegment, resetAudio, isInterruptedRef, setMediaData, setAgentStatus, setAuthInfo]);
 

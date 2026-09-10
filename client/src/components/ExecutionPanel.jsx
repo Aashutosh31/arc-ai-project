@@ -8,8 +8,8 @@ const pulse = keyframes`
 `;
 
 const Panel = styled.section`
-  background: linear-gradient(180deg, rgba(10, 10, 28, 0.98), rgba(7, 7, 20, 0.96));
-  border: 1px solid rgba(0, 255, 255, 0.18);
+  background: linear-gradient(180deg, var(--surface), var(--background-subtle));
+  border: 1px solid rgba(var(--primary-rgb), 0.18);
   border-radius: 16px;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
   overflow: hidden;
@@ -21,8 +21,8 @@ const Header = styled.button`
   width: 100%;
   border: 0;
   padding: 14px 14px 12px;
-  background: linear-gradient(135deg, rgba(0, 255, 255, 0.08), rgba(138, 43, 226, 0.08));
-  color: #d7faff;
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.08), rgba(138, 43, 226, 0.08));
+  color: var(--foreground);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -50,7 +50,7 @@ const Title = styled.h3`
   font-size: 13px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #7df7ff;
+  color: var(--accent-soft);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -69,8 +69,8 @@ const StatusPill = styled.span`
   gap: 6px;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(125, 247, 255, 0.24);
-  color: ${({ $status }) => ($status === 'FAILED' ? '#ff7070' : $status === 'BLOCKED' ? '#ffcf70' : $status === 'COMPLETED' ? '#4dffb0' : '#d7faff')};
+  border: 1px solid rgba(var(--accent-soft-rgb), 0.24);
+  color: ${({ $status }) => ($status === 'FAILED' ? 'var(--destructive)' : $status === 'BLOCKED' ? 'var(--warning)' : $status === 'COMPLETED' ? 'var(--success)' : 'var(--foreground)')};
   background: ${({ $status }) => ($status === 'FAILED' ? 'rgba(255, 80, 80, 0.1)' : $status === 'BLOCKED' ? 'rgba(255, 190, 64, 0.12)' : $status === 'COMPLETED' ? 'rgba(0, 255, 120, 0.08)' : 'rgba(255,255,255,0.04)')};
   font-size: 10px;
   letter-spacing: 0.12em;
@@ -91,10 +91,10 @@ const Body = styled.div`
 
 const LiveLine = styled.div`
   padding: 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 255, 255, 0.12);
-  background: rgba(2, 12, 24, 0.74);
-  color: #d7faff;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(var(--primary-rgb), 0.12);
+  background: var(--surface);
+  color: var(--foreground);
   font-size: 13px;
   line-height: 1.5;
   animation: ${pulse} 2.4s ease-in-out infinite;
@@ -112,7 +112,7 @@ const ProgressBar = styled.div`
     height: 100%;
     width: ${({ $progress }) => `${Math.max(6, Math.min(100, $progress || 0))}%`};
     border-radius: inherit;
-    background: linear-gradient(90deg, #00ffff, #8a2be2, #ff00ff);
+    background: linear-gradient(90deg, var(--primary-hex), var(--accent), var(--secondary-hex));
     transition: width 180ms ease;
   }
 `;
@@ -129,9 +129,9 @@ const StepItem = styled.div`
   gap: 10px;
   align-items: start;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: rgba(255,255,255,0.03);
-  border: 1px solid ${({ $state }) => ($state === 'FAILED' ? 'rgba(255,112,112,0.32)' : $state === 'BLOCKED' ? 'rgba(255, 190, 64, 0.34)' : $state === 'COMPLETED' ? 'rgba(77,255,176,0.28)' : $state === 'RUNNING' ? 'rgba(0,255,255,0.3)' : 'rgba(255,255,255,0.08)')};
+  border: 1px solid ${({ $state }) => ($state === 'FAILED' ? 'rgba(255,112,112,0.32)' : $state === 'BLOCKED' ? 'rgba(255, 190, 64, 0.34)' : $state === 'COMPLETED' ? 'rgba(77,255,176,0.28)' : $state === 'RUNNING' ? 'rgba(var(--primary-rgb),0.3)' : 'rgba(255,255,255,0.08)')};
 `;
 
 const Dot = styled.span`
@@ -139,8 +139,8 @@ const Dot = styled.span`
   height: 10px;
   margin-top: 4px;
   border-radius: 50%;
-  background: ${({ $state }) => ($state === 'FAILED' ? '#ff7070' : $state === 'BLOCKED' ? '#ffcf70' : $state === 'COMPLETED' ? '#4dffb0' : $state === 'RUNNING' ? '#00ffff' : 'rgba(255,255,255,0.4)')};
-  box-shadow: ${({ $state }) => ($state === 'RUNNING' ? '0 0 12px rgba(0,255,255,0.5)' : 'none')};
+  background: ${({ $state }) => ($state === 'FAILED' ? 'var(--destructive)' : $state === 'BLOCKED' ? 'var(--warning)' : $state === 'COMPLETED' ? 'var(--success)' : $state === 'RUNNING' ? 'var(--primary-hex)' : 'rgba(255,255,255,0.4)')};
+  box-shadow: ${({ $state }) => ($state === 'RUNNING' ? '0 0 12px rgba(var(--primary-rgb),0.5)' : 'none')};
 `;
 
 const StepMain = styled.div`
@@ -150,7 +150,7 @@ const StepMain = styled.div`
 const StepTitle = styled.div`
   font-size: 12px;
   font-weight: 700;
-  color: #f7fbff;
+  color: var(--foreground);
   text-transform: none;
 `;
 
@@ -179,7 +179,7 @@ const ResultPreview = styled.pre`
 const CancelButton = styled.button`
   border: 1px solid rgba(255, 80, 80, 0.42);
   background: rgba(255, 80, 80, 0.12);
-  color: #ffb0b0;
+  color: var(--destructive-soft);
   border-radius: 999px;
   padding: 8px 12px;
   font-size: 11px;

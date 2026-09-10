@@ -21,7 +21,7 @@ const FeatureLink = styled(Link)`
   align-items: center;
   gap: 6px;
   margin-top: 14px;
-  color: #7df7ff;
+  color: var(--accent-soft);
   text-decoration: none;
   font-size: 13px;
   font-weight: 700;
@@ -32,7 +32,7 @@ const FeatureLink = styled(Link)`
     transition: transform 0.2s ease;
   }
   &:hover::after { transform: translateX(3px); }
-  &:hover { color: #00ffff; }
+  &:hover { color: var(--primary); }
 `;
 
 const FEATURES = [

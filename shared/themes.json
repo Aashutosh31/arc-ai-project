@@ -1,0 +1,77 @@
+{
+  "defaultId": "default",
+  "themes": [
+    {
+      "id": "default",
+      "name": "ARC Midnight",
+      "category": "dark",
+      "description": "Default futuristic theme",
+      "colorScheme": "dark",
+      "preview": ["#00ffff", "#8a2be2", "#020314"]
+    },
+    {
+      "id": "hacker",
+      "name": "Hacker",
+      "category": "dark",
+      "description": "Monochrome terminal green",
+      "colorScheme": "dark",
+      "preview": ["#00ff00", "#4ade80", "#001100"]
+    },
+    {
+      "id": "alert",
+      "name": "Alert",
+      "category": "dark",
+      "description": "High-contrast red theme",
+      "colorScheme": "dark",
+      "preview": ["#ff0000", "#f87171", "#1a0000"]
+    },
+    {
+      "id": "arc-light",
+      "name": "ARC Light",
+      "category": "light",
+      "description": "Clean daylight theme",
+      "colorScheme": "light",
+      "preview": ["#0284c7", "#6d28d9", "#eef1f7"]
+    },
+    {
+      "id": "cyberpunk",
+      "name": "Cyberpunk",
+      "category": "neon",
+      "description": "High-voltage yellow and neon pink",
+      "colorScheme": "light",
+      "preview": ["#ff7598", "#00e5ff", "#ffee00"]
+    },
+    {
+      "id": "dracula",
+      "name": "Dracula",
+      "category": "dark",
+      "description": "Gothic purple and vampire pink",
+      "colorScheme": "dark",
+      "preview": ["#ff79c6", "#bd93f9", "#282a36"]
+    },
+    {
+      "id": "nord",
+      "name": "Nord",
+      "category": "light",
+      "description": "Arctic calm with frost blues",
+      "colorScheme": "light",
+      "preview": ["#5e81ac", "#88c0d0", "#eceff4"]
+    },
+    {
+      "id": "forest",
+      "name": "Forest",
+      "category": "dark",
+      "description": "Deep woods greens",
+      "colorScheme": "dark",
+      "preview": ["#1fb854", "#1eb88e", "#141911"]
+    },
+    {
+      "id": "synthwave",
+      "name": "Synthwave",
+      "category": "neon",
+      "description": "Retro sunset chrome and laser pink",
+      "colorScheme": "dark",
+      "preview": ["#f961b4", "#ff8b04", "#1a1033"]
+    }
+  ]
+}

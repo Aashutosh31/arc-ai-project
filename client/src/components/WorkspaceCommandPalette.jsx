@@ -24,7 +24,7 @@ const Palette = styled.div`
 
 const Header = styled.div`
   padding: 16px 18px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
 `;
 
 const Title = styled.h3`
@@ -32,12 +32,12 @@ const Title = styled.h3`
   font-size: 14px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #7df7ff;
+  color: var(--accent-soft);
 `;
 
 const Subtitle = styled.p`
   margin: 6px 0 0;
-  color: #aeb8d9;
+  color: var(--foreground-muted);
   font-size: 12px;
 `;
 
@@ -59,7 +59,7 @@ const ActionButton = styled.button`
   border-radius: 14px;
   border: 1px solid rgba(var(--primary-rgb), 0.18);
   background: rgba(255, 255, 255, 0.03);
-  color: #f4fbff;
+  color: var(--foreground);
   cursor: pointer;
   transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
 
@@ -78,13 +78,13 @@ const ActionLabel = styled.div`
 const ActionHint = styled.div`
   margin-top: 5px;
   font-size: 12px;
-  color: #aeb8d9;
+  color: var(--foreground-muted);
   line-height: 1.4;
 `;
 
 const Footer = styled.div`
   padding: 0 14px 14px;
-  color: #8fa2cf;
+  color: var(--foreground-muted);
   font-size: 12px;
 `;
 

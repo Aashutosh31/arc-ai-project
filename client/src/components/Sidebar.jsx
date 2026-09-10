@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { useConversation } from '../contexts/ConversationContext';
 import WorkspaceSwitcher from './WorkspaceSwitcher';
 
-const SIDEBAR_RAIL_WIDTH = 84;
+const SIDEBAR_RAIL_WIDTH = 68;
 const SIDEBAR_FULL_WIDTH = 280;
 
 const SidebarWrapper = styled.div`
@@ -12,28 +12,22 @@ const SidebarWrapper = styled.div`
   width: ${({ $collapsed }) => ($collapsed ? `${SIDEBAR_RAIL_WIDTH}px` : `${SIDEBAR_FULL_WIDTH}px`)};
   height: 100%;
   min-height: 0;
-  background: linear-gradient(180deg, rgba(10, 10, 20, 0.95) 0%, rgba(15, 15, 30, 0.95) 100%);
-  border-right: 2px solid rgba(var(--primary-rgb), 0.2);
-  backdrop-filter: blur(10px);
-  transition: width 0.28s ease, transform 0.28s ease, box-shadow 0.28s ease;
+  background: var(--surface);
+  border-right: 1px solid var(--border-subtle);
+  transition: width 0.25s ease, transform 0.25s ease;
   overflow: hidden;
-  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
 
   @media (max-width: 999px) {
     position: fixed;
     left: 0;
     top: 0;
     z-index: 1000;
-    width: 260px;
+    width: 280px;
     height: 100vh;
     height: 100dvh;
     max-height: 100dvh;
     transform: translateX(${props => props.$isOpen ? '0' : '-100%'});
     box-shadow: 4px 0 32px rgba(0, 0, 0, 0.7);
-  }
-
-  @media (max-width: 480px) {
-    width: 240px;
   }
 `;
 
@@ -43,137 +37,374 @@ const SidebarCore = styled.div`
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  opacity: ${({ $collapsed }) => ($collapsed ? 0.98 : 1)};
 `;
 
 const SidebarHeader = styled.div`
-  padding: 18px 16px;
-  border-bottom: 1px solid rgba(var(--primary-rgb), 0.15);
+  padding: 16px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 10px;
-
-  @media (max-width: 768px) {
-    padding: 16px 14px;
-  }
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
 `;
 
-const SidebarHeaderStack = styled.div`
+const Logo = styled.div`
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, var(--primary-hex), var(--violet));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+`;
+
+const RailLogo = styled.div`
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.12), rgba(var(--violet-rgb), 0.08));
+  border: 1px solid rgba(var(--primary-rgb), 0.18);
+  color: var(--primary-hex);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: all 0.2s;
+  &:hover { border-color: rgba(var(--primary-rgb), 0.35); }
+`;
+
+const ToggleButton = styled.button`
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
+  color: var(--foreground-subtle);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: all 0.2s;
+  &:hover { color: var(--foreground); background: rgba(255, 255, 255, 0.05); }
+  @media (max-width: 999px) { display: none; }
+`;
+
+const CloseButton = styled.button`
+  display: none;
+  background: none;
+  border: none;
+  color: var(--foreground-muted);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s;
+  &:hover { color: var(--foreground); }
+  @media (max-width: 999px) { display: block; }
+`;
+
+const TopActions = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  flex-shrink: 0;
+  ${({ $collapsed }) => $collapsed && `
+    align-items: center;
+    padding: 12px 8px;
+  `}
+`;
+
+const NewChatButton = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(var(--primary-rgb), 0.2);
+  background: rgba(var(--primary-rgb), 0.06);
+  color: var(--primary-hex);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  &:hover { background: rgba(var(--primary-rgb), 0.12); border-color: rgba(var(--primary-rgb), 0.35); }
+  ${({ $collapsed }) => $collapsed && `
+    padding: 10px 0;
+    font-size: 18px;
+  `}
+`;
+
+const SearchWrapper = styled.div`
+  padding: 0 12px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 5;
+`;
+
+const SearchInput = styled.input`
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--foreground);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+  &::placeholder { color: var(--foreground-subtle); }
+  &:focus { border-color: rgba(var(--primary-rgb), 0.25); }
+`;
+
+const SearchDropdown = styled.div`
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 12px;
+  right: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 30;
+  background: var(--surface-overlay);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5);
+`;
+
+const SearchItem = styled.button`
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--foreground);
+  cursor: pointer;
+  transition: background 0.15s;
+  &:hover { background: rgba(255, 255, 255, 0.04); }
+  &:last-child { border-bottom: none; }
+`;
+
+const SearchItemType = styled.div`
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-bottom: 2px;
+`;
+
+const ConversationSection = styled.div`
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+  display: ${({ $collapsed }) => ($collapsed ? 'none' : 'flex')};
+  flex-direction: column;
+  gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+  &::-webkit-scrollbar { width: 4px; }
+  &::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+`;
+
+const ConversationItem = styled.button`
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: none;
+  background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.06)' : 'transparent')};
+  cursor: pointer;
+  transition: background 0.15s;
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
+  position: relative;
+  &:hover { background: rgba(255, 255, 255, 0.04); }
 `;
 
-const Logo = styled.div`
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--primary-hex);
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  background: linear-gradient(135deg, var(--primary-hex), var(--secondary-hex));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-
-  @media (max-width: 768px) {
-    font-size: 16px;
-  }
+const ConvTitle = styled.span`
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: ${({ $active }) => ($active ? 'var(--foreground)' : 'rgba(255, 255, 255, 0.65)')};
+  font-weight: ${({ $active }) => ($active ? '600' : '400')};
 `;
 
-const RailLogo = styled.div`
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
+const ConvDate = styled.span`
+  font-size: 10px;
+  color: var(--foreground-subtle);
+  white-space: nowrap;
+  flex-shrink: 0;
+`;
+
+const DeleteButton = styled.span`
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: rgba(var(--destructive-rgb), 0.15);
+  color: var(--destructive);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.2), rgba(var(--secondary-rgb), 0.12));
-  border: 1px solid rgba(var(--primary-rgb), 0.3);
-  color: var(--primary-hex);
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  box-shadow: 0 0 20px rgba(var(--primary-rgb), 0.12);
+  transition: all 0.15s;
+  ${ConversationItem}:hover & {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  &:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+    outline: 2px solid rgba(var(--destructive-rgb), 0.6);
+    outline-offset: 1px;
+  }
+  &:hover { background: rgba(var(--destructive-rgb), 0.25); }
 `;
 
-const LogoFull = styled.span`
-  display: ${({ $collapsed }) => ($collapsed ? 'none' : 'inline')};
-
-  @media (max-width: 768px) {
-    display: inline;
-  }
-`;
-
-const LogoCompact = styled.span`
-  display: ${({ $collapsed }) => ($collapsed ? 'inline' : 'none')};
-
-  @media (max-width: 768px) {
-    display: none;
-  }
-`;
-
-const SidebarToggleButton = styled.button`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  border: 1px solid rgba(var(--primary-rgb), 0.24);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--primary-hex);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-
-  &:hover {
-    background: rgba(var(--primary-rgb), 0.12);
-    border-color: rgba(var(--primary-rgb), 0.4);
-  }
-
-  @media (max-width: 768px) {
-    display: none;
-  }
-`;
-
-const RailActionRow = styled.div`
+const EmptyState = styled.div`
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
+  padding: 20px;
+  text-align: center;
+  color: var(--foreground-subtle);
+  font-size: 12px;
+  line-height: 1.6;
+`;
+
+const SectionLabel = styled.div`
+  padding: 10px 14px 4px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--foreground-subtle);
+  font-weight: 700;
+  flex-shrink: 0;
+`;
+
+const NavButton = styled.button`
+  display: flex;
+  align-items: center;
   gap: 10px;
-  padding: 14px 0 12px;
-  border-bottom: 1px solid rgba(var(--primary-rgb), 0.14);
-`;
-
-const RailActionButton = styled.button`
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
-  border: 1px solid ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.65)' : 'rgba(var(--primary-rgb), 0.24)')};
-  background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.18)' : 'rgba(255, 255, 255, 0.04)')};
-  color: ${({ $active }) => ($active ? '#f5ffff' : 'var(--primary-hex)')};
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--foreground-muted);
+  font-size: 13px;
   cursor: pointer;
-  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
-  box-shadow: ${({ $active }) => ($active ? '0 0 18px rgba(var(--primary-rgb), 0.18)' : 'none')};
-
-  &:hover {
-    transform: translateY(-1px) scale(1.02);
-    border-color: rgba(var(--primary-rgb), 0.5);
-    background: rgba(var(--primary-rgb), 0.14);
-  }
+  transition: all 0.15s;
+  &:hover { background: rgba(255, 255, 255, 0.04); color: var(--foreground); }
 `;
 
-const RailActionIcon = styled.span`
-  display: inline-flex;
+const NavDivider = styled.div`
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 8px 12px 4px;
+  flex-shrink: 0;
+`;
+
+const NavSection = styled.div`
+  padding: 4px 8px 0;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const BottomSection = styled.div`
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-subtle);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  ${({ $collapsed }) => $collapsed && `
+    align-items: center;
+    padding: 8px;
+  `}
+`;
+
+const BottomButton = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--foreground-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  &:hover { background: rgba(255, 255, 255, 0.04); color: var(--foreground); }
+  ${({ $collapsed }) => $collapsed && `
+    justify-content: center;
+    padding: 10px 0;
+    font-size: 0;
+    &::before { content: attr(data-icon); font-size: 16px; }
+  `}
+`;
+
+const BottomIcon = styled.span`
+  width: 20px;
+  text-align: center;
+  font-size: 14px;
+  flex-shrink: 0;
+`;
+
+const RailConversationList = styled.div`
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  &::-webkit-scrollbar { width: 4px; }
+  &::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+`;
+
+const RailConvButton = styled.button`
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.35)' : 'rgba(255, 255, 255, 0.06)')};
+  background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent')};
+  color: ${({ $active }) => ($active ? 'var(--primary-hex)' : 'rgba(255, 255, 255, 0.5)')};
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1;
+  transition: all 0.15s;
+  position: relative;
+  &:hover { background: rgba(255, 255, 255, 0.04); border-color: var(--border); }
 `;
 
 const RailTooltipHost = styled.div`
@@ -181,458 +412,32 @@ const RailTooltipHost = styled.div`
   display: flex;
   justify-content: center;
   width: 100%;
-
-  &:hover > span {
-    opacity: 1;
-    transform: translateX(0);
-    pointer-events: auto;
-  }
+  &:hover > span { opacity: 1; transform: translateX(0); }
 `;
 
 const RailTooltip = styled.span`
   position: absolute;
-  left: calc(100% + 10px);
+  left: calc(100% + 8px);
   top: 50%;
   transform: translateX(-4px) translateY(-50%);
   opacity: 0;
   pointer-events: none;
   white-space: nowrap;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(7, 10, 24, 0.98);
-  border: 1px solid rgba(var(--primary-rgb), 0.2);
-  color: #f3fbff;
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.45);
-  transition: opacity 150ms ease, transform 150ms ease;
-  z-index: 20;
-`;
-
-const NewChatButton = styled.button`
-  padding: 10px 14px;
-  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.25), rgba(var(--secondary-rgb), 0.15));
-  border: 1px solid rgba(var(--primary-rgb), 0.4);
-  border-radius: 8px;
-  color: var(--primary-hex);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
-
-  &:hover {
-    background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.35), rgba(var(--secondary-rgb), 0.25));
-    border-color: rgba(var(--primary-rgb), 0.6);
-    transform: translateY(-1px);
-  }
-
-  &:active {
-    transform: translateY(0);
-  }
-
-  ${({ $collapsed }) => $collapsed && `
-    width: 100%;
-    min-width: 44px;
-    padding: 10px 0;
-    font-size: 0;
-
-    &::before {
-      content: '+';
-      font-size: 16px;
-      font-weight: 700;
-    }
-  `}
-
-  @media (max-width: 480px) {
-    padding: 9px 12px;
-    font-size: 12px;
-  }
-`;
-
-const CommandPaletteButton = styled.button`
-  padding: 10px 14px;
-  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.15), rgba(var(--secondary-rgb), 0.08));
-  border: 1px solid rgba(var(--primary-rgb), 0.3);
-  border-radius: 8px;
-  color: var(--primary-hex);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-  justify-content: center;
-
-  &:hover {
-    background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.25), rgba(var(--secondary-rgb), 0.15));
-    border-color: rgba(var(--primary-rgb), 0.5);
-    transform: translateY(-1px);
-  }
-
-  &:active {
-    transform: translateY(0);
-  }
-
-  ${({ $collapsed }) => $collapsed && `
-    width: 100%;
-    min-width: 44px;
-    padding: 10px 0;
-    font-size: 0;
-    gap: 0;
-
-    &::before {
-      content: '⌘';
-      font-size: 16px;
-      font-weight: 700;
-    }
-  `}
-
-  @media (max-width: 480px) {
-    padding: 9px 12px;
-    font-size: 12px;
-    gap: 8px;
-  }
-`;
-
-const ActionButtonsContainer = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px 12px 14px 12px;
-  border-bottom: 1px solid rgba(var(--primary-rgb), 0.15);
-  flex-shrink: 0;
-
-  ${({ $collapsed }) => $collapsed && `
-    align-items: stretch;
-    padding: 12px 10px 12px 10px;
-  `}
-
-  @media (max-width: 768px) {
-    gap: 9px;
-    padding: 14px 10px 12px 10px;
-  }
-
-  @media (max-width: 480px) {
-    gap: 8px;
-    padding: 12px 8px 10px 8px;
-  }
-`;
-
-const SearchSection = styled.div`
-  flex-shrink: 0;
-  padding: 12px 12px 0;
-  position: relative;
-  z-index: 5;
-  overflow: visible;
-`;
-
-const SearchResultsDropdown = styled.div`
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 12px;
-  right: 12px;
-  max-height: 320px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  z-index: 30;
-  background: rgba(7, 10, 24, 0.96);
-  border: 1px solid rgba(var(--primary-rgb), 0.18);
-  border-radius: 12px;
-  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.42);
-  backdrop-filter: blur(8px);
-  -webkit-overflow-scrolling: touch;
-`;
-
-const CommandPaletteIcon = styled.div`
-  width: 24px;
-  height: 24px;
-  min-width: 24px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.4), rgba(var(--secondary-rgb), 0.3));
-  border: 1.5px solid rgba(var(--primary-rgb), 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  color: var(--primary-hex);
-  font-weight: 700;
-`;
-
-const ActionLabel = styled.span`
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-`;
-
-const CloseButton = styled.button`
-  display: none;
-  background: none;
-  border: none;
-  color: var(--primary-hex);
-  font-size: 24px;
-  cursor: pointer;
-  padding: 0;
-  transition: all 0.3s ease;
-
-  &:hover {
-    color: var(--secondary-hex);
-  }
-
-  @media (max-width: 999px) {
-    display: block;
-  }
-`;
-
-const ConversationListWrapper = styled.div`
-  flex: 1;
-  min-height: 0; /* IMPORTANT */
-  min-width: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-
-  padding: 12px 10px;
-  display: ${({ $collapsed }) => ($collapsed ? 'none' : 'flex')};
-  flex-direction: column;
-  gap: 10px;
-
-  scrollbar-gutter: stable;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  scroll-padding-bottom: 20px;
-
-  /* smoother scrolling */
-  scroll-behavior: smooth;
-
-  /* Custom scrollbar */
-  &::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.15);
-    border-radius: 10px;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: rgba(var(--primary-rgb), 0.28);
-    border-radius: 10px;
-  }
-
-  &::-webkit-scrollbar-thumb:hover {
-    background: rgba(var(--primary-rgb), 0.5);
-  }
-
-  @media (max-width: 480px) {
-    padding: 8px 6px 20px;
-    gap: 6px;
-    scroll-padding-bottom: 28px;
-  }
-`;
-
-const RailConversationList = styled.div`
-  display: flex;
-  flex-direction: column;
-
-  flex: 1;
-  min-height: 0; /* IMPORTANT */
-  min-width: 0;
-
-  overflow-y: auto;
-  overflow-x: hidden;
-
-  align-items: stretch; /* better than center */
-  gap: 8px;
-
-  padding: 10px 0 12px;
-  padding-inline: 8px;
-
-  scrollbar-gutter: stable;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-
-  &::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: rgba(var(--primary-rgb), 0.26);
-    border-radius: 999px;
-  }
-`;
-
-const RailConversationButton = styled.button`
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
-  border: 1px solid ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.75)' : 'rgba(var(--primary-rgb), 0.15)')};
-  background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.16)' : 'rgba(255, 255, 255, 0.03)')};
-  color: ${({ $active }) => ($active ? '#ffffff' : '#d5dbf0')};
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  box-shadow: ${({ $active }) => ($active ? '0 0 18px rgba(var(--primary-rgb), 0.18)' : 'none')};
-  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
-
-  &:hover {
-    transform: translateY(-1px) scale(1.03);
-    border-color: rgba(var(--primary-rgb), 0.45);
-    background: rgba(var(--primary-rgb), 0.1);
-  }
-`;
-
-const RailConversationAvatar = styled.span`
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 11px;
-`;
-
-const RailActiveDot = styled.span`
-  position: absolute;
-  bottom: 5px;
-  right: 5px;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: #26ff8a;
-  box-shadow: 0 0 8px rgba(38, 255, 138, 0.85);
-`;
-
-const RailDivider = styled.div`
-  width: 26px;
-  height: 1px;
-  background: rgba(var(--primary-rgb), 0.16);
-  margin: 2px 0;
-`;
-
-const getConversationGlyph = (conversation) => {
-  const title = String(conversation?.title || 'Conversation').trim();
-  const firstChar = title.charAt(0).toUpperCase();
-  return firstChar || 'A';
-};
-
-const ConversationItem = styled.div`
-  padding: 9px 12px;
-  min-height: 58px;
-  background: ${props =>
-    props.$isActive
-      ? 'linear-gradient(135deg, rgba(var(--primary-rgb), 0.2), rgba(var(--secondary-rgb), 0.1))'
-      : 'rgba(255, 255, 255, 0.02)'};
-  border: 1px solid ${props =>
-    props.$isActive
-      ? 'rgba(var(--primary-rgb), 0.4)'
-      : 'rgba(var(--primary-rgb), 0.1)'};
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.25s ease;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  overflow: hidden;
-  min-width: 0;
-  flex-shrink: 0;
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(var(--primary-rgb), 0.25);
-  }
-
-  @media (max-width: 480px) {
-    padding: 10px 10px;
-    font-size: 13px;
-  }
-`;
-
-const ConversationTitle = styled.div`
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 14px;
-  font-weight: 500;
-  color: ${props => (props.$isActive ? 'var(--primary-hex)' : '#e0e0e0')};
-  transition: color 0.3s ease;
-`;
-
-const ConversationMeta = styled.div`
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
-  white-space: nowrap;
-  margin-top: 4px;
-  line-height: 1.2;
-`;
-
-const DeleteButton = styled.button`
-  padding: 4px 6px;
-  background: rgba(255, 60, 60, 0.15);
-  border: 1px solid rgba(255, 60, 60, 0.3);
+  padding: 6px 10px;
   border-radius: 6px;
-  color: #ff6b6b;
+  background: var(--surface-overlay);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--foreground);
   font-size: 12px;
-  cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-  flex-shrink: 0;
-
-  ${ConversationItem}:hover & {
-    opacity: 1;
-    pointer-events: auto;
-  }
-
-  &:focus-visible {
-    opacity: 1;
-    pointer-events: auto;
-  }
-
-  &:hover {
-    background: rgba(255, 60, 60, 0.25);
-    border-color: rgba(255, 60, 60, 0.5);
-  }
-
-  @media (max-width: 480px) {
-    opacity: 1;
-    padding: 3px 5px;
-    font-size: 10px;
-  }
-`;
-
-const EmptyState = styled.div`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  padding: 20px;
-  text-align: center;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 13px;
-  line-height: 1.6;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 20;
 `;
 
 const ConfirmOverlay = styled.div`
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -641,50 +446,49 @@ const ConfirmOverlay = styled.div`
 `;
 
 const ConfirmModal = styled.div`
-  width: min(360px, 100%);
-  background: linear-gradient(180deg, rgba(16, 16, 36, 0.98), rgba(10, 10, 24, 0.98));
-  border: 1px solid rgba(var(--primary-rgb), 0.35);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.55);
-  border-radius: 14px;
-  padding: 16px;
+  width: min(340px, 100%);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 20px;
 `;
 
 const ConfirmTitle = styled.h4`
   margin: 0;
   font-size: 15px;
-  color: #f6f8ff;
+  color: var(--foreground);
 `;
 
 const ConfirmText = styled.p`
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   font-size: 13px;
-  color: #b8c2e8;
-  line-height: 1.45;
+  color: var(--foreground-muted);
+  line-height: 1.5;
 `;
 
 const ConfirmActions = styled.div`
-  margin-top: 14px;
+  margin-top: 16px;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 `;
 
-const CancelButton = styled.button`
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.04);
-  color: #e8ecff;
+const CancelBtn = styled.button`
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--foreground);
   font-size: 12px;
   cursor: pointer;
 `;
 
-const ConfirmDeleteButton = styled.button`
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 70, 70, 0.5);
-  background: rgba(255, 70, 70, 0.15);
-  color: #ff9f9f;
+const DeleteBtn = styled.button`
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 70, 70, 0.4);
+  background: rgba(255, 70, 70, 0.1);
+  color: var(--destructive-soft);
   font-size: 12px;
   cursor: pointer;
 `;
@@ -693,10 +497,9 @@ const formatDate = (date) => {
   const d = new Date(date);
   const now = new Date();
   const diff = now - d;
-
-  if (diff < 3600000) return 'Just now'; // < 1 hour
-  if (diff < 86400000) return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }); // < 1 day
-  if (diff < 604800000) return d.toLocaleDateString('en-US', { weekday: 'short' }); // < 7 days
+  if (diff < 3600000) return 'Now';
+  if (diff < 86400000) return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  if (diff < 604800000) return d.toLocaleDateString('en-US', { weekday: 'short' });
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
@@ -705,182 +508,119 @@ export const Sidebar = ({
   collapsed = false,
   onToggleCollapse = () => {},
   onClose = () => {},
-  onCommandPaletteClick = () => {}
+  onCommandPaletteClick = () => {},
+  onOpenSettings = () => {},
+  onOpenTools = () => {},
+  onOpenAccount = () => {},
+  searchFocusToken = 0,
 }) => {
   const {
-    conversations,
-    activeConversationId,
-    loadingConversations,
-    createNewConversation,
-    switchConversation,
-    deleteConversation,
-    searchWorkspace,
-    setFocusedMessageId
+    conversations, activeConversationId, loadingConversations,
+    createNewConversation, switchConversation, deleteConversation,
+    searchWorkspace, setFocusedMessageId
   } = useConversation();
 
-  const [hoveredId, setHoveredId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState('');
-  const [pendingDeleteConversation, setPendingDeleteConversation] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const searchInputRef = React.useRef(null);
+
+  useEffect(() => {
+    if (searchFocusToken > 0) {
+      searchInputRef.current?.focus();
+    }
+  }, [searchFocusToken]);
 
   const handleNewChat = async () => {
-    try {
-      await createNewConversation();
-      onClose(); // Close sidebar on mobile after creating new chat
-    } catch (err) {
-      console.error('Failed to create conversation:', err);
-    }
+    try { await createNewConversation(); onClose(); } catch (e) { console.error(e); }
   };
 
   useEffect(() => {
-    const query = String(searchQuery || '').trim();
-    if (!query) {
-      setSearchResults([]);
-      setSearchError('');
-      setSearchLoading(false);
-      return undefined;
-    }
-
-    let isCancelled = false;
+    const q = String(searchQuery || '').trim();
+    if (!q) { setSearchResults([]); return; }
+    let cancelled = false;
     setSearchLoading(true);
-    setSearchError('');
-
     const timer = setTimeout(() => {
-      searchWorkspace(query, { limit: 8 })
-        .then((result) => {
-          if (isCancelled) return;
-          setSearchResults(Array.isArray(result?.items) ? result.items : []);
-        })
-        .catch((error) => {
-          if (isCancelled) return;
-          setSearchError(error?.message || 'Search failed');
-          setSearchResults([]);
-        })
-        .finally(() => {
-          if (!isCancelled) setSearchLoading(false);
-        });
+      searchWorkspace(q, { limit: 6 })
+        .then(r => { if (!cancelled) setSearchResults(Array.isArray(r?.items) ? r.items : []); })
+        .catch(() => { if (!cancelled) setSearchResults([]); })
+        .finally(() => { if (!cancelled) setSearchLoading(false); });
     }, 250);
-
-    return () => {
-      isCancelled = true;
-      clearTimeout(timer);
-    };
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [searchQuery, searchWorkspace]);
 
-  const groupedSearchResults = useMemo(() => {
-    const conversationsHit = searchResults.filter((item) => item.type === 'conversation');
-    const messageHit = searchResults.filter((item) => item.type === 'message');
-    const memoryHit = searchResults.filter((item) => item.type !== 'conversation' && item.type !== 'message');
-    return { conversationsHit, messageHit, memoryHit };
-  }, [searchResults]);
-
   const handleSearchSelect = (item) => {
-    if (item?.conversationId) {
-      switchConversation(item.conversationId);
-    }
-    if (item?.messageId && setFocusedMessageId) {
-      setFocusedMessageId(item.messageId);
-    }
+    if (item?.conversationId) switchConversation(item.conversationId);
+    if (item?.messageId && setFocusedMessageId) setFocusedMessageId(item.messageId);
     onClose();
     setSearchQuery('');
     setSearchResults([]);
   };
 
-  const handleDelete = async (e, conversationId) => {
-    e.stopPropagation();
-    const selectedConversation = conversations.find((conv) => conv._id === conversationId) || null;
-    setPendingDeleteConversation(selectedConversation);
-  };
+  const handleDelete = (e, conv) => { e.stopPropagation(); setPendingDelete(conv); };
 
   const handleConfirmDelete = async () => {
-    if (!pendingDeleteConversation?._id || isDeleting) return;
-
-    try {
-      setIsDeleting(true);
-      await deleteConversation(pendingDeleteConversation._id);
-      setPendingDeleteConversation(null);
-    } catch (err) {
-      console.error('Failed to delete conversation:', err);
-    } finally {
-      setIsDeleting(false);
-    }
+    if (!pendingDelete?._id || isDeleting) return;
+    try { setIsDeleting(true); await deleteConversation(pendingDelete._id); setPendingDelete(null); }
+    catch (e) { console.error(e); }
+    finally { setIsDeleting(false); }
   };
-
-  const renderRailTooltip = (label) => <RailTooltip>{label}</RailTooltip>;
 
   if (collapsed) {
     return (
       <SidebarWrapper $isOpen={isOpen} $collapsed>
-        <SidebarCore $collapsed>
-          <RailTooltipHost style={{ paddingTop: '12px' }}>
-            <RailActionButton type="button" onClick={onToggleCollapse} aria-label="Expand sidebar">
-              <RailLogo>ARC</RailLogo>
-            </RailActionButton>
-            {renderRailTooltip('Expand sidebar')}
-          </RailTooltipHost>
-
-          <RailActionRow>
+        <SidebarCore>
+          <div style={{ padding: '10px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
             <RailTooltipHost>
-              <RailActionButton type="button" onClick={handleNewChat} aria-label="New Chat">
-                <RailActionIcon>+</RailActionIcon>
-              </RailActionButton>
-              {renderRailTooltip('New Chat')}
+              <RailLogo onClick={onToggleCollapse}>A</RailLogo>
+              <RailTooltip>Expand sidebar</RailTooltip>
             </RailTooltipHost>
-
             <RailTooltipHost>
-              <RailActionButton type="button" onClick={onCommandPaletteClick} aria-label="Command Palette">
-                <RailActionIcon>⌘</RailActionIcon>
-              </RailActionButton>
-              {renderRailTooltip('Command Palette')}
+              <NewChatButton $collapsed onClick={handleNewChat} aria-label="New Chat">+</NewChatButton>
+              <RailTooltip>New Chat</RailTooltip>
             </RailTooltipHost>
-          </RailActionRow>
+            <RailTooltipHost>
+              <BottomButton $collapsed data-icon="⌘" onClick={onCommandPaletteClick} aria-label="Command Palette" />
+              <RailTooltip>Commands (Ctrl K)</RailTooltip>
+            </RailTooltipHost>
+            <RailTooltipHost>
+              <BottomButton $collapsed data-icon="🛠️" onClick={() => { onOpenTools(); onClose(); }} aria-label="Tools" />
+              <RailTooltip>Tools</RailTooltip>
+            </RailTooltipHost>
+          </div>
 
-          <RailDivider />
+          <div style={{ width: '24px', height: '1px', background: 'rgba(255,255,255,0.06)', margin: '4px auto' }} />
 
           <RailConversationList>
             {loadingConversations && (
-              <RailTooltipHost>
-                <RailConversationButton type="button" disabled aria-label="Loading conversations">
-                  <RailConversationAvatar>...</RailConversationAvatar>
-                </RailConversationButton>
-                {renderRailTooltip('Loading conversations')}
-              </RailTooltipHost>
+              <div style={{ color: 'rgba(255,255,255,0.2)', fontSize: 11, padding: '8px 0' }}>...</div>
             )}
-
-            {!loadingConversations && conversations.length === 0 && (
-              <RailTooltipHost>
-                <RailConversationButton type="button" disabled aria-label="No conversations yet">
-                  <RailConversationAvatar>+</RailConversationAvatar>
-                </RailConversationButton>
-                {renderRailTooltip('No conversations yet')}
+            {conversations.map(conv => (
+              <RailTooltipHost key={conv._id}>
+                <RailConvButton
+                  $active={activeConversationId === conv._id}
+                  onClick={() => switchConversation(conv._id)}
+                  aria-label={conv.title || 'Conversation'}
+                >
+                  {(conv.title || 'A').charAt(0).toUpperCase()}
+                </RailConvButton>
+                <RailTooltip>{conv.title || 'Conversation'}</RailTooltip>
               </RailTooltipHost>
-            )}
-
-            {conversations.map((conv) => {
-              const isActive = activeConversationId === conv._id;
-              const glyph = getConversationGlyph(conv);
-
-              return (
-                <RailTooltipHost key={conv._id}>
-                  <RailConversationButton
-                    type="button"
-                    $active={isActive}
-                    onClick={() => {
-                      switchConversation(conv._id);
-                    }}
-                    aria-label={conv.title || 'Conversation'}
-                  >
-                    <RailConversationAvatar>{glyph}</RailConversationAvatar>
-                    {isActive && <RailActiveDot />}
-                  </RailConversationButton>
-                  {renderRailTooltip(conv.title || 'Conversation')}
-                </RailTooltipHost>
-              );
-            })}
+            ))}
           </RailConversationList>
+
+          <div style={{ padding: '8px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <RailTooltipHost>
+              <BottomButton $collapsed data-icon="⚙" onClick={onOpenSettings} aria-label="Settings" />
+              <RailTooltip>Settings</RailTooltip>
+            </RailTooltipHost>
+            <RailTooltipHost>
+              <BottomButton $collapsed data-icon="👤" onClick={onOpenAccount} aria-label="Account" />
+              <RailTooltip>Account</RailTooltip>
+            </RailTooltipHost>
+          </div>
         </SidebarCore>
       </SidebarWrapper>
     );
@@ -890,149 +630,119 @@ export const Sidebar = ({
     <SidebarWrapper $isOpen={isOpen} $collapsed={collapsed}>
       <SidebarCore>
         <SidebarHeader>
-          <SidebarHeaderStack>
-            <Logo>
-              <LogoFull>ARC-AI</LogoFull>
-            </Logo>
-          </SidebarHeaderStack>
-          <SidebarToggleButton type="button" onClick={onToggleCollapse} aria-label="Collapse sidebar">
-            ‹
-          </SidebarToggleButton>
-          <CloseButton onClick={onClose}>×</CloseButton>
+          <Logo>ARC-AI</Logo>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <ToggleButton onClick={onToggleCollapse} aria-label="Collapse sidebar">‹</ToggleButton>
+            <CloseButton onClick={onClose}>×</CloseButton>
+          </div>
         </SidebarHeader>
 
-        <WorkspaceSwitcher />
-
-        <ActionButtonsContainer>
-          <NewChatButton onClick={handleNewChat} aria-label="Start a new chat">
-            + New Chat
+        <TopActions>
+          <NewChatButton onClick={handleNewChat} aria-label="New Chat">
+            <span style={{ fontSize: 16, lineHeight: 1 }}>+</span>
+            New Chat
           </NewChatButton>
+        </TopActions>
 
-          <CommandPaletteButton onClick={onCommandPaletteClick} aria-label="Open command palette">
-            <CommandPaletteIcon>⌘</CommandPaletteIcon>
-            <span>Command Palette</span>
-          </CommandPaletteButton>
-        </ActionButtonsContainer>
+        <SearchWrapper>
+          <SearchInput
+            ref={searchInputRef}
+            type="search"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search conversations..."
+            aria-label="Search conversations"
+          />
+          {(searchLoading || searchResults.length > 0 || (searchQuery.trim() && !searchLoading)) && (
+            <SearchDropdown>
+              {searchLoading && <div style={{ padding: 10, color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>Searching...</div>}
+              {!searchLoading && searchResults.length === 0 && searchQuery.trim() && (
+                <div style={{ padding: 10, color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No results</div>
+              )}
+              {searchResults.map(item => (
+                <SearchItem key={item.id} onClick={() => handleSearchSelect(item)}>
+                  <SearchItemType style={{ color: item.type === 'conversation' ? 'var(--primary-hex)' : item.type === 'message' ? 'var(--warning)' : 'var(--violet)' }}>
+                    {item.type}
+                  </SearchItemType>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{item.title || item.snippet || 'Result'}</div>
+                </SearchItem>
+              ))}
+            </SearchDropdown>
+          )}
+        </SearchWrapper>
 
-        <SearchSection>
-        <input
-          type="search"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search conversations, messages, memories"
-          style={{
-            width: '100%',
-            padding: '12px 14px',
-            borderRadius: '12px',
-            border: '1px solid rgba(var(--primary-rgb), 0.28)',
-            background: 'rgba(0,0,0,0.22)',
-            color: '#f3fbff',
-            outline: 'none',
-            fontSize: '13px'
-          }}
-        />
-        {(searchLoading || searchError || searchResults.length > 0) && (
-          <SearchResultsDropdown>
-            {searchLoading && <div style={{ padding: '10px 12px', color: '#9ddcff', fontSize: '12px' }}>Searching workspace...</div>}
-            {!searchLoading && searchError && <div style={{ padding: '10px 12px', color: '#ff9f9f', fontSize: '12px' }}>{searchError}</div>}
-            {!searchLoading && !searchError && searchResults.length === 0 && searchQuery.trim() && <div style={{ padding: '10px 12px', color: '#8ca0c7', fontSize: '12px' }}>No workspace matches.</div>}
-            {!searchLoading && !searchError && groupedSearchResults.conversationsHit.map((item) => (
-              <button key={item.id} type="button" onClick={() => handleSearchSelect(item)} style={{ width: '100%', textAlign: 'left', padding: '10px 12px', background: 'transparent', border: 'none', color: '#f1f7ff', cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                <div style={{ fontSize: '12px', color: '#7df7ff', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Conversation</div>
-                <div style={{ fontWeight: 700, marginTop: '2px' }}>{item.title || 'Conversation'}</div>
-                <div style={{ fontSize: '12px', color: '#b5c4e4', marginTop: '4px' }}>{item.snippet || 'Open conversation'}</div>
-              </button>
-            ))}
-            {!searchLoading && !searchError && groupedSearchResults.messageHit.map((item) => (
-              <button key={item.id} type="button" onClick={() => handleSearchSelect(item)} style={{ width: '100%', textAlign: 'left', padding: '10px 12px', background: 'transparent', border: 'none', color: '#f1f7ff', cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                <div style={{ fontSize: '12px', color: '#ffcf70', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Message</div>
-                <div style={{ fontWeight: 700, marginTop: '2px' }}>{item.snippet || 'Matched message'}</div>
-                <div style={{ fontSize: '12px', color: '#b5c4e4', marginTop: '4px' }}>Jump to conversation</div>
-              </button>
-            ))}
-            {!searchLoading && !searchError && groupedSearchResults.memoryHit.map((item) => (
-              <button key={item.id} type="button" onClick={() => handleSearchSelect(item)} style={{ width: '100%', textAlign: 'left', padding: '10px 12px', background: 'transparent', border: 'none', color: '#f1f7ff', cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                <div style={{ fontSize: '12px', color: '#b887ff', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Memory</div>
-                <div style={{ fontWeight: 700, marginTop: '2px' }}>{item.snippet || 'Memory result'}</div>
-                <div style={{ fontSize: '12px', color: '#b5c4e4', marginTop: '4px' }}>{item.type === 'userFact' ? 'User fact' : 'Semantic memory'}</div>
-              </button>
-            ))}
-          </SearchResultsDropdown>
-        )}
-      </SearchSection>
+        <div style={{ height: 8 }} />
 
-      <ConversationListWrapper>
-        {loadingConversations && (
-          <EmptyState>Loading conversations...</EmptyState>
-        )}
-
-        {!loadingConversations && conversations.length === 0 && (
-          <EmptyState>
-            <div>No conversations yet.</div>
-            <div style={{ marginTop: '8px', fontSize: '12px' }}>
-              Start a new chat to get going!
-            </div>
-          </EmptyState>
-        )}
-
-        {conversations.map((conv) => (
-          <ConversationItem
-            key={conv._id}
-            $isActive={activeConversationId === conv._id}
-            onClick={() => {
-              switchConversation(conv._id);
-              onClose(); // Close sidebar on mobile
-            }}
-            onMouseEnter={() => setHoveredId(conv._id)}
-            onMouseLeave={() => setHoveredId(null)}
-          >
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <ConversationTitle $isActive={activeConversationId === conv._id}>
-                {conv.title}
-              </ConversationTitle>
-              <ConversationMeta>
-                {formatDate(conv.updatedAt)}
-              </ConversationMeta>
-            </div>
-            <DeleteButton
-              onClick={(e) => handleDelete(e, conv._id)}
-              title="Delete"
-              aria-hidden={hoveredId !== conv._id}
-              tabIndex={hoveredId === conv._id ? 0 : -1}
+        <SectionLabel>Chats</SectionLabel>
+        <ConversationSection>
+          {loadingConversations && <EmptyState>Loading...</EmptyState>}
+          {!loadingConversations && conversations.length === 0 && (
+            <EmptyState>No conversations yet.<br />Start a new chat to begin.</EmptyState>
+          )}
+          {conversations.map(conv => (
+            <ConversationItem
+              key={conv._id}
+              $active={activeConversationId === conv._id}
+              onClick={() => { switchConversation(conv._id); onClose(); }}
+              onMouseEnter={() => {}}
+              onMouseLeave={() => {}}
             >
-              ⊗
-            </DeleteButton>
-          </ConversationItem>
-        ))}
-      </ConversationListWrapper>
+              <ConvTitle $active={activeConversationId === conv._id}>{conv.title}</ConvTitle>
+              <ConvDate>{formatDate(conv.updatedAt)}</ConvDate>
+              <DeleteButton
+                role="button"
+                tabIndex={0}
+                aria-label={`Delete ${conv.title || 'conversation'}`}
+                onClick={e => handleDelete(e, conv)}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setPendingDelete(conv); } }}
+                title="Delete"
+              >×</DeleteButton>
+            </ConversationItem>
+          ))}
+        </ConversationSection>
 
-      {pendingDeleteConversation && (
-        <ConfirmOverlay onClick={() => !isDeleting && setPendingDeleteConversation(null)}>
-          <ConfirmModal onClick={(event) => event.stopPropagation()}>
+        <SectionLabel>Workspaces</SectionLabel>
+        <div style={{ padding: '0 12px 4px', flexShrink: 0 }}>
+          <WorkspaceSwitcher />
+        </div>
+
+        <NavDivider />
+        <NavSection>
+          <NavButton onClick={() => { onOpenTools(); onClose(); }} aria-label="Open tools">
+            <BottomIcon>🛠️</BottomIcon>
+            <span>Tools</span>
+          </NavButton>
+          <NavButton onClick={onCommandPaletteClick} aria-label="Open command palette">
+            <BottomIcon>⌘</BottomIcon>
+            <span>Commands</span>
+            <span style={{ marginLeft: 'auto', fontSize: 10, color: 'rgba(255,255,255,0.25)' }}>Ctrl K</span>
+          </NavButton>
+        </NavSection>
+
+        <BottomSection>
+          <BottomButton onClick={onOpenSettings} aria-label="Settings">
+            <BottomIcon>⚙</BottomIcon>
+            <span>Settings</span>
+          </BottomButton>
+          <BottomButton onClick={onOpenAccount} aria-label="Account">
+            <BottomIcon>👤</BottomIcon>
+            <span>Account</span>
+          </BottomButton>
+        </BottomSection>
+      </SidebarCore>
+
+      {pendingDelete && (
+        <ConfirmOverlay onClick={() => !isDeleting && setPendingDelete(null)}>
+          <ConfirmModal onClick={e => e.stopPropagation()}>
             <ConfirmTitle>Delete conversation?</ConfirmTitle>
-            <ConfirmText>
-              This conversation will be removed from your sidebar history.
-            </ConfirmText>
+            <ConfirmText>This will remove the conversation from your history.</ConfirmText>
             <ConfirmActions>
-              <CancelButton
-                type="button"
-                onClick={() => setPendingDeleteConversation(null)}
-                disabled={isDeleting}
-              >
-                Cancel
-              </CancelButton>
-              <ConfirmDeleteButton
-                type="button"
-                onClick={handleConfirmDelete}
-                disabled={isDeleting}
-              >
-                {isDeleting ? 'Deleting...' : 'Delete'}
-              </ConfirmDeleteButton>
+              <CancelBtn onClick={() => setPendingDelete(null)} disabled={isDeleting}>Cancel</CancelBtn>
+              <DeleteBtn onClick={handleConfirmDelete} disabled={isDeleting}>{isDeleting ? 'Deleting...' : 'Delete'}</DeleteBtn>
             </ConfirmActions>
           </ConfirmModal>
         </ConfirmOverlay>
       )}
-      </SidebarCore>
     </SidebarWrapper>
   );
 };

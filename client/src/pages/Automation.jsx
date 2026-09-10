@@ -80,7 +80,7 @@ const Automation = () => (
           href={DEMO_URL}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ color: '#7df7ff', fontWeight: 700, textDecoration: 'none' }}
+          style={{ color: 'var(--accent-soft)', fontWeight: 700, textDecoration: 'none' }}
         >
           Watch the routine engine demo →
         </a>

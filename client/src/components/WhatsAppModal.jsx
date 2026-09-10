@@ -13,13 +13,13 @@ const Overlay = styled.div`
 `;
 
 const Modal = styled.div`
-  background: #0b0b1b;
+  background: var(--surface);
   border: 1px solid rgba(100,100,140,0.6);
   padding: 18px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   width: 420px;
   max-width: calc(100% - 32px);
-  color: #dfe6ff;
+  color: var(--foreground);
 `;
 
 const Header = styled.div`
@@ -32,19 +32,19 @@ const Header = styled.div`
 const Title = styled.h3`
   margin: 0;
   font-size: 16px;
-  color: #8be4ff;
+  color: var(--accent-soft);
 `;
 
 const Close = styled.button`
   background: transparent;
   border: none;
-  color: #aaa;
+  color: var(--foreground-muted);
   cursor: pointer;
 `;
 
 const QRBox = styled.div`
-  background: #061127;
-  border-radius: 8px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
   padding: 10px;
   display: flex;
   align-items: center;
@@ -63,7 +63,7 @@ const StatusList = styled.ul`
 
 const StatusItem = styled.li`
   margin: 6px 0;
-  color: #cbd8ff;
+  color: var(--foreground);
 `;
 
 const Controls = styled.div`
@@ -78,13 +78,14 @@ const Row = styled.div`
 `;
 
 const Input = styled.input`
-  flex:1; padding:8px;border-radius:8px;border:1px solid rgba(120,120,160,0.35);background:#071025;color:#e6eefc;
+  flex:1; padding:8px;border-radius:8px;border:1px solid rgba(120,120,160,0.35);background:var(--surface);color:var(--foreground);
 `;
 
 const Textarea = styled.textarea`
-  width:100%; min-height:80px; padding:8px;border-radius:8px;border:1px solid rgba(120,120,160,0.35);background:#071025;color:#e6eefc;
+  width:100%; min-height:80px; padding:8px;border-radius:8px;border:1px solid rgba(120,120,160,0.35);background:var(--surface);color:var(--foreground);
 `;
 
+// Fixed WhatsApp-blue CTA: deliberate third-party brand composition, not app theme.
 const Button = styled.button`
   padding:8px 10px;border-radius:8px;background:linear-gradient(90deg,#19a7ff,#7ce3ff);border:none;color:#05202b;font-weight:700;cursor:pointer;
 `;
@@ -192,7 +193,7 @@ export default function WhatsAppModal({ isOpen, onClose }) {
           {qrDataUrl ? (
             <img src={qrDataUrl} alt="WhatsApp QR" style={{maxWidth:'100%',maxHeight:160}} />
           ) : (
-            <div style={{color:'#93b7ff'}}>Waiting for QR...</div>
+            <div style={{color:'var(--foreground-muted)'}}>Waiting for QR...</div>
           )}
         </QRBox>
 

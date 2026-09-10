@@ -5,20 +5,17 @@ const ChatContext = createContext();
 
 export const useChat = () => useContext(ChatContext);
 
-// Exportable sanitizer for display-time normalization
+// Exportable sanitizer for display-time normalization.
+// Markdown-structure-safe: newlines, fences, tables, and emphasis syntax
+// MUST survive this pass or MarkdownRenderer receives broken source.
+// (A previous version collapsed \s{2,} which joined every line and
+// destroyed tables, lists, code blocks, and paragraphs.)
 export const sanitizeForDisplay = (text) => {
   if (!text || typeof text !== 'string') return text;
   let t = String(text);
   t = t.replace(/\r\n|\r/g, '\n');
-  t = t.replace(/\*{1,2}/g, '');
-  t = t.replace(/_{1,2}/g, '');
-  t = t.replace(/`+/g, '');
-  t = t.replace(/https?:\/\/[^\s]+/g, '');
-  t = t.replace(/([.,!?:;])(?=\S)/g, '$1 ');
-  t = t.replace(/(\S)([—–-])/g, '$1 $2');
-  t = t.replace(/([—–-])(\S)/g, '$1 $2');
-  t = t.replace(/\s{2,}/g, ' ');
-  t = t.replace(/([!?.]){2,}/g, '$1');
+  t = t.replace(/[ \t]+$/gm, '');
+  t = t.replace(/\n{3,}/g, '\n\n');
   return t.trim();
 };
 

@@ -15,17 +15,17 @@ const ModalOverlay = styled.div`
 `;
 
 const ModalContainer = styled.div`
-  background: linear-gradient(135deg, #0f1729 0%, #1a2847 100%);
-  border: 1px solid rgba(100, 200, 255, 0.2);
-  border-radius: 16px;
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface-elevated) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   padding: 40px;
   max-width: 480px;
   width: 90%;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
 `;
 
 const Title = styled.h2`
-  color: #e6f0ff;
+  color: var(--foreground);
   font-size: 20px;
   font-weight: 600;
   margin: 0 0 16px 0;
@@ -33,7 +33,7 @@ const Title = styled.h2`
 `;
 
 const Message = styled.p`
-  color: #b3d9ff;
+  color: var(--foreground-muted);
   font-size: 14px;
   line-height: 1.6;
   margin: 0 0 24px 0;
@@ -42,14 +42,14 @@ const Message = styled.p`
 
 const InfoBox = styled.div`
   background: rgba(100, 200, 255, 0.08);
-  border-left: 3px solid #64c8ff;
+  border-left: 3px solid var(--accent-soft);
   padding: 12px 16px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   margin-bottom: 24px;
 `;
 
 const InfoLabel = styled.p`
-  color: #8fb3dd;
+  color: var(--foreground-muted);
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
@@ -58,7 +58,7 @@ const InfoLabel = styled.p`
 `;
 
 const InfoText = styled.p`
-  color: #64c8ff;
+  color: var(--accent-soft);
   font-size: 13px;
   margin: 0;
   word-break: break-all;
@@ -74,7 +74,7 @@ const ButtonGroup = styled.div`
 const Button = styled.button`
   padding: 12px 24px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -93,6 +93,7 @@ const Button = styled.button`
   }
 `;
 
+// Fixed sky-blue CTA: deliberate button composition, not app theme.
 const PrimaryButton = styled(Button)`
   background: linear-gradient(135deg, #64c8ff 0%, #4ba3d9 100%);
   color: #0f1729;
@@ -106,7 +107,7 @@ const PrimaryButton = styled(Button)`
 
 const SecondaryButton = styled(Button)`
   background: rgba(100, 200, 255, 0.1);
-  color: #64c8ff;
+  color: var(--accent-soft);
   border: 1px solid rgba(100, 200, 255, 0.3);
 
   &:hover {
@@ -117,12 +118,12 @@ const SecondaryButton = styled(Button)`
 
 const TertiaryButton = styled(Button)`
   background: transparent;
-  color: #8fb3dd;
+  color: var(--foreground-muted);
   border: 1px solid rgba(100, 200, 255, 0.2);
 
   &:hover {
     background: rgba(100, 200, 255, 0.05);
-    color: #b3d9ff;
+    color: var(--foreground);
   }
 `;
 
@@ -146,7 +147,7 @@ const TestUserAccessModal = ({ isOpen, onClose, onProceed }) => {
           <InfoLabel>Request Access To</InfoLabel>
           <InfoText>arc.ai.assistant05@gmail.com</InfoText>
           <InfoLabel style={{ marginTop: '12px' }}>In Your Email, Include</InfoLabel>
-          <ul style={{ color: '#b3d9ff', fontSize: '13px', margin: '4px 0 0 0', paddingLeft: '20px', lineHeight: '1.6' }}>
+          <ul style={{ color: 'var(--foreground-muted)', fontSize: '13px', margin: '4px 0 0 0', paddingLeft: '20px', lineHeight: '1.6' }}>
             <li>Your full name</li>
             <li>Google email address to approve</li>
             <li>Optional: your use case</li>
