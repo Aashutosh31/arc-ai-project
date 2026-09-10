@@ -35,7 +35,9 @@ module.exports = {
                 
                 return {
                     success: true,
-                    message: `Playing ${video.title} for you now.`,
+                    // Truthful wording: the tool can only hand the result to the
+                    // client player; it must not assert audible playback started.
+                    message: `Found "${video.title}" — sending it to your media player now.`,
                     // 🚀 Trigger the floating Mini-Player on the frontend!
                     clientAction: {
                         type: 'PLAY_MEDIA',
