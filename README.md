@@ -14,7 +14,9 @@
 <br/><br/>
 
 <a href="https://arc-ai-project.vercel.app/" target="_blank">
-  <img width="100%" alt="ARC-AI Demo" src="https://github.com/user-attachments/assets/3f9fd56f-263c-4fdd-b6fd-391612ba7807" />
+  <img width="100%" alt="ARC-AI Demo" src="https://github.com/user-attachments/assets/a747fc10-4927-4b08-8d49-d584ecf1853c"/> 
+
+
 </a>
 
 <p><strong>🔗 Click the image to try the Live Application</strong></p>
