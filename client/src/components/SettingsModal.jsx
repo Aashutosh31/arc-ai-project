@@ -4,6 +4,8 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useChat } from '../contexts/ChatContext';
 import { THEME_CHANGE_EVENT, applyTheme, getStoredTheme } from '../utils/theme';
 import { listThemes } from '../theme/themes';
+import { Button as UiButton } from './ui';
+import { Badge } from './ui';
 
 const SECTIONS = [
   { id: 'account', label: 'Account', icon: '👤' },
@@ -126,47 +128,7 @@ const RowHint = styled.div`
   line-height: 1.5;
 `;
 
-const Pill = styled.span`
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 4px 10px;
-  border-radius: 999px;
-  color: ${({ $tone }) => ($tone === 'ok' ? 'var(--success)' : $tone === 'warn' ? 'var(--warning)' : 'var(--foreground-subtle)')};
-  border: 1px solid ${({ $tone }) => ($tone === 'ok' ? 'rgba(var(--success-rgb),0.3)' : $tone === 'warn' ? 'rgba(var(--warning-rgb),0.3)' : 'var(--border)')};
-  background: ${({ $tone }) => ($tone === 'ok' ? 'rgba(var(--success-rgb),0.06)' : $tone === 'warn' ? 'rgba(var(--warning-rgb),0.06)' : 'rgba(255,255,255,0.03)')};
-  white-space: nowrap;
-`;
-
-const ActionButton = styled.button`
-  padding: 8px 16px;
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(var(--primary-rgb), 0.25);
-  background: rgba(var(--primary-rgb), 0.07);
-  color: var(--accent-soft);
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-  &:hover { background: rgba(var(--primary-rgb), 0.13); }
-  &:disabled { opacity: 0.5; cursor: not-allowed; }
-`;
-
-const GhostButton = styled(ActionButton)`
-  border-color: var(--border);
-  background: transparent;
-  color: var(--foreground-muted);
-  &:hover { background: rgba(255, 255, 255, 0.05); color: var(--foreground); }
-`;
-
-const DangerButton = styled(ActionButton)`
-  border-color: rgba(255, 70, 70, 0.4);
-  background: rgba(255, 70, 70, 0.08);
-  color: var(--destructive-soft);
-  &:hover { background: rgba(255, 70, 70, 0.15); }
-`;
+const BADGE_CLASS = 'uppercase tracking-[0.06em] text-[10.5px]';
 
 const Toggle = styled.button`
   width: 42px;
@@ -293,15 +255,15 @@ const SettingsModal = ({
                 <Row>
                   <div><RowLabel>{authInfo?.username || (isGuest ? 'Guest' : 'User')}</RowLabel>
                   <RowHint>{isGuest ? 'Guest session' : `${authInfo?.authProvider || 'local'} account`}</RowHint></div>
-                  <Pill tone={isGuest ? 'warn' : 'ok'}>{isGuest ? 'Guest' : 'Signed in'}</Pill>
+                  <Badge tone={isGuest ? 'warning' : 'success'} outline className={BADGE_CLASS}>{isGuest ? 'Guest' : 'Signed in'}</Badge>
                 </Row>
                 {isGuest && (
                   <Row>
                     <div><RowLabel>Upgrade to a full account</RowLabel>
                     <RowHint>More credits, Google Calendar, and persistent identity.</RowHint></div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <GhostButton onClick={() => { window.location.href = '/login'; }}>Sign in</GhostButton>
-                      <ActionButton onClick={() => { window.location.href = '/register'; }}>Sign up</ActionButton>
+                      <UiButton variant="ghost" onClick={() => { window.location.href = '/login'; }}>Sign in</UiButton>
+                      <UiButton variant="outline" onClick={() => { window.location.href = '/register'; }}>Sign up</UiButton>
                     </div>
                   </Row>
                 )}
@@ -309,9 +271,9 @@ const SettingsModal = ({
                   <Row>
                     <div><RowLabel>Google account</RowLabel>
                     <RowHint>{authInfo?.googleLinked ? 'A Google account is linked.' : 'No Google account linked yet.'}</RowHint></div>
-                    <GhostButton onClick={google?.onLinkAccount} disabled={google?.busy}>
+                    <UiButton variant="ghost" onClick={google?.onLinkAccount} disabled={google?.busy}>
                       {authInfo?.googleLinked ? 'Reconnect' : 'Link Google'}
-                    </GhostButton>
+                    </UiButton>
                   </Row>
                 )}
               </>
@@ -341,7 +303,7 @@ const SettingsModal = ({
                 <Row>
                   <div><RowLabel>Voice mode</RowLabel>
                   <RowHint>Listening, thinking, speaking states with tap-to-interrupt.</RowHint></div>
-                  <ActionButton onClick={() => { onClose(); onOpenVoice?.(); }}>Open voice mode</ActionButton>
+                  <UiButton variant="outline" onClick={() => { onClose(); onOpenVoice?.(); }}>Open voice mode</UiButton>
                 </Row>
                 <Note>Voice input and spoken responses use your existing ARC voice pipeline (browser speech + server transcription where available). No additional configuration is required.</Note>
               </>
@@ -354,13 +316,13 @@ const SettingsModal = ({
                 <Row>
                   <div><RowLabel>Current provider</RowLabel>
                   <RowHint>{providerInfo?.detail || 'Selected automatically per request.'}</RowHint></div>
-                  <Pill tone={providerInfo?.provider ? 'ok' : 'muted'}>{providerInfo?.provider || 'Auto'}</Pill>
+                  <Badge tone={providerInfo?.provider ? 'success' : 'default'} outline className={BADGE_CLASS}>{providerInfo?.provider || 'Auto'}</Badge>
                 </Row>
                 {providerInfo?.fallbackUsed && (
                   <Row>
                     <div><RowLabel>Fallback</RowLabel>
                     <RowHint>The primary provider was unavailable, so a fallback answered.</RowHint></div>
-                    <Pill tone="warn">Fallback used</Pill>
+                    <Badge tone="warning" outline className={BADGE_CLASS}>Fallback used</Badge>
                   </Row>
                 )}
                 <Note>Manual provider selection is not available yet. Supported backends: Groq, Gemini, Mistral.</Note>
@@ -379,7 +341,7 @@ const SettingsModal = ({
                 <Row>
                   <div><RowLabel>Memory manager</RowLabel>
                   <RowHint>Inspect, pin, edit, or delete remembered facts.</RowHint></div>
-                  <ActionButton onClick={() => { onClose(); onOpenMemory?.(); }}>Open manager</ActionButton>
+                  <UiButton variant="outline" onClick={() => { onClose(); onOpenMemory?.(); }}>Open manager</UiButton>
                 </Row>
               </>
             )}
@@ -393,8 +355,8 @@ const SettingsModal = ({
                     <div><RowLabel>{w.name || 'Workspace'}</RowLabel>
                     {w.description && <RowHint>{w.description}</RowHint>}</div>
                     {String(w._id) === String(activeWorkspaceId)
-                      ? <Pill tone="ok">Active</Pill>
-                      : <GhostButton onClick={() => switchWorkspace(w._id)}>Switch</GhostButton>}
+                      ? <Badge tone="success" outline className={BADGE_CLASS}>Active</Badge>
+                      : <UiButton variant="ghost" onClick={() => switchWorkspace(w._id)}>Switch</UiButton>}
                   </Row>
                 ))}
                 <Note>Create, rename, and archive workspaces from the workspace switcher in the sidebar.</Note>
@@ -409,10 +371,10 @@ const SettingsModal = ({
                   <div><RowLabel>Google Calendar</RowLabel>
                   <RowHint>Let ARC read availability and schedule meetings.</RowHint></div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <Pill tone={google?.connected ? 'ok' : 'muted'}>{google?.connected ? 'Connected' : 'Not connected'}</Pill>
-                    <ActionButton onClick={google?.onConnectCalendar} disabled={google?.busy || isGuest}>
+                    <Badge tone={google?.connected ? 'success' : 'default'} outline className={BADGE_CLASS}>{google?.connected ? 'Connected' : 'Not connected'}</Badge>
+                    <UiButton variant="outline" onClick={google?.onConnectCalendar} disabled={google?.busy || isGuest}>
                       {isGuest ? 'Sign in first' : google?.connected ? 'Reconnect' : 'Connect'}
-                    </ActionButton>
+                    </UiButton>
                   </div>
                 </Row>
                 {google?.note && <Note>{google.note}</Note>}
@@ -420,10 +382,10 @@ const SettingsModal = ({
                   <div><RowLabel>WhatsApp</RowLabel>
                   <RowHint>Send messages on your behalf once connected.</RowHint></div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <Pill tone={whatsapp?.connected ? 'ok' : 'muted'}>{whatsapp?.connected ? 'Connected' : 'Not connected'}</Pill>
-                    <ActionButton onClick={whatsapp?.onConnect} disabled={isGuest}>
+                    <Badge tone={whatsapp?.connected ? 'success' : 'default'} outline className={BADGE_CLASS}>{whatsapp?.connected ? 'Connected' : 'Not connected'}</Badge>
+                    <UiButton variant="outline" onClick={whatsapp?.onConnect} disabled={isGuest}>
                       {isGuest ? 'Sign in first' : whatsapp?.connected ? 'Reconnect' : 'Connect'}
-                    </ActionButton>
+                    </UiButton>
                   </div>
                 </Row>
               </>
@@ -436,7 +398,7 @@ const SettingsModal = ({
                 <Row>
                   <div><RowLabel>Remaining balance</RowLabel>
                   <RowHint>{isGuest ? 'Guest balances are limited. Sign in for more.' : 'Top up any time from your account page.'}</RowHint></div>
-                  <Pill tone="ok">{authInfo?.creditsRemaining ?? '—'} credits</Pill>
+                  <Badge tone="success" outline className={BADGE_CLASS}>{authInfo?.creditsRemaining ?? '—'} credits</Badge>
                 </Row>
               </>
             )}
@@ -448,12 +410,12 @@ const SettingsModal = ({
                 <Row>
                   <div><RowLabel>This session</RowLabel>
                   <RowHint>{isGuest ? 'Anonymous guest session on this device.' : `Signed-in ${authInfo?.authProvider || ''} session on this device.`}</RowHint></div>
-                  <Pill tone={isGuest ? 'warn' : 'ok'}>{isGuest ? 'Guest' : 'Authenticated'}</Pill>
+                  <Badge tone={isGuest ? 'warning' : 'success'} outline className={BADGE_CLASS}>{isGuest ? 'Guest' : 'Authenticated'}</Badge>
                 </Row>
                 <Row>
                   <div><RowLabel>Sign out</RowLabel>
                   <RowHint>Clears the local session and returns to the home page.</RowHint></div>
-                  <DangerButton onClick={onSignOut}>Sign out</DangerButton>
+                  <UiButton variant="danger-outline" onClick={onSignOut}>Sign out</UiButton>
                 </Row>
               </>
             )}
