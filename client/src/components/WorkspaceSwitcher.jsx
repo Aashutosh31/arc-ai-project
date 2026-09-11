@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { Button as UiButton, Input as UiInput, Textarea as UiTextarea } from './ui';
 
 const Panel = styled.div`
   display: flex;
@@ -13,7 +14,7 @@ const Select = styled.select`
   width: 100%;
   border-radius: var(--radius-md);
   border: 1px solid rgba(var(--primary-rgb), 0.22);
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--surface);
   color: var(--foreground);
   padding: 11px 12px;
   font-size: 13px;
@@ -24,29 +25,6 @@ const ActionRow = styled.div`
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-`;
-
-const ActionButton = styled.button`
-  border: 1px solid rgba(var(--primary-rgb), 0.18);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--foreground);
-  border-radius: 10px;
-  padding: 9px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
-
-  &:hover {
-    transform: translateY(-1px);
-    border-color: rgba(var(--primary-rgb), 0.35);
-    background: rgba(var(--primary-rgb), 0.08);
-  }
-
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.55;
-    transform: none;
-  }
 `;
 
 const WorkspaceMeta = styled.div`
@@ -71,14 +49,14 @@ const Modal = styled.div`
   width: min(460px, 100%);
   border-radius: 16px;
   border: 1px solid rgba(var(--primary-rgb), 0.28);
-  background: linear-gradient(180deg, rgba(13, 14, 32, 0.98), rgba(8, 10, 22, 0.98));
+  background: linear-gradient(180deg, var(--surface-elevated), var(--surface));
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
   overflow: hidden;
 `;
 
 const ModalHeader = styled.div`
   padding: 14px 16px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-subtle);
 `;
 
 const ModalTitle = styled.h4`
@@ -110,77 +88,11 @@ const FieldLabel = styled.label`
   font-size: 12px;
 `;
 
-const Input = styled.input`
-  width: 100%;
-  border-radius: 10px;
-  border: 1px solid rgba(var(--primary-rgb), 0.24);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--foreground);
-  padding: 10px 12px;
-  font-size: 13px;
-  outline: none;
-
-  &:focus {
-    border-color: rgba(var(--primary-rgb), 0.5);
-    box-shadow: 0 0 0 2px rgba(var(--primary-rgb), 0.14);
-  }
-`;
-
-const Textarea = styled.textarea`
-  width: 100%;
-  min-height: 90px;
-  resize: vertical;
-  border-radius: 10px;
-  border: 1px solid rgba(var(--primary-rgb), 0.24);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--foreground);
-  padding: 10px 12px;
-  font-size: 13px;
-  outline: none;
-
-  &:focus {
-    border-color: rgba(var(--primary-rgb), 0.5);
-    box-shadow: 0 0 0 2px rgba(var(--primary-rgb), 0.14);
-  }
-`;
-
 const ModalActions = styled.div`
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   padding: 0 16px 14px;
-`;
-
-const SecondaryButton = styled.button`
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--foreground);
-  border-radius: 10px;
-  padding: 9px 12px;
-  font-size: 12px;
-  cursor: pointer;
-`;
-
-const PrimaryButton = styled.button`
-  border: 1px solid rgba(var(--primary-rgb), 0.36);
-  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.24), rgba(var(--secondary-rgb), 0.18));
-  color: var(--foreground);
-  border-radius: 10px;
-  padding: 9px 12px;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-`;
-
-const DangerButton = styled(PrimaryButton)`
-  border-color: rgba(255, 70, 70, 0.5);
-  background: rgba(255, 70, 70, 0.16);
-  color: var(--destructive-soft);
 `;
 
 const InlineError = styled.div`
@@ -321,9 +233,9 @@ const WorkspaceSwitcher = () => {
         ))}
       </Select>
       <ActionRow>
-        <ActionButton type="button" onClick={openCreateModal} disabled={loadingWorkspaces || switchingWorkspace}>New</ActionButton>
-        <ActionButton type="button" onClick={openRenameModal} disabled={!activeWorkspaceId || loadingWorkspaces || switchingWorkspace}>Rename</ActionButton>
-        <ActionButton type="button" onClick={openDeleteModal} disabled={!activeWorkspaceId || loadingWorkspaces || switchingWorkspace}>Delete</ActionButton>
+        <UiButton variant="outline" size="sm" className="w-full" type="button" onClick={openCreateModal} disabled={loadingWorkspaces || switchingWorkspace}>New</UiButton>
+        <UiButton variant="outline" size="sm" className="w-full" type="button" onClick={openRenameModal} disabled={!activeWorkspaceId || loadingWorkspaces || switchingWorkspace}>Rename</UiButton>
+        <UiButton variant="outline" size="sm" className="w-full" type="button" onClick={openDeleteModal} disabled={!activeWorkspaceId || loadingWorkspaces || switchingWorkspace}>Delete</UiButton>
       </ActionRow>
       <WorkspaceMeta>
         {workspaceError ? workspaceError : `${workspaceOptions.length} workspace${workspaceOptions.length === 1 ? '' : 's'} loaded.`}
@@ -350,7 +262,7 @@ const WorkspaceSwitcher = () => {
                 <>
                   <FieldLabel>
                     Workspace Name
-                    <Input
+                    <UiInput
                       value={nameInput}
                       onChange={(event) => setNameInput(event.target.value)}
                       placeholder="Workspace name"
@@ -360,7 +272,7 @@ const WorkspaceSwitcher = () => {
                   </FieldLabel>
                   <FieldLabel>
                     Description
-                    <Textarea
+                    <UiTextarea
                       value={descriptionInput}
                       onChange={(event) => setDescriptionInput(event.target.value)}
                       placeholder="Optional workspace description"
@@ -378,15 +290,15 @@ const WorkspaceSwitcher = () => {
             </ModalBody>
 
             <ModalActions>
-              <SecondaryButton type="button" onClick={closeModal} disabled={submitting}>Cancel</SecondaryButton>
+              <UiButton variant="ghost" type="button" onClick={closeModal} disabled={submitting}>Cancel</UiButton>
               {modalMode === 'create' ? (
-                <PrimaryButton type="button" onClick={handleCreate} disabled={submitting}>Create</PrimaryButton>
+                <UiButton variant="outline" type="button" onClick={handleCreate} disabled={submitting}>Create</UiButton>
               ) : null}
               {modalMode === 'rename' ? (
-                <PrimaryButton type="button" onClick={handleRename} disabled={submitting}>Save</PrimaryButton>
+                <UiButton variant="outline" type="button" onClick={handleRename} disabled={submitting}>Save</UiButton>
               ) : null}
               {modalMode === 'delete' ? (
-                <DangerButton type="button" onClick={handleDelete} disabled={submitting}>Archive</DangerButton>
+                <UiButton variant="danger-outline" type="button" onClick={handleDelete} disabled={submitting}>Archive</UiButton>
               ) : null}
             </ModalActions>
           </Modal>
