@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { useConversation } from '../contexts/ConversationContext';
 import WorkspaceSwitcher from './WorkspaceSwitcher';
+import { Button as UiButton, Input as UiInput } from './ui';
 
 const SIDEBAR_RAIL_WIDTH = 68;
 const SIDEBAR_FULL_WIDTH = 280;
@@ -80,7 +81,7 @@ const ToggleButton = styled.button`
   width: 30px;
   height: 30px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   background: transparent;
   color: var(--foreground-subtle);
   cursor: pointer;
@@ -147,20 +148,6 @@ const SearchWrapper = styled.div`
   z-index: 5;
 `;
 
-const SearchInput = styled.input`
-  width: 100%;
-  padding: 9px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--foreground);
-  font-size: 13px;
-  outline: none;
-  transition: border-color 0.2s;
-  &::placeholder { color: var(--foreground-subtle); }
-  &:focus { border-color: rgba(var(--primary-rgb), 0.25); }
-`;
-
 const SearchDropdown = styled.div`
   position: absolute;
   top: calc(100% + 4px);
@@ -170,7 +157,7 @@ const SearchDropdown = styled.div`
   overflow-y: auto;
   z-index: 30;
   background: var(--surface-overlay);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5);
 `;
@@ -181,7 +168,7 @@ const SearchItem = styled.button`
   padding: 10px 12px;
   background: transparent;
   border: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--border-subtle);
   color: var(--foreground);
   cursor: pointer;
   transition: background 0.15s;
@@ -237,7 +224,7 @@ const ConvTitle = styled.span`
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  color: ${({ $active }) => ($active ? 'var(--foreground)' : 'rgba(255, 255, 255, 0.65)')};
+  color: ${({ $active }) => ($active ? 'var(--foreground)' : 'var(--foreground-muted)')};
   font-weight: ${({ $active }) => ($active ? '600' : '400')};
 `;
 
@@ -393,9 +380,9 @@ const RailConvButton = styled.button`
   width: 44px;
   height: 44px;
   border-radius: 10px;
-  border: 1px solid ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.35)' : 'rgba(255, 255, 255, 0.06)')};
+  border: 1px solid ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.35)' : 'var(--border-subtle)')};
   background: ${({ $active }) => ($active ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent')};
-  color: ${({ $active }) => ($active ? 'var(--primary-hex)' : 'rgba(255, 255, 255, 0.5)')};
+  color: ${({ $active }) => ($active ? 'var(--primary-hex)' : 'var(--foreground-muted)')};
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -426,7 +413,7 @@ const RailTooltip = styled.span`
   padding: 6px 10px;
   border-radius: 6px;
   background: var(--surface-overlay);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   color: var(--foreground);
   font-size: 12px;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
@@ -471,26 +458,6 @@ const ConfirmActions = styled.div`
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-`;
-
-const CancelBtn = styled.button`
-  padding: 8px 14px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--foreground);
-  font-size: 12px;
-  cursor: pointer;
-`;
-
-const DeleteBtn = styled.button`
-  padding: 8px 14px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 70, 70, 0.4);
-  background: rgba(255, 70, 70, 0.1);
-  color: var(--destructive-soft);
-  font-size: 12px;
-  cursor: pointer;
 `;
 
 const formatDate = (date) => {
@@ -591,11 +558,11 @@ export const Sidebar = ({
             </RailTooltipHost>
           </div>
 
-          <div style={{ width: '24px', height: '1px', background: 'rgba(255,255,255,0.06)', margin: '4px auto' }} />
+          <div style={{ width: '24px', height: '1px', background: 'var(--border-subtle)', margin: '4px auto' }} />
 
           <RailConversationList>
             {loadingConversations && (
-              <div style={{ color: 'rgba(255,255,255,0.2)', fontSize: 11, padding: '8px 0' }}>...</div>
+              <div style={{ color: 'var(--foreground-subtle)', fontSize: 11, padding: '8px 0' }}>...</div>
             )}
             {conversations.map(conv => (
               <RailTooltipHost key={conv._id}>
@@ -611,7 +578,7 @@ export const Sidebar = ({
             ))}
           </RailConversationList>
 
-          <div style={{ padding: '8px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+          <div style={{ padding: '8px', borderTop: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
             <RailTooltipHost>
               <BottomButton $collapsed data-icon="⚙" onClick={onOpenSettings} aria-label="Settings" />
               <RailTooltip>Settings</RailTooltip>
@@ -645,7 +612,7 @@ export const Sidebar = ({
         </TopActions>
 
         <SearchWrapper>
-          <SearchInput
+          <UiInput
             ref={searchInputRef}
             type="search"
             value={searchQuery}
@@ -655,9 +622,9 @@ export const Sidebar = ({
           />
           {(searchLoading || searchResults.length > 0 || (searchQuery.trim() && !searchLoading)) && (
             <SearchDropdown>
-              {searchLoading && <div style={{ padding: 10, color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>Searching...</div>}
+              {searchLoading && <div style={{ padding: 10, color: 'var(--foreground-subtle)', fontSize: 12 }}>Searching...</div>}
               {!searchLoading && searchResults.length === 0 && searchQuery.trim() && (
-                <div style={{ padding: 10, color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No results</div>
+                <div style={{ padding: 10, color: 'var(--foreground-subtle)', fontSize: 12 }}>No results</div>
               )}
               {searchResults.map(item => (
                 <SearchItem key={item.id} onClick={() => handleSearchSelect(item)}>
@@ -715,7 +682,7 @@ export const Sidebar = ({
           <NavButton onClick={onCommandPaletteClick} aria-label="Open command palette">
             <BottomIcon>⌘</BottomIcon>
             <span>Commands</span>
-            <span style={{ marginLeft: 'auto', fontSize: 10, color: 'rgba(255,255,255,0.25)' }}>Ctrl K</span>
+            <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--foreground-subtle)' }}>Ctrl K</span>
           </NavButton>
         </NavSection>
 
@@ -737,8 +704,8 @@ export const Sidebar = ({
             <ConfirmTitle>Delete conversation?</ConfirmTitle>
             <ConfirmText>This will remove the conversation from your history.</ConfirmText>
             <ConfirmActions>
-              <CancelBtn onClick={() => setPendingDelete(null)} disabled={isDeleting}>Cancel</CancelBtn>
-              <DeleteBtn onClick={handleConfirmDelete} disabled={isDeleting}>{isDeleting ? 'Deleting...' : 'Delete'}</DeleteBtn>
+              <UiButton variant="ghost" onClick={() => setPendingDelete(null)} disabled={isDeleting}>Cancel</UiButton>
+              <UiButton variant="danger-outline" onClick={handleConfirmDelete} disabled={isDeleting}>{isDeleting ? 'Deleting...' : 'Delete'}</UiButton>
             </ConfirmActions>
           </ConfirmModal>
         </ConfirmOverlay>

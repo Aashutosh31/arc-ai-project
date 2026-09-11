@@ -14,6 +14,7 @@ import WhatsAppConnectModal from '../components/WhatsAppConnectModal.jsx';
 import WorkspaceMemoryModal from '../components/WorkspaceMemoryModal.jsx';
 import CommandPalette from '../components/CommandPalette.jsx';
 import VoiceDock from '../components/VoiceDock.jsx';
+import MediaPlayer from '../components/MediaPlayer.jsx';
 import VisionCard from '../components/VisionCard.jsx';
 import ToolsPanel from '../components/ToolsPanel.jsx';
 import SettingsModal from '../components/SettingsModal.jsx';
@@ -446,6 +447,7 @@ const DashboardPageContent = () => {
       {showVoice && (
         <VoiceDock onClose={() => setShowVoice(false)} activateSignal={voiceSignal} />
       )}
+      <MediaPlayer />
       {showVision && (
         <VisionCard
           onClose={() => setShowVision(false)}

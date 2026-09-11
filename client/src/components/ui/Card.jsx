@@ -27,15 +27,34 @@ export function CardContent({ className = '', ...props }) {
 const BADGE_TONES = {
   default: 'bg-muted text-foreground',
   primary: 'bg-primary text-primary-foreground',
-  success: 'bg-success text-black',
-  warning: 'bg-warning text-black',
-  destructive: 'bg-destructive text-white',
+  success: 'bg-success text-success-foreground',
+  warning: 'bg-warning text-warning-foreground',
+  destructive: 'bg-destructive text-destructive-foreground',
 };
 
-export function Badge({ tone = 'default', className = '', ...props }) {
+const BADGE_OUTLINE_TEXT = {
+  default: 'text-foreground',
+  primary: 'text-primary',
+  success: 'text-success',
+  warning: 'text-warning',
+  destructive: 'text-destructive',
+};
+
+const BADGE_OUTLINE_BORDER = {
+  default: 'border-border',
+  primary: 'border-primary',
+  success: 'border-success',
+  warning: 'border-warning',
+  destructive: 'border-destructive',
+};
+
+export function Badge({ tone = 'default', outline = false, className = '', ...props }) {
+  const toneClasses = outline
+    ? `bg-transparent border ${BADGE_OUTLINE_BORDER[tone] || BADGE_OUTLINE_BORDER.default} ${BADGE_OUTLINE_TEXT[tone] || BADGE_OUTLINE_TEXT.default}`
+    : (BADGE_TONES[tone] || BADGE_TONES.default);
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full ${BADGE_TONES[tone] || BADGE_TONES.default} ${className}`}
+      className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full ${toneClasses} ${className}`}
       {...props}
     />
   );

@@ -6,6 +6,7 @@ import { useConversation } from '../contexts/ConversationContext';
 import { useExecution } from '../contexts/ExecutionContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import MarkdownRenderer from './MarkdownRenderer';
+import { Button as UiButton } from './ui';
 
 /* Fluid readable column: full width on small screens, capped prose width
    on desktop. Code/tables break out wider via MarkdownBody rules. */
@@ -232,23 +233,9 @@ const ComposerInner = styled.div`
   }
 `;
 
-const IconButton = styled.button`
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--foreground-subtle);
-  font-size: 17px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: all 0.15s;
-  position: relative;
-  &:hover { background: rgba(255, 255, 255, 0.06); color: var(--foreground); }
-`;
+// Composer square controls share one 34px geometry; UiButton carries the
+// token color/focus/disabled semantics.
+const COMPOSER_SQUARE = { width: 34, height: 34, padding: 0 };
 
 const AttachMenu = styled.div`
   position: absolute;
@@ -307,22 +294,6 @@ const TextInput = styled.textarea`
   padding: 5px 2px;
   font-family: inherit;
   &::placeholder { color: var(--foreground-subtle); }
-`;
-
-const SendButton = styled.button`
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  border: none;
-  background: ${({ $disabled }) => ($disabled ? 'rgba(var(--primary-rgb), 0.1)' : 'var(--primary-hex)')};
-  color: ${({ $disabled }) => ($disabled ? 'rgba(var(--primary-rgb), 0.35)' : 'var(--primary-foreground)')};
-  cursor: ${({ $disabled }) => ($disabled ? 'not-allowed' : 'pointer')};
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: all 0.15s;
-  &:hover { filter: ${({ $disabled }) => ($disabled ? 'none' : 'brightness(1.12)')}; }
 `;
 
 const PreviewRow = styled.div`
@@ -766,8 +737,8 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
         )}
 
         <ComposerInner as="form" onSubmit={handleSubmit}>
-          <IconButton type="button" onClick={() => setShowAttachMenu(p => !p)} aria-label="Attachments and tools">
-            +
+          <UiButton variant="ghost" size="sm" style={COMPOSER_SQUARE} className="relative shrink-0" type="button" onClick={() => setShowAttachMenu(p => !p)} aria-label="Attachments and tools">
+            <span className="text-[17px] leading-none">+</span>
             {showAttachMenu && (
               <AttachMenu onClick={e => e.stopPropagation()}>
                 <AttachOption type="button" onClick={() => { imageInputRef.current?.click(); }}>
@@ -784,12 +755,12 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
                 <AttachOption type="button" onClick={() => { setShowAttachMenu(false); onOpenVoice?.(); }}>
                   <span>🎤</span> Voice mode
                 </AttachOption>
-                <AttachOption type="button" onClick={() => { setShowAttachMenu(false); onOpenTools?.(); }}>
-                  <span>🛠️</span> Browse tools
-                </AttachOption>
+              <AttachOption type="button" onClick={() => { setShowAttachMenu(false); onOpenTools?.(); }}>
+                <span>🛠️</span> Browse tools
+              </AttachOption>
               </AttachMenu>
             )}
-          </IconButton>
+          </UiButton>
           <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={handleImageUpload} style={{ display: 'none' }} />
           <input ref={docInputRef} type="file" accept=".txt,.csv,.md,.json,.pdf" onChange={handleDocUpload} style={{ display: 'none' }} />
 
@@ -808,22 +779,23 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
             aria-label="Message input"
           />
 
-          <IconButton type="button" onClick={() => onOpenVoice?.()} aria-label="Voice mode" title="Voice mode">
+          <UiButton variant="ghost" size="sm" style={COMPOSER_SQUARE} className="shrink-0" type="button" onClick={() => onOpenVoice?.()} aria-label="Voice mode" title="Voice mode">
             <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
             </svg>
-          </IconButton>
+          </UiButton>
 
-          <SendButton
+          <UiButton
             type="submit"
-            $disabled={canSend}
+            style={COMPOSER_SQUARE}
+            className="shrink-0"
             disabled={canSend}
             aria-label="Send message"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
             </svg>
-          </SendButton>
+          </UiButton>
         </ComposerInner>
       </Composer>
     </ChatWrapper>

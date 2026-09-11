@@ -8,7 +8,10 @@ const VARIANTS = {
   primary: 'bg-primary text-primary-foreground hover:brightness-110 shadow-md',
   secondary: 'bg-card text-foreground border border-border hover:border-primary/50',
   ghost: 'bg-transparent text-foreground hover:bg-muted',
-  destructive: 'bg-destructive text-white hover:brightness-110',
+  destructive: 'bg-destructive text-destructive-foreground hover:brightness-110',
+  // Tinted outline actions (ARC settings/menu pattern): bordered, no fill shift.
+  outline: 'bg-primary/[0.07] text-[var(--accent-soft)] border border-primary/25 hover:bg-primary/[0.13] whitespace-nowrap',
+  'danger-outline': 'bg-destructive/10 text-[var(--destructive-soft)] border border-destructive/40 hover:bg-destructive/20 whitespace-nowrap',
 };
 
 const SIZES = {
