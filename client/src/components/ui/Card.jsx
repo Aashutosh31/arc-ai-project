@@ -27,9 +27,9 @@ export function CardContent({ className = '', ...props }) {
 const BADGE_TONES = {
   default: 'bg-muted text-foreground',
   primary: 'bg-primary text-primary-foreground',
-  success: 'bg-success text-black',
-  warning: 'bg-warning text-black',
-  destructive: 'bg-destructive text-white',
+  success: 'bg-success text-success-foreground',
+  warning: 'bg-warning text-warning-foreground',
+  destructive: 'bg-destructive text-destructive-foreground',
 };
 
 export function Badge({ tone = 'default', className = '', ...props }) {

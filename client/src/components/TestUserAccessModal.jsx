@@ -1,4 +1,5 @@
 import styled from 'styled-components';
+import { Button as UiButton } from './ui';
 
 const ModalOverlay = styled.div`
   position: fixed;
@@ -71,59 +72,31 @@ const ButtonGroup = styled.div`
   flex-direction: column;
 `;
 
-const Button = styled.button`
+// Fixed sky-blue CTA: deliberate button composition, not app theme.
+// Self-contained (no shared base): secondary/tertiary actions use ui/Button.
+const PrimaryButton = styled.button`
   padding: 12px 24px;
   border: none;
   border-radius: var(--radius-sm);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   text-decoration: none;
   display: inline-block;
   text-align: center;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: linear-gradient(135deg, #64c8ff 0%, #4ba3d9 100%);
+  color: #0f1729;
 
   &:hover {
     transform: translateY(-2px);
+    background: linear-gradient(135deg, #7ed5ff 0%, #5bb0e8 100%);
+    box-shadow: 0 8px 20px rgba(100, 200, 255, 0.3);
   }
 
   &:active {
     transform: translateY(0);
-  }
-`;
-
-// Fixed sky-blue CTA: deliberate button composition, not app theme.
-const PrimaryButton = styled(Button)`
-  background: linear-gradient(135deg, #64c8ff 0%, #4ba3d9 100%);
-  color: #0f1729;
-  font-weight: 600;
-
-  &:hover {
-    background: linear-gradient(135deg, #7ed5ff 0%, #5bb0e8 100%);
-    box-shadow: 0 8px 20px rgba(100, 200, 255, 0.3);
-  }
-`;
-
-const SecondaryButton = styled(Button)`
-  background: rgba(100, 200, 255, 0.1);
-  color: var(--accent-soft);
-  border: 1px solid rgba(100, 200, 255, 0.3);
-
-  &:hover {
-    background: rgba(100, 200, 255, 0.15);
-    border-color: rgba(100, 200, 255, 0.5);
-  }
-`;
-
-const TertiaryButton = styled(Button)`
-  background: transparent;
-  color: var(--foreground-muted);
-  border: 1px solid rgba(100, 200, 255, 0.2);
-
-  &:hover {
-    background: rgba(100, 200, 255, 0.05);
-    color: var(--foreground);
   }
 `;
 
@@ -158,12 +131,12 @@ const TestUserAccessModal = ({ isOpen, onClose, onProceed }) => {
           <PrimaryButton onClick={handleRequestAccess}>
             Request Access
           </PrimaryButton>
-          <SecondaryButton onClick={onProceed}>
+          <UiButton variant="secondary" onClick={onProceed}>
             I am Already a Test User
-          </SecondaryButton>
-          <TertiaryButton onClick={onClose}>
+          </UiButton>
+          <UiButton variant="ghost" onClick={onClose}>
             Cancel
-          </TertiaryButton>
+          </UiButton>
         </ButtonGroup>
       </ModalContainer>
     </ModalOverlay>

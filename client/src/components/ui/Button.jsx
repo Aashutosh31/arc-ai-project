@@ -8,7 +8,7 @@ const VARIANTS = {
   primary: 'bg-primary text-primary-foreground hover:brightness-110 shadow-md',
   secondary: 'bg-card text-foreground border border-border hover:border-primary/50',
   ghost: 'bg-transparent text-foreground hover:bg-muted',
-  destructive: 'bg-destructive text-white hover:brightness-110',
+  destructive: 'bg-destructive text-destructive-foreground hover:brightness-110',
 };
 
 const SIZES = {
