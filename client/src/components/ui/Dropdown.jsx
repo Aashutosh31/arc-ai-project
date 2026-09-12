@@ -1,10 +1,18 @@
 /**
  * Source-owned ARC Dropdown primitive. Click-outside via dismiss backdrop.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 export function Dropdown({ label, className = '', children }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open ]);
   return (
     <div className={`relative inline-block ${className}`}>
       <button

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { useSocket } from '../hooks/useSocket';
+import { Button as UiButton, Input as UiInput, Textarea as UiTextarea } from './ui';
 
 const Overlay = styled.div`
   position: fixed;
@@ -33,13 +34,6 @@ const Title = styled.h3`
   margin: 0;
   font-size: 16px;
   color: var(--accent-soft);
-`;
-
-const Close = styled.button`
-  background: transparent;
-  border: none;
-  color: var(--foreground-muted);
-  cursor: pointer;
 `;
 
 const QRBox = styled.div`
@@ -77,12 +71,9 @@ const Row = styled.div`
   display:flex; gap:8px; align-items: center;
 `;
 
-const Input = styled.input`
-  flex:1; padding:8px;border-radius:8px;border:1px solid rgba(120,120,160,0.35);background:var(--surface);color:var(--foreground);
-`;
-
-const Textarea = styled.textarea`
-  width:100%; min-height:80px; padding:8px;border-radius:8px;border:1px solid rgba(120,120,160,0.35);background:var(--surface);color:var(--foreground);
+const InputGrow = styled.div`
+  flex: 1;
+  min-width: 0;
 `;
 
 // Fixed WhatsApp-blue CTA: deliberate third-party brand composition, not app theme.
@@ -186,7 +177,7 @@ export default function WhatsAppModal({ isOpen, onClose }) {
       <Modal>
         <Header>
           <Title>WhatsApp Connect</Title>
-          <Close onClick={onClose}>Close</Close>
+          <UiButton variant="ghost" size="sm" onClick={onClose}>Close</UiButton>
         </Header>
 
         <QRBox>
@@ -204,10 +195,12 @@ export default function WhatsAppModal({ isOpen, onClose }) {
 
         <Controls>
           <Row>
-            <Input placeholder="Recipient name or alias" value={to} onChange={(e)=>setTo(e.target.value)} />
+            <InputGrow>
+              <UiInput placeholder="Recipient name or alias" value={to} onChange={(e)=>setTo(e.target.value)} />
+            </InputGrow>
             <Button type="button" onClick={handleSend}>Send</Button>
           </Row>
-          <Textarea placeholder="Message" value={message} onChange={(e)=>setMessage(e.target.value)} />
+          <UiTextarea placeholder="Message" value={message} onChange={(e)=>setMessage(e.target.value)} />
         </Controls>
       </Modal>
     </Overlay>

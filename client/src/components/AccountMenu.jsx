@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import styled from 'styled-components';
+import { Badge } from './ui';
 
 const Wrapper = styled.div`
   position: relative;
@@ -9,10 +10,10 @@ const AvatarButton = styled.button`
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border);
   background: ${({ $guest }) => ($guest
-    ? 'rgba(255, 207, 112, 0.12)'
-    : 'linear-gradient(135deg, rgba(var(--primary-rgb),0.25), rgba(184,135,255,0.25))')};
+    ? 'rgba(var(--warning-rgb), 0.12)'
+    : 'linear-gradient(135deg, rgba(var(--primary-rgb),0.25), rgba(var(--violet-rgb),0.25))')};
   color: ${({ $guest }) => ($guest ? 'var(--warning)' : 'var(--foreground)')};
   font-size: 13px;
   font-weight: 700;
@@ -30,7 +31,7 @@ const Menu = styled.div`
   right: 0;
   width: 264px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--border);
   background: var(--surface-overlay);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
   overflow: hidden;
@@ -57,20 +58,6 @@ const Sub = styled.div`
   margin-top: 3px;
 `;
 
-const SessionBadge = styled.span`
-  display: inline-block;
-  margin-top: 8px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 3px 9px;
-  border-radius: 999px;
-  color: ${({ $guest }) => ($guest ? 'var(--warning)' : 'var(--success)')};
-  border: 1px solid ${({ $guest }) => ($guest ? 'rgba(255,207,112,0.3)' : 'rgba(77,255,176,0.3)')};
-  background: ${({ $guest }) => ($guest ? 'rgba(255,207,112,0.06)' : 'rgba(77,255,176,0.06)')};
-`;
-
 const MenuRow = styled.div`
   padding: 10px 16px;
   display: flex;
@@ -78,7 +65,7 @@ const MenuRow = styled.div`
   justify-content: space-between;
   font-size: 12.5px;
   color: var(--foreground-muted);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--border-subtle);
 `;
 
 const MenuValue = styled.span`
@@ -99,7 +86,7 @@ const MenuButton = styled.button`
   align-items: center;
   gap: 10px;
   transition: background 0.15s;
-  &:hover { background: rgba(255, 255, 255, 0.04); }
+  &:hover { background: rgba(255, 255, 255, 0.04); color: var(--foreground); }
 `;
 
 const DangerButton = styled(MenuButton)`
@@ -111,7 +98,7 @@ const GuestNote = styled.div`
   font-size: 11.5px;
   line-height: 1.55;
   color: var(--foreground-subtle);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--border-subtle);
   a { color: var(--accent-soft); }
 `;
 
@@ -151,7 +138,13 @@ const AccountMenu = ({ authInfo, googleConnected, whatsappConnected, onOpenSetti
             <Sub>
               {isGuest ? 'Guest session' : `${authInfo?.authProvider || 'local'} account`}
             </Sub>
-            <SessionBadge $guest={isGuest}>{isGuest ? 'Guest' : 'Signed in'}</SessionBadge>
+            <Badge
+              tone={isGuest ? 'warning' : 'success'}
+              outline
+              className="mt-2 uppercase tracking-[0.08em] text-[10px]"
+            >
+              {isGuest ? 'Guest' : 'Signed in'}
+            </Badge>
           </Identity>
 
           {isGuest && (

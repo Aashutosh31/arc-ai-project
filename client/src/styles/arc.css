@@ -335,6 +335,9 @@
   --success: var(--color-success);
   --warning: var(--color-warning);
   --destructive: var(--color-error);
+  --destructive-foreground: var(--color-error-content);
+  --success-foreground: var(--color-success-content);
+  --warning-foreground: var(--color-warning-content);
   --card: var(--surface);
   --card-foreground: var(--foreground);
   --popover: var(--surface-elevated);
@@ -645,4 +648,11 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning-foreground: var(--warning-foreground);
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
+import { Button as UiButton, Input as UiInput, Badge } from './ui';
 
 /**
  * ARC's actual registered tool set (mirrors server/tools registry schemas).
@@ -71,8 +72,8 @@ const Panel = styled.div`
   display: flex;
   flex-direction: column;
   border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  background: linear-gradient(180deg, rgba(13, 14, 32, 0.98), rgba(8, 10, 22, 0.98));
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--surface-elevated), var(--surface));
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
   overflow: hidden;
 `;
@@ -94,19 +95,6 @@ const Subtitle = styled.p`
   color: var(--foreground-subtle);
   font-size: 12.5px;
   line-height: 1.55;
-`;
-
-const SearchInput = styled.input`
-  margin: 12px 16px 0;
-  padding: 10px 14px;
-  border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--foreground);
-  font-size: 13px;
-  outline: none;
-  &:focus { border-color: rgba(var(--primary-rgb), 0.25); }
-  &::placeholder { color: var(--foreground-subtle); }
 `;
 
 const List = styled.div`
@@ -167,37 +155,11 @@ const ToolName = styled.div`
   flex-wrap: wrap;
 `;
 
-const RequireBadge = styled.span`
-  font-family: inherit;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 999px;
-  color: ${({ $ok }) => ($ok ? 'var(--success)' : 'var(--warning)')};
-  border: 1px solid ${({ $ok }) => ($ok ? 'rgba(77,255,176,0.3)' : 'rgba(255,207,112,0.3)')};
-  background: ${({ $ok }) => ($ok ? 'rgba(77,255,176,0.06)' : 'rgba(255,207,112,0.06)')};
-`;
-
 const ToolAbout = styled.div`
   font-size: 12px;
   color: var(--foreground-muted);
   margin-top: 3px;
   line-height: 1.55;
-`;
-
-const TryButton = styled.button`
-  flex-shrink: 0;
-  margin-top: 2px;
-  padding: 6px 12px;
-  border-radius: 7px;
-  border: 1px solid rgba(var(--primary-rgb), 0.2);
-  background: rgba(var(--primary-rgb), 0.06);
-  color: var(--accent-soft);
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-  &:hover { background: rgba(var(--primary-rgb), 0.12); }
 `;
 
 const CATEGORY_ICONS = {
@@ -250,13 +212,15 @@ const ToolsPanel = ({ isOpen, onClose, onUseExample, googleConnected, whatsappCo
             ARC picks the right tool. "Try it" drops an example into the composer.
           </Subtitle>
         </Header>
-        <SearchInput
-          type="search"
-          placeholder="Search tools..."
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          aria-label="Search tools"
-        />
+        <div style={{ margin: '12px 16px 0' }}>
+          <UiInput
+            type="search"
+            placeholder="Search tools..."
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            aria-label="Search tools"
+          />
+        </div>
         <List>
           {Object.entries(grouped).map(([cat, tools]) => (
             <div key={cat}>
@@ -269,20 +233,20 @@ const ToolsPanel = ({ isOpen, onClose, onUseExample, googleConnected, whatsappCo
                     <ToolMain>
                       <ToolName>
                         {t.name}
-                        {req && <RequireBadge $ok={req.ok}>{req.label}</RequireBadge>}
+                        {req && <Badge tone={req.ok ? 'success' : 'warning'} outline className="text-[10px]">{req.label}</Badge>}
                       </ToolName>
                       <ToolAbout>{t.about}</ToolAbout>
                     </ToolMain>
-                    <TryButton type="button" onClick={() => { onUseExample?.(t.example); onClose(); }}>
+                    <UiButton variant="outline" size="sm" className="shrink-0 self-start mt-0.5" type="button" onClick={() => { onUseExample?.(t.example); onClose(); }}>
                       Try it
-                    </TryButton>
+                    </UiButton>
                   </ToolRow>
                 );
               })}
             </div>
           ))}
           {Object.keys(grouped).length === 0 && (
-            <div style={{ padding: 20, textAlign: 'center', color: 'rgba(255,255,255,0.35)', fontSize: 13 }}>
+            <div style={{ padding: 20, textAlign: 'center', color: 'var(--foreground-subtle)', fontSize: 13 }}>
               No tools match "{query}"
             </div>
           )}

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import styled from 'styled-components';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { Badge } from './ui';
 
 const Overlay = styled.div`
   position: fixed;
@@ -17,7 +18,7 @@ const Overlay = styled.div`
 const Palette = styled.div`
   width: min(600px, 100%);
   border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--border);
   background: linear-gradient(180deg, var(--surface-elevated), var(--surface));
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
   overflow: hidden;
@@ -87,15 +88,6 @@ const ResultHint = styled.div`
   margin-top: 2px;
 `;
 
-const ActiveTag = styled.span`
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--success);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  flex-shrink: 0;
-`;
-
 const SectionLabel = styled.div`
   padding: 8px 12px 4px;
   font-size: 10px;
@@ -118,7 +110,7 @@ const Footer = styled.div`
 const Shortcut = styled.kbd`
   padding: 2px 6px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.05);
   font-size: 10px;
   font-family: inherit;
@@ -244,14 +236,14 @@ const CommandPalette = ({
                       <ResultLabel>{cmd.label}</ResultLabel>
                       <ResultHint>{cmd.hint}</ResultHint>
                     </ResultText>
-                    {cmd.active && <ActiveTag>Active</ActiveTag>}
+                    {cmd.active && <Badge tone="success" className="uppercase tracking-[0.06em] text-[10px] shrink-0">Active</Badge>}
                   </ResultItem>
                 );
               })}
             </React.Fragment>
           ))}
           {filtered.length === 0 && (
-            <div style={{ padding: '20px', textAlign: 'center', color: 'rgba(255,255,255,0.35)', fontSize: '13px' }}>
+            <div style={{ padding: '20px', textAlign: 'center', color: 'var(--foreground-subtle)', fontSize: '13px' }}>
               No matching commands
             </div>
           )}
