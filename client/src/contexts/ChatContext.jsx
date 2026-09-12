@@ -54,6 +54,27 @@ export const ChatProvider = ({ children }) => {
     setIsStreaming(false);
   }, []);
 
+  // Prepend an older history page ahead of the current list (Stage 2 cursor
+  // pagination). Deduplicates by database id — never by text/timestamp/index.
+  // Live (id-less) messages are always preserved. Functional update so a
+  // streaming append landing mid-prepend cannot produce duplicates.
+  const prependMessages = useCallback((olderMessages = []) => {
+    if (!Array.isArray(olderMessages) || olderMessages.length === 0) return;
+    setMessages((prev) => {
+      const known = new Set();
+      for (const m of prev) {
+        if (m && m.id !== null && m.id !== undefined) known.add(String(m.id));
+      }
+      const novel = olderMessages.filter((m) => {
+        if (!m || typeof m !== 'object') return false;
+        if (m.id === null || m.id === undefined) return true;
+        return !known.has(String(m.id));
+      });
+      if (novel.length === 0) return prev;
+      return [...novel, ...prev];
+    });
+  }, []);
+
   const clearMessages = useCallback(() => {
     setMessages([]);
     setIsProcessing(false);
@@ -146,6 +167,7 @@ export const ChatProvider = ({ children }) => {
       messages,
       addMessage,
       replaceMessages,
+      prependMessages,
       clearMessages,
       appendBotChunk,
       finishBotStream,
@@ -173,6 +195,7 @@ export const ChatProvider = ({ children }) => {
       messages,
       addMessage,
       replaceMessages,
+      prependMessages,
       clearMessages,
       appendBotChunk,
       finishBotStream,

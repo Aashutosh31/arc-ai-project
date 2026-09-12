@@ -240,22 +240,36 @@ export const ConversationProvider = ({ children }) => {
     }
   }, [activeConversationId, activeWorkspaceId]);
 
+  // History page fetcher (Stage 2 cursor pagination).
+  // Supports { limit, skip, before, signal } and returns the full envelope:
+  //   { messages, total, hasMore, page }
+  // Cursor path: pass `before` (oldest loaded _id); `skip` is omitted then.
+  // Latest-page bootstrap: pass `skip` (anchored from a prior total).
+  // Pagination metadata is never hidden — callers own oldestId/hasMore.
   const fetchConversationMessages = useCallback(async (conversationId, options = {}) => {
-    if (!conversationId) return [];
+    if (!conversationId) return { messages: [], total: 0, hasMore: false, page: null };
     const limit = Number(options.limit || 200);
-    const skip = Number(options.skip || 0);
+    const params = new URLSearchParams();
+    params.set('limit', String(limit));
+    if (options.before) {
+      params.set('before', String(options.before));
+    } else {
+      params.set('skip', String(Number(options.skip || 0)));
+    }
+    if (activeWorkspaceId) params.set('workspaceId', activeWorkspaceId);
 
     console.log('[ConversationContext] fetchConversationMessages:start', {
       conversationId,
       limit,
-      skip
+      skip: options.before ? undefined : Number(options.skip || 0),
+      before: options.before || undefined
     });
 
     // Single request: the server falls back to the unfiltered ownership lookup
     // when the workspace-scoped lookup misses, so no client second-fetch is needed.
     const response = await fetch(
-      `${API_URL}/api/conversations/${conversationId}/messages?limit=${limit}&skip=${skip}${activeWorkspaceId ? `&workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ''}`,
-      { headers: getAuthHeaders() }
+      `${API_URL}/api/conversations/${conversationId}/messages?${params.toString()}`,
+      { headers: getAuthHeaders(), ...(options.signal ? { signal: options.signal } : {}) }
     );
 
     if (!response.ok) {
@@ -270,6 +284,8 @@ export const ConversationProvider = ({ children }) => {
     console.log('[ConversationContext] fetchConversationMessages:done', {
       conversationId,
       count: Array.isArray(data?.messages) ? data.messages.length : 0,
+      total: data?.total ?? null,
+      hasMore: data?.hasMore ?? null,
       statuses: Array.isArray(data?.messages)
         ? data.messages.map((message) => ({
             role: message?.role,
@@ -281,7 +297,12 @@ export const ConversationProvider = ({ children }) => {
           }))
         : []
     });
-    return Array.isArray(data?.messages) ? data.messages : [];
+    return {
+      messages: Array.isArray(data?.messages) ? data.messages : [],
+      total: Number(data?.total ?? 0),
+      hasMore: Boolean(data?.hasMore),
+      page: data?.page ?? null
+    };
   }, [activeWorkspaceId]);
 
   // Register new conversation from socket event

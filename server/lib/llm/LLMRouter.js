@@ -259,7 +259,9 @@ class LLMRouter {
         lastError = error;
 
         const failure = classifyProviderFailure(error);
-        const canFailover = this.isRetryable(error) || failure.isModelError;
+        // Context-budget failures never fail over: the identical payload
+        // would exceed the next provider's budget the same way. Surface it.
+        const canFailover = !failure.isContextBudget && (this.isRetryable(error) || failure.isModelError);
         const isLast = index === providerOrder.length - 1;
         console.error('[LLMRouter] provider request failed', describeProviderFailure(error, {
           providerId: provider.id,
@@ -308,7 +310,7 @@ class LLMRouter {
             normalizeProviderError(streamError, provider.id);
             self.recordFailure(provider.id, streamError, route);
             const streamFailure = classifyProviderFailure(streamError);
-            const canFailoverStream = !emittedChunk &&
+            const canFailoverStream = !streamFailure.isContextBudget && !emittedChunk &&
               (self.isRetryable(streamError) || streamFailure.isModelError) &&
               index < providerOrder.length - 1;
             console.error('[LLMRouter] provider stream failed', describeProviderFailure(streamError, {

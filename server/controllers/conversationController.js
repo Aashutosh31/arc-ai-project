@@ -157,12 +157,22 @@ exports.getConversation = async (req, res) => {
 };
 
 // Get paginated messages for a conversation
+//
+// Two paths (Stage 1):
+//  - Legacy offset path (no `before`): byte-identical behavior —
+//    sort createdAt asc + skip/limit, {messages, total, hasMore}.
+//  - Cursor path (`before=<messageId>`): returns up to `limit` messages
+//    strictly older than the cursor message, ascending within the page,
+//    plus `page: {nextBefore, hasMore}`. `skip` is ignored when `before`
+//    is present. No filtering on streaming/interrupted/state — every
+//    persisted message is returned verbatim (data integrity first).
 exports.getMessages = async (req, res) => {
   try {
     const { userId, workspaceId } = getRequestContext(req);
     const { conversationId } = req.params;
     const limitNum = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
     const skipNum = Math.max(parseInt(req.query.skip, 10) || 0, 0);
+    const beforeRaw = typeof req.query.before === 'string' ? req.query.before.trim() : '';
 
     if (!userId) return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
     if (rejectInvalidWorkspace(res, workspaceId)) return;
@@ -176,6 +186,56 @@ exports.getMessages = async (req, res) => {
 
     const msgQuery = { conversationId };
     if (workspaceId) msgQuery.workspaceId = workspaceId;
+
+    // Cursor path: page strictly older than the cursor message.
+    if (beforeRaw) {
+      if (!isValidObjectId(beforeRaw)) {
+        return res.status(400).json({ error: 'Invalid cursor.', code: 'INVALID_CURSOR' });
+      }
+
+      // Cursor is scoped to this conversation: a cursor from another
+      // conversation (or a deleted message) must not leak/return data.
+      const cursorDoc = await Message.findOne({ ...msgQuery, _id: beforeRaw }).lean();
+      if (!cursorDoc) {
+        return res.status(404).json({ error: 'Cursor message not found.', code: 'CURSOR_NOT_FOUND' });
+      }
+
+      // Cursor page: default 40, clamp 1-100. Independent of the legacy
+      // limit clamp above so existing callers are unaffected.
+      const cursorLimit = Math.min(Math.max(parseInt(req.query.limit, 10) || 40, 1), 100);
+
+      const rangeQuery = {
+        ...msgQuery,
+        $or: [
+          { createdAt: { $lt: cursorDoc.createdAt } },
+          { createdAt: cursorDoc.createdAt, _id: { $lt: cursorDoc._id } }
+        ]
+      };
+
+      // Newest-first scan (served by message_cursor_pagination), limit+1
+      // probe to determine hasMore without an extra range count. Response
+      // order stays ascending to match the legacy path.
+      const [probed, total] = await Promise.all([
+        Message.find(rangeQuery)
+          .sort({ createdAt: -1, _id: -1 })
+          .limit(cursorLimit + 1)
+          .lean(),
+        Message.countDocuments(msgQuery)
+      ]);
+
+      const hasMore = probed.length > cursorLimit;
+      const pageDocs = (hasMore ? probed.slice(0, cursorLimit) : probed).reverse();
+
+      return res.json({
+        messages: pageDocs,
+        total,
+        hasMore,
+        page: {
+          nextBefore: pageDocs.length > 0 ? String(pageDocs[0]._id) : null,
+          hasMore
+        }
+      });
+    }
 
     const messages = await Message.find(msgQuery)
       .sort({ createdAt: 1 })

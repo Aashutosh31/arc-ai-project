@@ -110,7 +110,6 @@ const MarkdownBody = styled.div`
   table {
     width: max-content;
     min-width: 100%;
-    max-width: 100%;
     border-collapse: collapse;
     margin: 0;
     font-size: 13.5px;
@@ -196,7 +195,11 @@ const MarkdownBody = styled.div`
 `;
 
 const TableScroll = styled.div`
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
   margin: 1.1em 0;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 10px;
@@ -206,12 +209,11 @@ const TableScroll = styled.div`
   &::-webkit-scrollbar { height: 6px; }
   &::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
-  /* Same wide-viewport breakout as code blocks (see MarkdownBody pre). */
-  @media (min-width: 1100px) {
-    --out: max(0px, min(110px, calc((100vw - 280px - 980px - 48px) / 2)));
-    margin-left: calc(-1 * var(--out));
-    margin-right: calc(-1 * var(--out));
-  }
+  /* Deliberately NO wide-viewport breakout (unlike code blocks): negative
+     margins would push this scroll container outside overflow:hidden
+     ancestors (e.g. the collapsed Deep Research wrapper) on desktop only,
+     clipping table/scrollbar ends with no usable scroll. The wrapper always
+     fits the prose column; wide tables scroll INSIDE it at every viewport. */
 `;
 
 const CodeHeader = styled.div`

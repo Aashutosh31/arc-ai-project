@@ -314,6 +314,23 @@ const classifyProviderFailure = (error) => {
     message.includes('resource_exhausted') ||
     message.includes('too many requests');
 
+  // Request exceeds the provider's context/token budget (HTTP 413 or an
+  // explicit context-length complaint). Distinct from a transient rate limit:
+  // the IDENTICAL payload would fail on any provider, so it must never be
+  // retried or failed over blindly — only shrunk or refused with a truthful
+  // message. Matched on status first; message patterns are secondary and
+  // deliberately narrow ('rate_limit_exceeded' uses underscores, so it never
+  // collides with the 'rate limit' transient pattern above).
+  const isContextBudget =
+    status === 413 ||
+    message.includes('rate_limit_exceeded') ||
+    message.includes('request_too_large') ||
+    message.includes('request too large') ||
+    message.includes('context_length_exceeded') ||
+    message.includes('context length') ||
+    message.includes('maximum context') ||
+    message.includes('tokens per minute');
+
   // Treat API key errors (400/401) as transient to trigger provider fallback.
   // OpenAI-compatible providers (Groq) report invalid keys as 401
   // ("Invalid API Key", "Unauthorized"); Mistral uses 401 "Unauthorized".
@@ -344,7 +361,7 @@ const classifyProviderFailure = (error) => {
     message.includes('timeout') ||
     message.includes('network');
 
-  return { isRateLimit, isTransient, status, message, isApiKeyError, isModelError };
+  return { isRateLimit, isTransient, status, message, isApiKeyError, isModelError, isContextBudget };
 };
 
 // Normalize provider SDK errors to a common shape WITHOUT touching secrets.
@@ -369,7 +386,7 @@ const normalizeProviderError = (error, providerId = null) => {
     if (/api key not valid|invalid api key/i.test(message)) {
       error.providerCode = 'API_KEY_INVALID';
     } else {
-      const match = message.match(/(API_KEY_INVALID|invalid_model|INVALID_ARGUMENT|SAFETY|RESOURCE_EXHAUSTED|model_not_found)/i);
+      const match = message.match(/(API_KEY_INVALID|invalid_model|INVALID_ARGUMENT|SAFETY|RESOURCE_EXHAUSTED|model_not_found|rate_limit_exceeded|context_length_exceeded|request_too_large)/i);
       if (match) error.providerCode = match[1];
     }
   }
