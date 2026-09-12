@@ -15,6 +15,7 @@
   "dependencies": {
     "@google/genai": "^2.0.1",
     "@mistralai/mistralai": "^1.15.1",
+    "@modelcontextprotocol/client": "^2.0.0",
     "@pinecone-database/pinecone": "^7.1.0",
     "axios": "^1.16.0",
     "bcryptjs": "^3.0.2",
@@ -47,6 +48,9 @@
     "yt-search": "^2.13.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "nodemon": "^3.1.10",
+    "zod": "^4.6.2"
   }
 }

@@ -1,5 +1,6 @@
 const toolRegistry = require('../tools/index');
-const { consumeCredits } = require('./creditService');
+const { consumeCredits, isGuestActorId } = require('./creditService');
+const { McpToolSource, isMcpToolName } = require('../lib/mcp');
 
 const TOOL_CREDIT_COSTS = {
     executeCode: 2,
@@ -22,14 +23,36 @@ const TOOL_CREDIT_COSTS = {
  */
 class TaskExecutor {
     async executeTool(toolName, args, userId, socket = null, executionOptions = {}) {
-        console.log(`[TaskExecutor] Before tool execution: ${toolName}`, args || {});
+        console.log(`[TaskExecutor] Before tool execution: ${toolName}`);
         
         try {
             if (executionOptions?.signal?.aborted) {
                 return { success: false, cancelled: true, error: 'Execution aborted before tool start.' };
             }
 
-            const tool = toolRegistry.getTool(toolName);
+            let tool = toolRegistry.getTool(toolName);
+            const isMcp = !tool && isMcpToolName(toolName);
+
+            if (isMcp) {
+                // MCP fallback: native registry first, MCP only on a miss.
+                // Native tools can never be shadowed by an MCP server.
+                try {
+                    tool = await McpToolSource.resolveTool(toolName, {
+                        workspaceId: executionOptions?.workspaceId || null,
+                        isGuest: isGuestActorId(userId),
+                        signal: executionOptions?.signal || null
+                    });
+                } catch (err) {
+                    return {
+                        success: false,
+                        error: err?.message || `MCP tool ${toolName} unavailable.`,
+                        errorType: err?.category || 'mcp.protocol_error',
+                        retryable: Boolean(err?.retryable),
+                        tool: toolName,
+                        cancelled: err?.category === 'mcp.cancelled'
+                    };
+                }
+            }
             
             if (!tool) {
                 console.warn(`[TaskExecutor] AI requested an unknown tool: ${toolName}`);
@@ -77,14 +100,21 @@ class TaskExecutor {
             // Execute the tool's modular logic
             const result = await tool.execute(args, context, socket);
 
-            console.log(`[TaskExecutor] After tool execution: ${toolName}`, result);
-            if (!result?.success) {
+            console.log(`[TaskExecutor] After tool execution: ${toolName}`);
+            if (!result?.success && !isMcp) {
                 console.warn('[TaskExecutor] Tool returned failure payload:', {
                     toolName,
                     error: result?.error || result?.message || null,
                     diagnostic: result?.diagnostic || null,
                     cancelled: Boolean(result?.cancelled),
                     payloadPreview: JSON.stringify(result).slice(0, 500)
+                });
+            } else if (!result?.success && isMcp) {
+                console.warn('[TaskExecutor] MCP tool returned failure payload:', {
+                    toolName,
+                    errorType: result?.errorType || null,
+                    cancelled: Boolean(result?.cancelled),
+                    retryable: Boolean(result?.retryable)
                 });
             }
             return result;
