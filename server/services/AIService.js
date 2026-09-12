@@ -14,10 +14,22 @@ const WorkspaceContextManager = require('./WorkspaceContextManager');
 const TaskPlanner = require('./TaskPlanner');
 const ToolRecoveryManager = require('./ToolRecoveryManager');
 const { upsertTextVector } = require('./workspaceIndexService');
-const { buildProviderContinuationMessages, normalizeProviderError, describeProviderFailure } = require('../lib/llm/utils');
+const { buildProviderContinuationMessages, normalizeProviderError, describeProviderFailure, classifyProviderFailure } = require('../lib/llm/utils');
+const { selectToolSchemas, detectOutputIntent, activeToolNamesFromCalls, selectContinuationTools } = require('../lib/llm/toolSelection');
+const {
+    OUTPUT_BUDGET_DEFAULT,
+    OUTPUT_BUDGET_EXTENDED,
+    DOC_CHARS_INITIAL,
+    assembleBudgetedRequest
+} = require('../lib/llm/contextBudget');
 const WorkspaceRuntimeManager = require('./WorkspaceRuntimeManager');
 const WorkspaceLogger = require('../lib/WorkspaceLogger');
 const ttsService = require('./ttsService');
+
+// Truthful refusal when a request cannot fit the provider context budget
+// even after deterministic compaction. Used both for pre-provider refusal
+// and for provider-reported 413s — one message, no duplication drift.
+const CONTEXT_BUDGET_USER_MESSAGE = "That request exceeds the current AI provider's context budget. Please start a new conversation or shorten the request and try again.";
 
 const SCHEDULE_KEYWORDS = [
     'schedule',
@@ -594,17 +606,15 @@ class AIService {
                 });
             }
 
-            const recentMemories = isGuest ? [] : await AIMemory.find({ userId, workspaceId: workspaceContext.workspaceId || null }).sort({ pinned: -1, timestamp: -1 }).limit(8)
-                .then((items) => items.reverse()
-                    .filter(mem => mem.query && mem.response)
-                    .map(mem => [
-                        { role: 'user', content: String(mem.query) },
-                        { role: 'assistant', content: String(mem.response) }
-                    ]).flat());
+            // Candidate pools for the budget pipeline: fetched wider than the
+            // old fixed top-N so ranking (pinned > relevance > recency) can
+            // choose by value instead of recency alone. The pipeline caps
+            // what is actually sent; memories are never injected verbatim.
+            const memoryDocs = isGuest ? [] : await AIMemory.find({ userId, workspaceId: workspaceContext.workspaceId || null }).sort({ pinned: -1, timestamp: -1 }).limit(20).lean();
 
             const baseMessageContent = text || (document ? `Please analyze the attached document: ${document.name}` : 'Hello');
 
-                        const userFacts = isGuest ? [] : await UserFact.find({ userId, workspaceId: workspaceContext.workspaceId || null }).sort({ pinned: -1, createdAt: -1 }).limit(12).lean();
+                        const factDocs = isGuest ? [] : await UserFact.find({ userId, workspaceId: workspaceContext.workspaceId || null }).sort({ pinned: -1, createdAt: -1 }).limit(20).lean();
 
                         let retrievalItems = [];
                         if (!isGuest) {
@@ -619,27 +629,9 @@ class AIService {
                             }
                         }
 
-            const recentMemoryTurnsText = recentMemories.length > 0
-                ? `\n\nRECENT MEMORY TURNS:\n${recentMemories.map((message, index) => `${index + 1}. ${String(message.content || '').slice(0, 180)}`).join('\n')}`
-                : '';
-
-            const memoryContextLines = retrievalItems.length > 0
-                ? retrievalItems.map((item) => {
-                    const label = item.type === 'conversation' ? 'Conversation' : item.type === 'message' ? 'Message' : 'Memory';
-                    return `- [${label} | ${item.source} | score ${(item.score * 100).toFixed(0)}] ${String(item.snippet || '').slice(0, 220)}`;
-                }).join('\n')
-                : '';
-
-            let longTermMemoryText = "";
-            if (userFacts.length > 0) {
-                longTermMemoryText = "\n\nCRITICAL CONTEXT - You permanently know these facts about the user:\n" + 
-                    userFacts.map(f => `- ${f.fact}`).join("\n");
-            }
-
-            let retrievalContextText = recentMemoryTurnsText;
-            if (memoryContextLines) {
-                retrievalContextText += `\n\nRELEVANT RETRIEVAL CONTEXT (ranked, deduplicated):\n${memoryContextLines}`;
-            }
+            // Memory/fact/RAG prose is rendered by the budget pipeline below
+            // (compactMemories/compactFacts/compactRag) — the raw candidate
+            // pools above are ranked and capped there, never injected raw.
 
             if (socket) {
                 socket.emit('ai:agent:status', {
@@ -668,8 +660,10 @@ class AIService {
                         parsedText = Buffer.from(document.base64, 'base64').toString('utf-8');
                     }
 
-                    if (parsedText.length > 80000) {
-                        parsedText = parsedText.substring(0, 80000) + "\n... [Document truncated due to length limits]";
+                    // Initial document cap: the budget pipeline may shrink this
+                    // further; the truncation notice pattern is preserved.
+                    if (parsedText.length > DOC_CHARS_INITIAL) {
+                        parsedText = parsedText.substring(0, DOC_CHARS_INITIAL) + "\n... [Document truncated due to length limits]";
                     }
 
                     documentContext = `\n\n--- ATTACHED FILE CONTEXT (${document.name}) ---\nThe user has attached a file for you to read. Here is the text extracted from it:\n\n${parsedText}\n-----------------------------------\n`;
@@ -684,25 +678,18 @@ class AIService {
                 }
             }
 
-            let messageContent = baseMessageContent;
-            messageContent = `${messageContent}${documentContext}`;
+            // ---- Budgeted request assembly (contextBudget pipeline) ----
+            // Memories are compacted to short bullets (never verbatim
+            // messages[] turns), facts/RAG are capped, tools are the
+            // intent-matched subset (never all 22), and output is explicit.
+            // provider-context (messages[]) carries ONLY the current user
+            // turn; short-term continuity arrives via RAG message snippets.
+            // Display history (pagination) and provider context stay separate.
+            const toolPick = selectToolSchemas(baseMessageContent, () => toolRegistry.getSchemas());
+            const outputIntent = detectOutputIntent(baseMessageContent);
+            const outputBudget = outputIntent === 'extended' ? OUTPUT_BUDGET_EXTENDED : OUTPUT_BUDGET_DEFAULT;
 
-            const messages = [
-                ...recentMemories,
-                {
-                    role: 'user',
-                    content: messageContent
-                }
-            ];
-
-            if (socket) {
-                socket.emit('ai:agent:status', {
-                    status: retrievalItems.length > 0 ? 'retrieving memory' : 'thinking',
-                    detail: retrievalItems.length > 0 ? `${retrievalItems.length} relevant workspace items prepared.` : 'No strong memory matches found.'
-                });
-            }
-
-            const systemPrompt = `You are ARC-AI, an advanced, highly intelligent autonomous agent.
+            const systemTemplate = `You are ARC-AI, an advanced, highly intelligent autonomous agent.
                     The current system date and time is: ${currentDateString}.
                     
                     CORE DIRECTIVES:
@@ -723,7 +710,7 @@ class AIService {
                     MEMORY DIRECTIVE:
                     Use the ranked retrieval context below only when it is relevant. Prefer the most recent and semantically matching items. Ignore duplicates.
 
-                    ${longTermMemoryText}${retrievalContextText}
+                    __LONG_TERM_MEMORY_SLOT____RETRIEVAL_CONTEXT_SLOT__
 
                     IDENTITY DIRECTIVE:
                     If a user asks "who created you", "who made you", or similar identity/creator questions, reply exactly with:
@@ -731,7 +718,44 @@ class AIService {
                     "I am ARC-AI, an autonomous multimodal AI platform created by Aashutosh Bairagi — an AI systems engineer focused on realtime architectures, autonomous agents, and next-generation intelligent software systems."
                     `;
 
-            const tools = toolRegistry.getSchemas();
+            const budgeted = assembleBudgetedRequest({
+                systemTemplate,
+                baseUserText: baseMessageContent,
+                docText: documentContext,
+                memoryDocs,
+                factDocs,
+                ragItems: retrievalItems,
+                selectedTools: toolPick.tools,
+                outputBudget,
+                query: baseMessageContent
+            });
+
+            if (!budgeted.ok) {
+                // Even the minimal profile overflows (gigantic user input):
+                // refuse WITHOUT calling the provider — same terminal
+                // contract as a provider error, truthful message.
+                console.error('[AIService] contextBudget refusal', {
+                    ...budgeted.report,
+                    toolGroups: toolPick.groups,
+                    outputIntent
+                });
+                if (socket) socket.emit('bot_error', CONTEXT_BUDGET_USER_MESSAGE);
+                if (socket) socket.emit('ai:tts:response:chunk', { chunk: '', displayText: '', isFinal: true });
+                return "Error";
+            }
+
+            const messages = budgeted.messages;
+            const systemPrompt = budgeted.systemPrompt;
+            const tools = budgeted.tools;
+            const maxTokens = budgeted.maxTokens;
+
+            if (socket) {
+                socket.emit('ai:agent:status', {
+                    status: retrievalItems.length > 0 ? 'retrieving memory' : 'thinking',
+                    detail: retrievalItems.length > 0 ? `${retrievalItems.length} relevant workspace items prepared.` : 'No strong memory matches found.'
+                });
+            }
+
             const attachments = imageBase64
                 ? [{ type: 'image', data: imageBase64, mimeType: 'image/jpeg' }]
                 : [];
@@ -744,11 +768,26 @@ class AIService {
             }
 
             deliveryTiming.providerStartAt = Date.now();
+            // Budget preflight diagnostic (sizes/counts ONLY — never content,
+            // keys, or credentials). §13 shape: per-category estimates plus
+            // the enforced budgets and any compaction applied. Diagnostics
+            // must never break the request path.
+            try {
+                console.log('[AIService] contextBudget', {
+                    ...budgeted.report,
+                    toolGroups: toolPick.groups,
+                    outputIntent,
+                    hasAttachments: attachments.length > 0
+                });
+            } catch {
+                // Diagnostics must never break the request path.
+            }
             const response = await this.llmRouter.generate({
                 messages,
                 systemPrompt,
                 tools,
                 stream: false,
+                maxTokens,
                 temperature: imageBase64 ? 0.2 : 0.3,
                 userContext: {
                     userId,
@@ -817,18 +856,33 @@ class AIService {
                     provider: response?.provider || 'mistral'
                 });
 
+                // Continuation of the SAME tool-use transaction (not a new
+                // intent): the tools referenced by the active tool calls are
+                // mandatory. Sending tools=[] here makes providers reject the
+                // request ("tool choice is none, but model called a tool").
+                const activeContinuationNames = activeToolNamesFromCalls(assistantMessage?.toolCalls);
+                const continuationPick = selectContinuationTools(
+                    tools,
+                    activeContinuationNames,
+                    () => toolRegistry.getSchemas()
+                );
+
                 console.log('[AIService] provider continuation payload', continuationMessages.map((message) => ({
                     role: message.role,
                     toolCallIds: Array.isArray(message.toolCalls)
                       ? message.toolCalls.map((toolCall) => toolCall?.id).filter(Boolean)
                       : message.toolCallId || message.tool_call_id || null
-                })));
+                })), {
+                    continuationTools: continuationPick.tools.map((t) => t?.function?.name).filter(Boolean),
+                    mandatoryCount: continuationPick.mandatoryCount
+                });
 
                 return this.llmRouter.generate({
                     messages: continuationMessages,
                     systemPrompt,
-                    tools: [],
+                    tools: continuationPick.tools,
                     stream: true,
+                    maxTokens,
                     temperature: imageBase64 ? 0.2 : 0.3,
                     userContext: {
                         userId,
@@ -840,6 +894,106 @@ class AIService {
                     attachments: [],
                     signal: controller.signal
                 });
+            };
+
+            // Consume a continuation stream while capturing any FOLLOW-UP
+            // tool calls the model emits instead of text (Groq surfaces them
+            // as a final textless { toolCalls } chunk). The tap observes every
+            // stream chunk — consume() itself skips textless chunks before
+            // its callback, so observing at the callback would miss exactly
+            // the terminal tool-call chunk. No StreamingRuntime change.
+            const consumeContinuation = async (generation, followUp, onChunk) => {
+                if (!generation || !generation.stream) {
+                    return this.streamingRuntime.consume(
+                        generation ? generation.stream : null,
+                        socket, controller.signal, onChunk || null, deliveryHooks);
+                }
+                const tap = async function* tapped() {
+                    for await (const chunk of generation.stream) {
+                        if (chunk && Array.isArray(chunk.toolCalls) && chunk.toolCalls.length > 0) {
+                            followUp.push(...chunk.toolCalls);
+                        }
+                        yield chunk;
+                    }
+                };
+                return this.streamingRuntime.consume(tap(), socket, controller.signal, onChunk || null, deliveryHooks);
+            };
+
+            // Bounded second tool round: if a continuation answers with more
+            // tool calls instead of text, execute them directly (max 4, no
+            // planner re-entry) and synthesize once more with the same
+            // mandatory-tools continuation path. If THAT still yields calls
+            // instead of text, fall back to flattened text-only synthesis
+            // (no tool_calls blocks, tools:[]) which always terminates the
+            // loop with a natural-language answer.
+            const runFollowUpContinuation = async (followUpCalls, siteOnChunk) => {
+                const bounded = (Array.isArray(followUpCalls) ? followUpCalls : []).slice(0, 4);
+                const toolResults = [];
+                for (const tc of bounded) {
+                    const fname = tc?.function?.name;
+                    if (!fname) continue;
+                    let args = {};
+                    try {
+                        args = typeof tc.function.arguments === 'string'
+                            ? JSON.parse(tc.function.arguments) : tc.function.arguments || {};
+                    } catch { args = {}; }
+                    console.log('[AIService] follow-up tool execution', { tool: fname });
+                    let result = null;
+                    try {
+                        result = await TaskExecutor.executeTool(fname, args, userId, socket, { signal: controller.signal, conversationId, workspaceId: workspaceContext.workspaceId });
+                    } catch (execErr) {
+                        result = { success: false, error: execErr?.message || 'Tool execution failed.' };
+                    }
+                    if (result?.clientAction && socket) socket.emit('ai:client:action', result.clientAction);
+                    toolResults.push({ toolCallId: tc.id, name: fname, content: result });
+                }
+                const assistantMsg = {
+                    role: 'assistant',
+                    content: '',
+                    toolCalls: bounded.map((tc) => ({
+                        id: tc.id,
+                        function: { name: tc?.function?.name, arguments: tc?.function?.arguments || {} }
+                    }))
+                };
+                const gen2 = await makeContinuationGeneration({ assistantMessage: assistantMsg, toolResults });
+                const followUp2 = [];
+                const text2 = await consumeContinuation(gen2, followUp2, siteOnChunk);
+                if (text2 && String(text2).trim()) return text2;
+                if (followUp2.length === 0) return text2;
+                console.log('[AIService] follow-up still tool-calling; flattened text synthesis', {
+                    followUpTools: followUp2.map((t) => t?.function?.name).filter(Boolean)
+                });
+                const flatContext = toolResults
+                    .map((r) => {
+                        let body = '';
+                        try {
+                            body = typeof r.content === 'string' ? r.content : JSON.stringify(r.content);
+                        } catch { body = '[unserializable tool result]'; }
+                        if (body.length > 6000) body = `${body.slice(0, 6000)}\n... [truncated]`;
+                        return `[${r.name}] ${body}`;
+                    })
+                    .join('\n');
+                const flat = await this.llmRouter.generate({
+                    messages: [{
+                        role: 'user',
+                        content: `${baseMessageContent}\n\nTool results:\n${flatContext}\n\nAnswer the user's request directly using these results.`
+                    }],
+                    systemPrompt,
+                    tools: [],
+                    stream: true,
+                    maxTokens,
+                    temperature: imageBase64 ? 0.2 : 0.3,
+                    userContext: {
+                        userId,
+                        isGuest,
+                        calendarIntent,
+                        requestKey: key,
+                        taskMode: imageBase64 ? 'multimodal' : 'text'
+                    },
+                    attachments: [],
+                    signal: controller.signal
+                });
+                return consumeContinuation(flat, [], siteOnChunk);
             };
 
             if (toolCalls && toolCalls.length > 0) {
@@ -935,11 +1089,19 @@ class AIService {
                                 toolResults: plannerToolResults
                             });
 
-                            finalOutputText = await this.streamingRuntime.consume(finalGeneration.stream, socket, controller.signal, async (chunkText) => {
+                            const plannerStreamOnChunk = async (chunkText) => {
                                 assistantDraftContent += chunkText;
                                 await persistAssistantDraft(assistantDraftContent, { interrupted: false, state: 'streaming' });
                                 if (ttsBuffer) ttsBuffer.push(chunkText);
-                            }, deliveryHooks);
+                            };
+                            const followUp = [];
+                            finalOutputText = await consumeContinuation(finalGeneration, followUp, plannerStreamOnChunk);
+                            if (!String(finalOutputText || '').trim() && followUp.length > 0) {
+                                console.log('[AIService] continuation requested follow-up tools', {
+                                    tools: followUp.map((t) => t?.function?.name).filter(Boolean)
+                                });
+                                finalOutputText = await runFollowUpContinuation(followUp, plannerStreamOnChunk);
+                            }
                         }
                 } else {
                     console.log('[Planner] Delegating execution inline (quick tool path)');
@@ -1045,7 +1207,15 @@ class AIService {
                         toolResults: providerToolResults
                     });
 
-                    finalOutputText = await this.streamingRuntime.consume(finalGeneration.stream, socket, controller.signal, ttsBuffer ? async (chunkText) => { ttsBuffer.push(chunkText); } : null, deliveryHooks);
+                    const quickStreamOnChunk = ttsBuffer ? async (chunkText) => { ttsBuffer.push(chunkText); } : null;
+                    const quickFollowUp = [];
+                    finalOutputText = await consumeContinuation(finalGeneration, quickFollowUp, quickStreamOnChunk);
+                    if (!String(finalOutputText || '').trim() && quickFollowUp.length > 0) {
+                        console.log('[AIService] continuation requested follow-up tools', {
+                            tools: quickFollowUp.map((t) => t?.function?.name).filter(Boolean)
+                        });
+                        finalOutputText = await runFollowUpContinuation(quickFollowUp, quickStreamOnChunk);
+                    }
                 }
             } else {
                 finalOutputText = response?.text || '';
@@ -1262,8 +1432,14 @@ class AIService {
                 stream: false
             }));
             let userFriendlyError = "An internal system error occurred.";
-            
-                if (error.statusCode === 429 || (error.message && (error.message.includes('capacity exceeded') || error.message.includes('Rate limit exceeded')))) {
+
+            // Context-budget refusal (HTTP 413 / context-length / TPM-limit):
+            // the request itself is oversized, so retrying changes nothing.
+            // Checked before the rate-limit branch via the shared classifier.
+            const budgetFailure = classifyProviderFailure(error);
+            if (budgetFailure.isContextBudget) {
+                userFriendlyError = CONTEXT_BUDGET_USER_MESSAGE;
+            } else if (error.statusCode === 429 || (error.message && (error.message.includes('capacity exceeded') || error.message.includes('Rate limit exceeded')))) {
                 userFriendlyError = imageBase64 
                     ? "Your current multimodal provider is rate-limited right now. Please wait 1-2 minutes and retry the image request."
                     : "The current AI provider is rate-limited. Please wait a minute and try again.";

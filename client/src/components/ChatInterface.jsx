@@ -1,10 +1,11 @@
 import React, { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import styled, { keyframes } from 'styled-components';
-import { useChat, sanitizeForDisplay } from '../contexts/ChatContext';
+import { useChat } from '../contexts/ChatContext';
 import { useSocket } from '../hooks/useSocket';
 import { useConversation } from '../contexts/ConversationContext';
 import { useExecution } from '../contexts/ExecutionContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { HistoryLoader } from '../lib/conversationHistory';
 import MarkdownRenderer from './MarkdownRenderer';
 import { Button as UiButton } from './ui';
 
@@ -405,9 +406,6 @@ const PresenceDot = styled.span`
   background: ${({ $status }) => ($status === 'Completed' ? 'var(--success)' : $status === 'Failed' ? 'var(--destructive)' : 'var(--primary-hex)')};
 `;
 
-const INITIAL_MESSAGES = 60;
-const LOAD_MORE = 40;
-
 const SUGGESTIONS = [
   { icon: '💡', label: 'Explain a concept', prompt: 'Explain a fascinating science concept in simple terms' },
   { icon: '💻', label: 'Help me code', prompt: 'Help me write clean, well explained code for a common task' },
@@ -450,7 +448,7 @@ const ChatMessage = memo(({ msg, isSpeaking, isLast }) => {
 ChatMessage.displayName = 'ChatMessage';
 
 const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => {
-  const { messages, replaceMessages, clearMessages, isProcessing, isStreaming, isSpeaking, getLiveVisionFrame } = useChat();
+  const { messages, replaceMessages, prependMessages: prependStoreMessages, clearMessages, isProcessing, isStreaming, isSpeaking, getLiveVisionFrame } = useChat();
   const { interruptStream, sendCommand, socket, isConnected } = useSocket();
   const { activeExecution, presence, cancelActiveExecution } = useExecution();
   const { activeConversationId, activeConversationRevision, switchConversation, fetchConversations, fetchConversationMessages, updateConversationTitle, ensureConversationReady, isFirstMessageSendingRef } = useConversation();
@@ -460,7 +458,13 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedDocument, setSelectedDocument] = useState(null);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(INITIAL_MESSAGES);
+  // Cursor-history UI state: whether an older page exists + older-page fetch
+  // in flight. Pagination bookkeeping itself (oldestId/hasMore/total) lives
+  // in the HistoryLoader; this mirrors only what rendering needs.
+  const [historyMeta, setHistoryMeta] = useState({ hasMore: false, loadingOlder: false });
+  const [prependKey, setPrependKey] = useState(0);
+  // Bumped when a streaming-deferred history load must re-run after settle.
+  const [historyRefreshTick, setHistoryRefreshTick] = useState(0);
 
   const messageEndRef = useRef(null);
   const messageAreaRef = useRef(null);
@@ -468,6 +472,19 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
   const shouldAutoScrollRef = useRef(true);
   const loadedWorkspaceCountRef = useRef(0);
   const messageLoadSeqRef = useRef(0);
+  // Stage 2 cursor history: stable loader (bookkeeping only, no cache) plus
+  // mirrors consulted by async callbacks so they never close over stale state.
+  const loaderRef = useRef(null);
+  const fetchMessagesRef = useRef(fetchConversationMessages);
+  const messagesRef = useRef(messages);
+  const streamingRef = useRef(false);
+  const historyStaleRef = useRef(false);
+  const staleConvRef = useRef(null);
+  if (!loaderRef.current) {
+    loaderRef.current = new HistoryLoader((conversationId, opts) =>
+      fetchMessagesRef.current(conversationId, opts)
+    );
+  }
   const textareaRef = useRef(null);
   const imageInputRef = useRef(null);
   const docInputRef = useRef(null);
@@ -500,35 +517,82 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
     return () => socket.off('ai:conversation:title', onTitle);
   }, [socket, updateConversationTitle, activeWorkspaceId]);
 
+  // Keep async-history mirrors current (assigned during render — refs only).
+  fetchMessagesRef.current = fetchConversationMessages;
+  messagesRef.current = messages;
+  streamingRef.current = isProcessing || isStreaming;
+
   useEffect(() => {
+    const loader = loaderRef.current;
     const seq = messageLoadSeqRef.current + 1;
     messageLoadSeqRef.current = seq;
     let cancelled = false;
+    const controller = new AbortController();
     const isStale = () => cancelled || seq !== messageLoadSeqRef.current;
+    const isAbort = (e) => e?.name === 'AbortError' || e?.code === 'STALE';
 
     const load = async () => {
       if (!activeConversationId) {
+        loader.reset();
+        historyStaleRef.current = false;
+        staleConvRef.current = null;
         if (activeWorkspaceId) loadedWorkspaceCountRef.current += 1;
         if (loadedWorkspaceCountRef.current > 1) clearMessages();
+        setHistoryMeta({ hasMore: false, loadingOlder: false });
         return;
       }
       if (isFirstMessageSendingRef?.current) { isFirstMessageSendingRef.current = false; return; }
+      // A new latest-page load supersedes any in-flight older-page fetch.
+      loader.abort();
       try {
-        const db = await fetchConversationMessages(activeConversationId, { limit: 500, skip: 0 });
+        const res = await loader.loadLatest(activeConversationId, { signal: controller.signal });
         if (isStale()) return;
-        const mapped = db.map(m => ({ sender: m.role === 'user' ? 'user' : 'ai', text: sanitizeForDisplay(String(m.content || '')), isStreaming: false }));
-        replaceMessages(mapped);
-      } catch (e) { if (!isStale()) console.error('Failed loading messages:', e); }
+        // STREAMING SAFETY: never replace history while the active
+        // conversation is streaming. Defer until the stream settles; the
+        // refresh effect below re-runs this load then.
+        if (streamingRef.current) {
+          historyStaleRef.current = true;
+          staleConvRef.current = activeConversationId;
+          // New conversation with unknown history: hide Load More until
+          // the deferred load completes (also clears any stuck spinner).
+          setHistoryMeta({ hasMore: false, loadingOlder: false });
+          return;
+        }
+        const deferred = historyStaleRef.current && staleConvRef.current === activeConversationId;
+        historyStaleRef.current = false;
+        // Guest/ephemera safety on deferred refresh: the server may hold
+        // nothing (guest messages are never persisted). An empty page must
+        // not blank a non-empty live view — keep it and sync bookkeeping.
+        if (deferred && res.messages.length === 0 && messagesRef.current.length > 0) {
+          loader.oldestId = null;
+          loader.hasMore = false;
+          setHistoryMeta({ hasMore: false, loadingOlder: false });
+          return;
+        }
+        // Server history is authoritative: render every returned message.
+        // No filtering on streaming/interrupted/state/partial — see Stage 0.
+        shouldAutoScrollRef.current = true;
+        replaceMessages(res.messages);
+        setHistoryMeta({ hasMore: res.hasMore, loadingOlder: false });
+      } catch (e) {
+        if (!isStale() && !isAbort(e)) {
+          console.error('Failed loading messages:', e);
+          setHistoryMeta({ hasMore: false, loadingOlder: false });
+        }
+      }
     };
     load();
-    return () => { cancelled = true; };
-  }, [activeConversationId, activeConversationRevision, fetchConversationMessages, replaceMessages, clearMessages]);
+    return () => { cancelled = true; controller.abort(); };
+  }, [activeConversationId, activeConversationRevision, historyRefreshTick, fetchConversationMessages, replaceMessages, clearMessages]);
 
+  // Deferred-refresh: a history load skipped for active streaming re-runs
+  // once the stream settles (same conversation still active). The tick
+  // re-fires the load effect above, which consumes the stale flag itself.
   useEffect(() => {
-    setVisibleCount(c => Math.min(Math.max(c, INITIAL_MESSAGES), messages.length));
-  }, [messages.length]);
-
-  const visibleMessages = messages.slice(Math.max(0, messages.length - visibleCount));
+    if (isProcessing || isStreaming || !historyStaleRef.current) return;
+    if (!activeConversationId || staleConvRef.current !== activeConversationId) return;
+    setHistoryRefreshTick((t) => t + 1);
+  }, [isProcessing, isStreaming, activeConversationId]);
 
   const isNearBottom = (el) => {
     if (!el) return true;
@@ -546,12 +610,47 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
       el.scrollTop = snap.scrollTop + (el.scrollHeight - snap.scrollHeight);
       historyScrollRef.current = null;
     }
-  }, [visibleCount]);
+  }, [prependKey, messages]);
 
-  const handleLoadMore = () => {
+  const handleLoadMore = async () => {
+    const loader = loaderRef.current;
+    if (!loader || historyMeta.loadingOlder || !historyMeta.hasMore) return;
+    // Never prepend older history mid-stream: the live tail is append-only
+    // and a prepend racing it risks misattribution. The button stays
+    // available once the stream settles.
+    if (streamingRef.current) return;
     const el = messageAreaRef.current;
     if (el) historyScrollRef.current = { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight };
-    setVisibleCount(c => Math.min(messages.length, c + LOAD_MORE));
+    setHistoryMeta((m) => ({ ...m, loadingOlder: true }));
+    const seq = messageLoadSeqRef.current + 1;
+    messageLoadSeqRef.current = seq;
+    const isStale = () => seq !== messageLoadSeqRef.current;
+    try {
+      const res = await loader.loadOlder(messagesRef.current);
+      if (isStale()) {
+        // Superseded (e.g. conversation switched): the newer load owns
+        // historyMeta — just release our spinner if it is still ours.
+        setHistoryMeta((m) => ({ ...m, loadingOlder: false }));
+        return;
+      }
+      if (res.messages.length > 0) {
+        prependStoreMessages(res.messages);
+        setPrependKey((k) => k + 1);
+      } else {
+        historyScrollRef.current = null;
+      }
+      setHistoryMeta({ hasMore: res.hasMore, loadingOlder: false });
+    } catch (e) {
+      historyScrollRef.current = null;
+      if (e?.code === 'NO_MORE') {
+        setHistoryMeta({ hasMore: false, loadingOlder: false });
+      } else if (e?.name === 'AbortError' || e?.code === 'STALE') {
+        if (!isStale()) setHistoryMeta((m) => ({ ...m, loadingOlder: false }));
+      } else {
+        console.error('Failed loading older messages:', e);
+        if (!isStale()) setHistoryMeta((m) => ({ ...m, loadingOlder: false }));
+      }
+    }
   };
 
   useLayoutEffect(() => {
@@ -633,7 +732,7 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
     e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
   };
 
-  const isEmpty = visibleMessages.length === 0;
+  const isEmpty = messages.length === 0;
   const canSend = (!inputText.trim() && !selectedImage && !selectedDocument) || isBusy;
 
   // External seed (e.g. ToolsPanel "Try it"): fill composer, focus, don't auto-send.
@@ -655,9 +754,9 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
   return (
     <ChatWrapper>
       <MessageArea ref={messageAreaRef} onScroll={handleScroll} $empty={isEmpty}>
-        {messages.length > visibleMessages.length && (
-          <HistoryButton onClick={handleLoadMore} disabled={visibleCount >= messages.length}>
-            Load earlier ({messages.length - visibleMessages.length} hidden)
+        {historyMeta.hasMore && (
+          <HistoryButton onClick={handleLoadMore} disabled={historyMeta.loadingOlder}>
+            {historyMeta.loadingOlder ? 'Loading…' : 'Load older messages'}
           </HistoryButton>
         )}
 
@@ -688,17 +787,17 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
             </SuggestionGrid>
           </EmptyState>
         ) : (
-          visibleMessages.map((msg, i) => (
+          messages.map((msg, i) => (
             <ChatMessage
-              key={`${messages.length - visibleMessages.length + i}`}
+              key={msg?.id != null ? `msg-${msg.id}` : `live-${i}`}
               msg={msg}
               isSpeaking={isSpeaking}
-              isLast={i === visibleMessages.length - 1}
+              isLast={i === messages.length - 1}
             />
           ))
         )}
 
-        {isProcessing && (visibleMessages.length === 0 || visibleMessages[visibleMessages.length - 1].sender !== 'ai') && (
+        {isProcessing && (messages.length === 0 || messages[messages.length - 1].sender !== 'ai') && (
           <MessageRow $role="assistant">
             <AssistantDoc>
               <AssistantLabel>

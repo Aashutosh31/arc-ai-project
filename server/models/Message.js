@@ -85,8 +85,16 @@ MessageSchema.index({ content: 'text' }, {
   name: 'message_text_search'
 });
 
-// Index for conversation querying
+// Index for conversation querying (legacy offset path: sort createdAt asc + skip)
 MessageSchema.index({ conversationId: 1, createdAt: 1 });
+
+// Index for cursor pagination (Stage 1): latest-page and `before` range scans
+// sort on (createdAt desc, _id desc). Keeps the legacy index above intact
+// until all skip/limit consumers are migrated and verified.
+MessageSchema.index(
+  { conversationId: 1, createdAt: -1, _id: -1 },
+  { name: 'message_cursor_pagination' }
+);
 
 // Auto-update timestamp on save
 MessageSchema.pre('save', function (next) {
