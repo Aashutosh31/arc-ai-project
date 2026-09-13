@@ -41,7 +41,7 @@ const corsOriginHandler = (origin, callback) => {
 
 app.use(cors({
     origin: corsOriginHandler,
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     credentials: true
 }));
 
@@ -191,6 +191,7 @@ app.use('/api/search', searchRoutes);
 app.use('/api/memory', memoryRoutes);
 app.use('/api/workspaces', workspaceRoutes);
 app.use('/api/voice', voiceRoutes);
+app.use('/api/mcp', require('./routes/mcp.js'));
 
 server.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));
 

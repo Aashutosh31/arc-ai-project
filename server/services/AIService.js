@@ -16,6 +16,7 @@ const ToolRecoveryManager = require('./ToolRecoveryManager');
 const { upsertTextVector } = require('./workspaceIndexService');
 const { buildProviderContinuationMessages, normalizeProviderError, describeProviderFailure, classifyProviderFailure } = require('../lib/llm/utils');
 const { selectToolSchemas, detectOutputIntent, activeToolNamesFromCalls, selectContinuationTools } = require('../lib/llm/toolSelection');
+const { McpToolSource } = require('../lib/mcp');
 const {
     OUTPUT_BUDGET_DEFAULT,
     OUTPUT_BUDGET_EXTENDED,
@@ -685,7 +686,35 @@ class AIService {
             // provider-context (messages[]) carries ONLY the current user
             // turn; short-term continuity arrives via RAG message snippets.
             // Display history (pagination) and provider context stay separate.
-            const toolPick = selectToolSchemas(baseMessageContent, () => toolRegistry.getSchemas());
+            // MCP tools ride the same budget pipeline: their schemas are
+            // keyword-scored below and then held to the SAME 6-tool cap and
+            // the 7K context budget (unknown-group rank → dropped first).
+            let mcpSchemas = [];
+            let mcpBlocked = [];
+            try {
+                const mcpPick = await McpToolSource.schemasForRequest({
+                    workspaceId: workspaceContext?.workspaceId || null,
+                    isGuest
+                });
+                mcpSchemas = mcpPick?.schemas || [];
+                // Server-side only: policy-removed tools, used solely for
+                // no-substitution detection below (never sent to any provider).
+                mcpBlocked = mcpPick?.blocked || [];
+            } catch {
+                mcpSchemas = [];
+                mcpBlocked = [];
+            }
+            const toolPick = selectToolSchemas(baseMessageContent, () => toolRegistry.getSchemas(), { mcpSchemas, mcpBlocked });
+            // No-substitution truthfulness: the request targets an MCP
+            // capability removed by workspace policy. No MCP tool was
+            // offered, so guide the model to say so instead of substituting
+            // an unrelated tool or fabricating a result. Generic: names the
+            // blocked wires the user already knows (Settings shows them).
+            let mcpPolicyNote = '';
+            if (toolPick?.mcpSuppressed && Array.isArray(toolPick?.mcpBlockedNames) && toolPick.mcpBlockedNames.length) {
+                const named = toolPick.mcpBlockedNames.slice(0, 3).join(', ');
+                mcpPolicyNote = `\n\nPOLICY NOTICE: the MCP capability requested here (${named}) is currently unavailable in this workspace due to the workspace's MCP tool policy. Do not substitute another tool for it, do not execute an unrelated tool in its place, and do not fabricate its result. Briefly tell the user it is unavailable or blocked by policy.`;
+            }
             const outputIntent = detectOutputIntent(baseMessageContent);
             const outputBudget = outputIntent === 'extended' ? OUTPUT_BUDGET_EXTENDED : OUTPUT_BUDGET_DEFAULT;
 
@@ -716,7 +745,7 @@ class AIService {
                     If a user asks "who created you", "who made you", or similar identity/creator questions, reply exactly with:
 
                     "I am ARC-AI, an autonomous multimodal AI platform created by Aashutosh Bairagi — an AI systems engineer focused on realtime architectures, autonomous agents, and next-generation intelligent software systems."
-                    `;
+                    ${mcpPolicyNote}`;
 
             const budgeted = assembleBudgetedRequest({
                 systemTemplate,

@@ -6,6 +6,7 @@ import { THEME_CHANGE_EVENT, applyTheme, getStoredTheme } from '../utils/theme';
 import { listThemes } from '../theme/themes';
 import { Button as UiButton } from './ui';
 import { Badge } from './ui';
+import McpSettings from './McpSettings';
 
 const SECTIONS = [
   { id: 'account', label: 'Account', icon: '👤' },
@@ -15,6 +16,7 @@ const SECTIONS = [
   { id: 'memory', label: 'Memory', icon: '💾' },
   { id: 'workspaces', label: 'Workspaces', icon: '📁' },
   { id: 'integrations', label: 'Integrations', icon: '🔗' },
+  { id: 'mcp', label: 'MCP / Integrations', icon: '🧩' },
   { id: 'credits', label: 'Credits / Usage', icon: '💳' },
   { id: 'security', label: 'Security', icon: '🔒' },
 ];
@@ -389,6 +391,10 @@ const SettingsModal = ({
                   </div>
                 </Row>
               </>
+            )}
+
+            {section === 'mcp' && (
+              <McpSettings isGuest={isGuest} />
             )}
 
             {section === 'credits' && (

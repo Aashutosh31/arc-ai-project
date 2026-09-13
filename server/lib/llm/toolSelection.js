@@ -67,6 +67,161 @@ function detectOutputIntent(text) {
 // getSchemasFn is injected (defaults to the live registry) for testability.
 // Unknown names are skipped — the registry is the source of truth, so a
 // renamed/removed tool can never break selection or the request.
+//
+// MCP extension: `options.mcpSchemas` is an array of ARC-shaped schemas whose
+// `function.name` is the MCP wire name (mcp_...) and whose description carries
+// the tool's purpose. They are keyword-scored against the query and appended
+// AFTER native group matches, then the combined list is capped at maxTools.
+// A knowledge question ("Explain encapsulation") matches zero MCP tools;
+// "create a GitHub issue" scores the GitHub fixture tools. Nothing here knows
+// what MCP is — the wire-name prefix and schema shape are all it relies on.
+function scoreMcpSchemas(text, mcpSchemas) {
+  const lowered = normalizeText(text);
+  const tokens = lowered.match(/[a-z][a-z0-9]{2,}/g) || [];
+  if (!tokens.length || !Array.isArray(mcpSchemas) || !mcpSchemas.length) return [];
+
+  const scored = [];
+  for (const schema of mcpSchemas) {
+    const name = schema?.function?.name || '';
+    const desc = schema?.function?.description || '';
+    let score = 0;
+    const nameLower = name.toLowerCase();
+    const descLower = desc.toLowerCase();
+    // Name token hits are strong signals ("github", "create", "issue").
+    for (const tok of tokens) {
+      if (nameLower.includes(tok)) score += 3;
+      else if (descLower.includes(tok)) score += 1;
+    }
+    if (!name && !desc) score = 0;
+    if (score > 0) {
+      scored.push({ schema, score, name });
+    }
+  }
+  // Deterministic: score desc, then lexicographic tie-break.
+  scored.sort((a, b) => (b.score - a.score) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return scored.map((s) => s.schema);
+}
+
+// Policy-aware MCP selection (no-substitution rule).
+//
+// When the request's evidence points at a tool the policy removed (blocked
+// list), offering the remaining tools invites the model to SUBSTITUTE an
+// unrelated tool and present its result as the answer ("Fixed test value:
+// done=true" from delayed_tool). Instead, suppress ALL MCP offers for this
+// request so the model responds naturally that the capability is
+// unavailable. Generic: no tool names, no capabilities hardcoded here.
+//
+// `exposed` = policy-permitted schemas for the model; `blocked` =
+// policy-removed schemas, server-side only (never attached to a request).
+// Suppression triggers only when the blocked side strictly outscores the
+// exposed side — mixed requests naming an allowed tool still work.
+// Closed-class English tokens carry no tool evidence ("the" also
+// substring-matches "weather"). Standard IR stopwords, not tool knowledge.
+const MCP_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'have', 'has',
+  'are', 'was', 'were', 'will', 'would', 'should', 'could', 'there',
+  'their', 'about', 'into', 'your', 'yours', 'what', 'when', 'where',
+  'which', 'who', 'whom', 'how', 'why', 'not', 'but', 'all', 'any',
+  'can', 'just', 'like', 'more', 'most', 'other', 'some', 'such',
+  'than', 'then', 'too', 'very', 'does', 'did', 'use', 'using', 'used',
+  'please', 'tool', 'tools'
+]);
+
+// Minimum evidence for offering a tool: a single distinctive name hit
+// (3·ln(N) for a unique token) clears it; a single shared/generic hit does
+// not. Calibrated so "echo … echo" (repeated unique token) and "what is the
+// weather" (unique token) select, while incidental one-token overlap
+// ("tool", "get") never offers a substitute on its own.
+const MCP_MIN_SCORE = 5;
+
+const toMcpCandidate = (schema) => ({
+  schema,
+  name: schema?.function?.name || '',
+  nameLower: (schema?.function?.name || '').toLowerCase(),
+  descLower: (schema?.function?.description || '').toLowerCase()
+});
+
+// Evidence rarity is measured over the FULL discovered set (exposed AND
+// blocked): a token naming a blocked tool is just as distinctive when the
+// tool is removed, and per-subset frequencies would collapse (a lone
+// blocked candidate makes every token "ubiquitous").
+const mcpTokenDf = (tokens, candidates) => {
+  const df = new Map();
+  for (const tok of new Set(tokens)) {
+    let count = 0;
+    for (const c of candidates) {
+      if (c.nameLower.includes(tok) || c.descLower.includes(tok)) count += 1;
+    }
+    df.set(tok, count);
+  }
+  return df;
+};
+
+const scoreMcpCandidate = (c, tokens, df, N) => {
+  let score = 0;
+  for (const tok of tokens) {
+    const tokDf = df.get(tok) || 0;
+    // Ubiquitous (namespace boilerplate) and absent tokens carry nothing.
+    if (tokDf === 0 || tokDf >= N) continue;
+    const idf = Math.log(N / tokDf);
+    if (c.nameLower.includes(tok)) score += 3 * idf;
+    else if (c.descLower.includes(tok)) score += idf;
+  }
+  return score;
+};
+
+function scoreMcpSchemasDetailed(text, mcpSchemas) {
+  const lowered = normalizeText(text);
+  const tokens = (lowered.match(/[a-z][a-z0-9]{2,}/g) || []).filter((t) => !MCP_STOPWORDS.has(t));
+  if (!tokens.length || !Array.isArray(mcpSchemas) || !mcpSchemas.length) return [];
+  const candidates = mcpSchemas.map(toMcpCandidate);
+  const N = candidates.length;
+  const df = mcpTokenDf(tokens, candidates);
+  const scored = [];
+  for (const c of candidates) {
+    const score = scoreMcpCandidate(c, tokens, df, N);
+    if ((!c.name && !c.descLower) || score < MCP_MIN_SCORE) continue;
+    scored.push({ schema: c.schema, score, name: c.name });
+  }
+  scored.sort((a, b) => (b.score - a.score) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return scored;
+}
+
+function selectMcpSchemasWithPolicy(text, exposed = [], blocked = []) {
+  const lowered = normalizeText(text);
+  const tokens = (lowered.match(/[a-z][a-z0-9]{2,}/g) || []).filter((t) => !MCP_STOPWORDS.has(t));
+  const exposedCands = (Array.isArray(exposed) ? exposed : []).map(toMcpCandidate);
+  const blockedCands = (Array.isArray(blocked) ? blocked : []).map(toMcpCandidate);
+  if (!tokens.length || exposedCands.length === 0) {
+    return { schemas: [], suppressed: false, blockedNames: [], mcpMatched: 0 };
+  }
+  const combined = [...exposedCands, ...blockedCands];
+  const N = combined.length;
+  const df = mcpTokenDf(tokens, combined);
+  const scoreAll = (cands) => cands
+    .map((c) => ({ schema: c.schema, score: scoreMcpCandidate(c, tokens, df, N), name: c.name }))
+    .filter((s) => s.name && s.score >= MCP_MIN_SCORE)
+    .sort((a, b) => (b.score - a.score) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const exposedScored = scoreAll(exposedCands);
+  const blockedScored = scoreAll(blockedCands);
+  const bestExposed = exposedScored.length ? exposedScored[0].score : 0;
+  const bestBlocked = blockedScored.length ? blockedScored[0].score : 0;
+  if (bestBlocked > 0 && bestBlocked > bestExposed) {
+    return {
+      schemas: [],
+      suppressed: true,
+      blockedNames: blockedScored.map((s) => s.name),
+      mcpMatched: 0
+    };
+  }
+  return {
+    schemas: exposedScored.map((s) => s.schema),
+    suppressed: false,
+    blockedNames: [],
+    mcpMatched: exposedScored.length
+  };
+}
+
 function selectToolSchemas(text, getSchemasFn = null, options = {}) {
   const maxTools = Math.max(0, Number(options.maxTools ?? MAX_TOOLS_PER_REQUEST));
   const matched = matchGroups(text);
@@ -89,13 +244,25 @@ function selectToolSchemas(text, getSchemasFn = null, options = {}) {
       if (schema && !ordered.includes(schema)) ordered.push(schema);
     }
   }
+  // MCP tools ride the same deterministic append path, ranked by query score —
+  // unless the request targets a policy-blocked capability, in which case no
+  // MCP tool is offered at all (no-substitution rule; see above).
+  const mcpPick = selectMcpSchemasWithPolicy(text, options.mcpSchemas, options.mcpBlocked);
+  for (const schema of mcpPick.schemas) {
+    if (ordered.length >= maxTools) break;
+    if (!ordered.includes(schema)) ordered.push(schema);
+  }
   const selected = ordered.slice(0, maxTools);
   return {
     tools: selected,
     groups,
     matchedGroups: matched,
     defaulted: matched.length === 0,
-    totalAvailable: schemas.length
+    totalAvailable: schemas.length,
+    mcpAvailable: Array.isArray(options.mcpSchemas) ? options.mcpSchemas.length : 0,
+    mcpMatched: mcpPick.mcpMatched,
+    mcpSuppressed: mcpPick.suppressed,
+    mcpBlockedNames: mcpPick.blockedNames
   };
 }
 
@@ -155,6 +322,9 @@ module.exports = {
   DEFAULT_GROUPS,
   matchGroups,
   detectOutputIntent,
+  scoreMcpSchemas,
+  scoreMcpSchemasDetailed,
+  selectMcpSchemasWithPolicy,
   selectToolSchemas,
   activeToolNamesFromCalls,
   selectContinuationTools
