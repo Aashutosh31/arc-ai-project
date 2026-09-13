@@ -157,16 +157,37 @@ const nameToGroup = (() => {
 // Drop whole tool groups from lowest priority until the tool set fits.
 // Schemas are never truncated or edited — a tool is either fully present
 // with its required parameters or absent.
-function trimToolsToBudget(tools, budgetTokens) {
+//
+// Production 400 fix: `options.protectedNames` lists tool names that must
+// NEVER be dropped here (explicitly user-requested / active continuation
+// tools). MCP schemas otherwise rank last (unknown group) and were evicted
+// first under pressure — including the exact tool the user named, after
+// which the model still called it and Groq rejected the request ("not in
+// request.tools"). Protected tools sort first and only unprotected tools are
+// popped. If the protected set alone exceeds the budget it is kept anyway:
+// omitting a tool the model is about to call fails loudly at the provider,
+// while the token budget stays a conservative heuristic.
+function trimToolsToBudget(tools, budgetTokens, options = {}) {
   const list = Array.isArray(tools) ? [...tools] : [];
+  const protectedNames = new Set(
+    (Array.isArray(options?.protectedNames) ? options.protectedNames : []).filter((n) => typeof n === 'string')
+  );
   const rankOf = (schema) => {
     const g = nameToGroup.get(schema?.function?.name);
     const idx = GROUP_PRIORITY.indexOf(g);
     return idx < 0 ? GROUP_PRIORITY.length : idx;
   };
-  list.sort((a, b) => rankOf(a) - rankOf(b));
-  while (list.length > 0 && estToolsTokens(list) > budgetTokens) list.pop();
-  return list;
+  const shielded = [];
+  const droppable = [];
+  for (const schema of list) {
+    if (protectedNames.has(schema?.function?.name)) shielded.push(schema);
+    else droppable.push(schema);
+  }
+  shielded.sort((a, b) => rankOf(a) - rankOf(b));
+  droppable.sort((a, b) => rankOf(a) - rankOf(b));
+  const kept = [...shielded, ...droppable];
+  while (kept.length > shielded.length && estToolsTokens(kept) > budgetTokens) kept.pop();
+  return kept;
 }
 
 const buildSystemPrompt = (template, { longTermText, retrievalText }) =>
@@ -190,6 +211,11 @@ function assembleBudgetedRequest(parts) {
     outputBudget = OUTPUT_BUDGET_DEFAULT,
     query = ''
   } = parts || {};
+  // Tool names that must survive budgeting (explicitly requested / active
+  // tools — dropping them causes provider "not in request.tools" 400s).
+  const protectedToolNames = Array.isArray(parts?.protectedToolNames)
+    ? parts.protectedToolNames.filter((n) => typeof n === 'string')
+    : [];
 
   const maxTokens = Math.max(256, Number(outputBudget) || OUTPUT_BUDGET_DEFAULT);
   const inputBudget = Math.max(0, SAFE_TOTAL_BUDGET_TOKENS - maxTokens);
@@ -241,11 +267,12 @@ function assembleBudgetedRequest(parts) {
   let built = renderAll(state);
   let est = estimate(built);
 
-  // Pass 1: drop low-priority tool groups (never edit schemas).
+  // Pass 1: drop low-priority tool groups (never edit schemas, never drop
+  // explicitly requested / active tools).
   if (over(built)) {
     est = shrink('tools', () => {
       const toolsBudgetTokens = Math.max(0, inputBudget - estTokensForChars(String(built.systemPrompt || '').length) - estMessagesTokens(built.messages));
-      state.tools = trimToolsToBudget(state.tools, toolsBudgetTokens);
+      state.tools = trimToolsToBudget(state.tools, toolsBudgetTokens, { protectedNames: protectedToolNames });
     });
     built = renderAll(state);
   }
@@ -306,10 +333,15 @@ function assembleBudgetedRequest(parts) {
     });
     built = renderAll(state);
   }
-  // Pass 6: minimal profile — system + user only.
+  // Pass 6: minimal profile — system + user only. Explicitly requested /
+  // active tools are retained even here: dropping a tool the model is about
+  // to call fails loudly at the provider, so if the minimal profile plus
+  // the protected tools still overflows, the pipeline honestly refuses
+  // (ok:false) instead of sending a tool-less request the model cannot use.
   if (over(built)) {
     compactionPasses.push('minimal-profile');
-    state.tools = [];
+    const shielded = state.tools.filter((s) => protectedToolNames.includes(s?.function?.name));
+    state.tools = [...shielded];
     state.memoryText = '';
     state.factsText = '';
     state.ragText = '';

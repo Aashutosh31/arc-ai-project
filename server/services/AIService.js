@@ -15,7 +15,7 @@ const TaskPlanner = require('./TaskPlanner');
 const ToolRecoveryManager = require('./ToolRecoveryManager');
 const { upsertTextVector } = require('./workspaceIndexService');
 const { buildProviderContinuationMessages, normalizeProviderError, describeProviderFailure, classifyProviderFailure } = require('../lib/llm/utils');
-const { selectToolSchemas, detectOutputIntent, activeToolNamesFromCalls, selectContinuationTools } = require('../lib/llm/toolSelection');
+const { selectToolSchemas, detectOutputIntent, activeToolNamesFromCalls, selectContinuationTools, partitionToolCallsByExposure } = require('../lib/llm/toolSelection');
 const { McpToolSource } = require('../lib/mcp');
 const {
     OUTPUT_BUDGET_DEFAULT,
@@ -756,7 +756,11 @@ class AIService {
                 ragItems: retrievalItems,
                 selectedTools: toolPick.tools,
                 outputBudget,
-                query: baseMessageContent
+                query: baseMessageContent,
+                // Explicitly requested MCP tools must survive context budgeting:
+                // dropping a user-named tool makes the model call it anyway
+                // and the provider rejects the request ("not in request.tools").
+                protectedToolNames: toolPick.mcpExplicit || []
             });
 
             if (!budgeted.ok) {
@@ -889,11 +893,18 @@ class AIService {
                 // intent): the tools referenced by the active tool calls are
                 // mandatory. Sending tools=[] here makes providers reject the
                 // request ("tool choice is none, but model called a tool").
+                // MCP schemas ride along so an active `mcp_...` tool absent
+                // from the previous set (scoring miss, cap, budget trim) is
+                // still resolved — otherwise the continuation references a
+                // tool missing from its own request.tools and Groq 400s.
+                // mcpSchemas are already policy-filtered (exposed only), so
+                // deny-wins is preserved.
                 const activeContinuationNames = activeToolNamesFromCalls(assistantMessage?.toolCalls);
                 const continuationPick = selectContinuationTools(
                     tools,
                     activeContinuationNames,
-                    () => toolRegistry.getSchemas()
+                    () => toolRegistry.getSchemas(),
+                    { mcpSchemas }
                 );
 
                 console.log('[AIService] provider continuation payload', continuationMessages.map((message) => ({
@@ -905,6 +916,27 @@ class AIService {
                     continuationTools: continuationPick.tools.map((t) => t?.function?.name).filter(Boolean),
                     mandatoryCount: continuationPick.mandatoryCount
                 });
+
+                // Hard invariant (Groq enforces server-side): every tool call
+                // referenced by the continuation messages must exist in the
+                // continuation request.tools. Resolvable tools are healed by
+                // selectContinuationTools above; anything still unexposed here
+                // (unknown/denied name the model produced anyway) is logged
+                // loudly instead of failing silently downstream.
+                try {
+                    const exposure = partitionToolCallsByExposure(
+                        assistantMessage?.toolCalls || [],
+                        continuationPick.tools
+                    );
+                    if (exposure.unexposedNames.length > 0) {
+                        console.error('[AIService] continuation tool-call exposure violation', {
+                            unexposed: exposure.unexposedNames,
+                            continuationTools: continuationPick.tools.map((t) => t?.function?.name).filter(Boolean)
+                        });
+                    }
+                } catch {
+                    // Diagnostics must never break the request path.
+                }
 
                 return this.llmRouter.generate({
                     messages: continuationMessages,
