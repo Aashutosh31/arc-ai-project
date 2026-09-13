@@ -56,6 +56,19 @@ export const refreshMcpServer = (id) =>
 
 export const getMcpServerTools = (id) => request(`/servers/${id}/tools`);
 
+// OAuth (Phase 3). Responses carry safe metadata only — tokens, codes, and
+// secrets never cross this boundary.
+export const startMcpOAuth = (id) =>
+  request(`/servers/${id}/oauth/start`, { method: 'POST' });
+
+export const getMcpOAuthStatus = (id) => request(`/servers/${id}/oauth/status`);
+
+export const forgetMcpOAuth = (id, issuer = null) =>
+  request(`/servers/${id}/oauth/forget`, {
+    method: 'POST',
+    body: JSON.stringify(issuer ? { issuer } : {}),
+  });
+
 export default {
   listMcpServers,
   createMcpServer,
@@ -66,4 +79,7 @@ export default {
   disconnectMcpServer,
   refreshMcpServer,
   getMcpServerTools,
+  startMcpOAuth,
+  getMcpOAuthStatus,
+  forgetMcpOAuth,
 };

@@ -43,7 +43,7 @@ class McpManager {
   // Returns the connection for a config, connecting-on-first-use, reusing
   // an already-connected instance. Never blocks on another workspace's
   // in-flight connect (per-config single-flight).
-  async ensureConnected(config, { signal = null } = {}) {
+  async ensureConnected(config, { signal = null, authProvider = null } = {}) {
     if (!config) throw toMcpToolError(new Error('Missing MCP server config.'), { category: CATEGORIES.PROTOCOL_ERROR });
     const configId = String(config.id);
 
@@ -71,7 +71,7 @@ class McpManager {
       });
     }
 
-    await conn.connect({ signal });
+    await conn.connect({ signal, authProvider });
     // Publish the freshly discovered tool set to the registry so wire-name
     // resolution works for this connection immediately.
     this._syncRegistryTools(config);
@@ -82,7 +82,7 @@ class McpManager {
 
   // Resolves a wire tool name used by the model back to an executable
   // ({ schema, execute }) OR null when it is a native tool or unknown.
-  async resolveTool(wireName, { workspaceId = null, isGuest = false, signal = null } = {}) {
+  async resolveTool(wireName, { workspaceId = null, isGuest = false, signal = null, authProvider = null } = {}) {
     let entry = this._registry.toolByWireName(wireName);
     if (!entry) {
       // Fallback: the registry may lag a live connection (late connect or
@@ -190,7 +190,7 @@ return { schema: null, execute: async () => ({ success: false, error: err.messag
       }
     }
 
-    const conn = await this.ensureConnected(config, { signal });
+    const conn = await this.ensureConnected(config, { signal, authProvider });
     const toolEntry = conn.getToolEntry(entry.originalToolName);
     if (!toolEntry) return null;
 
@@ -358,6 +358,7 @@ const currentConfigToPlain = (config) => ({
   allowedTools: Array.isArray(config.allowedTools) ? [...config.allowedTools] : [],
   deniedTools: Array.isArray(config.deniedTools) ? [...config.deniedTools] : [],
   auth: config.auth,
+  oauthScope: config.oauthScope || null,
   testHooks: config.testHooks || null
 });
 

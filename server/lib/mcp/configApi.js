@@ -22,12 +22,13 @@ const CLIENT_VISIBLE_FIELDS = [
   'transport', 'command', 'args', 'url',
   'envVarNames', 'allowlistEnv',
   'allowedTools', 'deniedTools',
-  'auth', 'enabled', 'guestAllowed',
+  'auth', 'oauthScope', 'enabled', 'guestAllowed',
   'createdAt', 'updatedAt'
 ];
 
 const sanitizeAuthForClient = (auth) => {
   if (!auth || typeof auth !== 'object') return { type: 'none' };
+  if (auth.type === 'oauth') return { type: 'oauth', configured: true };
   return {
     type: auth.type === 'header' ? 'header' : 'none',
     headerName: auth.type === 'header' ? (auth.headerName || 'Authorization') : undefined,
@@ -158,6 +159,15 @@ const validateConfigInput = (body = {}, { isUpdate = false } = {}) => {
     if (auth !== null && typeof auth !== 'object') return fail('Auth must be an object or null.');
     if (!auth) {
       data.auth = { type: 'none' };
+    } else if (auth.type === 'oauth') {
+      // OAuth (Phase 3): no static secret; credentials are per-user OAuth
+      // tokens stored encrypted server-side after the browser flow.
+      // OAuth requires a remote endpoint — stdio servers cannot authorize.
+      const effective = body.transport || body._effectiveTransport || null;
+      if (effective && effective !== 'streamable-http') {
+        return fail('OAuth authentication requires the streamable-http transport.');
+      }
+      data.auth = { type: 'oauth' };
     } else {
       const type = auth.type === 'header' ? 'header' : 'none';
       const headerName = String(auth.headerName || 'Authorization').trim() || 'Authorization';
@@ -172,6 +182,12 @@ const validateConfigInput = (body = {}, { isUpdate = false } = {}) => {
 
   if (has('enabled')) data.enabled = body.enabled !== false;
   if (has('guestAllowed')) data.guestAllowed = body.guestAllowed === true;
+
+  if (has('oauthScope')) {
+    const scope = String(body.oauthScope ?? '').trim();
+    if (scope.length > 512) return fail('OAuth scope must be 512 characters or fewer.');
+    data.oauthScope = scope || null;
+  }
 
   return { ok: true, error: null, data };
 };

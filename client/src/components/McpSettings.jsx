@@ -35,6 +35,7 @@ const emptyForm = (workspaceId) => ({
   authType: 'none',
   authHeaderName: 'Authorization',
   authEnvVar: '',
+  oauthScope: '',
   enabled: true,
   guestAllowed: false,
   allowedTools: '',
@@ -52,9 +53,10 @@ const serverToForm = (server, fallbackWorkspaceId) => ({
   url: server?.url || '',
   envVarNames: Array.isArray(server?.envVarNames) ? server.envVarNames.join(', ') : '',
   allowlistEnv: Array.isArray(server?.allowlistEnv) ? server.allowlistEnv.join(', ') : '',
-  authType: server?.auth?.type === 'header' ? 'header' : 'none',
+  authType: server?.auth?.type === 'header' ? 'header' : (server?.auth?.type === 'oauth' ? 'oauth' : 'none'),
   authHeaderName: server?.auth?.headerName || 'Authorization',
   authEnvVar: server?.auth?.envVar || '',
+  oauthScope: server?.oauthScope || '',
   enabled: server?.enabled !== false,
   guestAllowed: server?.guestAllowed === true,
   allowedTools: Array.isArray(server?.allowedTools) ? server.allowedTools.join(', ') : '',
@@ -82,7 +84,12 @@ const formToPayload = (form) => {
     payload.allowlistEnv = form.allowlistEnv.split(/[\n,]+/).map((v) => v.trim()).filter(Boolean);
     payload.auth = form.authType === 'header'
       ? { type: 'header', headerName: form.authHeaderName.trim() || 'Authorization', envVar: form.authEnvVar.trim() || null }
-      : { type: 'none' };
+      : form.authType === 'oauth'
+        ? { type: 'oauth' }
+        : { type: 'none' };
+    if (form.authType === 'oauth' && form.oauthScope.trim()) {
+      payload.oauthScope = form.oauthScope.trim();
+    }
   }
   payload.allowedTools = form.allowedTools.split(/[\n,]+/).map((t) => t.trim()).filter(Boolean);
   payload.deniedTools = form.deniedTools.split(/[\n,]+/).map((t) => t.trim()).filter(Boolean);
@@ -96,6 +103,40 @@ const Field = ({ label, hint, children }) => (
     {hint ? <span className="block text-[11px] text-muted-foreground mt-1 leading-relaxed">{hint}</span> : null}
   </label>
 );
+
+// Safe OAuth metadata line. Tokens, codes, and secrets are never rendered —
+// the API only exposes issuers, scopes, and expiry flags.
+const OAuthStatusLine = ({ status, onReload }) => {
+  if (status === undefined) {
+    return (
+      <p className="text-[11px] text-muted-foreground mt-1">
+        OAuth status unknown. <button type="button" className="underline" onClick={onReload}>Check</button>
+      </p>
+    );
+  }
+  if (!status || status.oauth === false) return null;
+  if (status.reason === 'not_owner') {
+    return <p className="text-[11px] text-muted-foreground mt-1">OAuth authorization is private to the owning account.</p>;
+  }
+  if (!status.authorized) {
+    return (
+      <p className="text-[11px] text-warning mt-1">
+        Authorization required — connect, then authorize in your browser.
+      </p>
+    );
+  }
+  const servers = Array.isArray(status.servers) ? status.servers : [];
+  const parts = [];
+  if (status.authorizationServers?.length) parts.push(`via ${status.authorizationServers[0]}`);
+  if (status.scopes?.length) parts.push(`scopes: ${status.scopes.join(' ')}`);
+  const expiring = servers.find((s) => typeof s.expired === 'boolean');
+  if (expiring && expiring.expired) parts.push('token expired — will refresh on next use');
+  return (
+    <p className="text-[11px] text-success mt-1">
+      OAuth authorized{parts.length ? ` (${parts.join(' · ')})` : ''}
+    </p>
+  );
+};
 
 const McpSettings = ({ isGuest }) => {
   const { workspaces, activeWorkspaceId } = useWorkspace();
@@ -112,6 +153,33 @@ const McpSettings = ({ isGuest }) => {
   const [toolsCache, setToolsCache] = useState({});
   const [formTools, setFormTools] = useState([]);
   const [formToolsLoading, setFormToolsLoading] = useState(false);
+  // OAuth (Phase 3): per-server authorization status (safe metadata only —
+  // issuers, scopes, expiry flags; never tokens) + pending auth-required flag
+  // surfaced when Connect meets a 401.
+  const [oauthStatus, setOauthStatus] = useState({});
+  const [oauthNotice, setOauthNotice] = useState(null);
+
+  // Surface the OAuth callback result (?mcp_oauth=success|error) after the
+  // provider redirects back to the dashboard.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      const result = params.get('mcp_oauth');
+      if (result === 'success' || result === 'error') {
+        setOauthNotice({
+          ok: result === 'success',
+          server: params.get('server'),
+          detail: params.get('reason') || (result === 'success' ? `${params.get('tools') || '0'} tools discovered` : 'authorization failed'),
+        });
+        params.delete('mcp_oauth');
+        params.delete('server');
+        params.delete('tools');
+        params.delete('reason');
+        const rest = params.toString();
+        window.history.replaceState({}, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
+      }
+    } catch { /* banner is best effort */ }
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -127,6 +195,26 @@ const McpSettings = ({ isGuest }) => {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Keep OAuth authorization state fresh for OAuth-mode servers (safe
+  // metadata only; fetched lazily so listing never opens connections).
+  useEffect(() => {
+    const oauthServers = (servers || []).filter((s) => s?.auth?.type === 'oauth');
+    if (!oauthServers.length) return;
+    let cancelled = false;
+    (async () => {
+      for (const s of oauthServers) {
+        const id = s.id || s._id;
+        if (oauthStatus[id] !== undefined) continue;
+        try {
+          const payload = await mcpApi.getMcpOAuthStatus(id);
+          if (!cancelled) setOauthStatus((prev) => ({ ...prev, [id]: payload }));
+        } catch { /* status is best effort */ }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [servers]);
 
   const set = (key) => (e) => {
     const value = e?.target?.type === 'checkbox' ? e.target.checked : e?.target?.value;
@@ -197,6 +285,16 @@ const McpSettings = ({ isGuest }) => {
     }
   };
 
+  const loadOAuthStatus = async (id) => {
+    try {
+      const payload = await mcpApi.getMcpOAuthStatus(id);
+      setOauthStatus((s) => ({ ...s, [id]: payload }));
+      return payload;
+    } catch {
+      return null;
+    }
+  };
+
   const runAction = async (server, action) => {
     const id = server.id || server._id;
     setBusyId(`${action}:${id}`);
@@ -205,9 +303,38 @@ const McpSettings = ({ isGuest }) => {
       if (action === 'delete') {
         await mcpApi.deleteMcpServer(id);
       } else if (action === 'connect') {
-        await mcpApi.connectMcpServer(id);
+        try {
+          await mcpApi.connectMcpServer(id);
+        } catch (connErr) {
+          // OAuth servers answer 401 + authRequired instead of a bare 401 —
+          // surface the [Authorize] path rather than a dead-end error.
+          if (connErr && (connErr.status === 401 || connErr.category === 'mcp.auth_required') && server?.auth?.type === 'oauth') {
+            await loadOAuthStatus(id);
+            setError('Authorization required — click Authorize to connect this server.');
+            await refresh();
+            return;
+          }
+          throw connErr;
+        }
       } else if (action === 'disconnect') {
         await mcpApi.disconnectMcpServer(id);
+      } else if (action === 'authorize') {
+        const started = await mcpApi.startMcpOAuth(id);
+        if (started && started.authorized) {
+          setOauthNotice({ ok: true, server: id, detail: 'Already authorized — connected.' });
+        } else if (started && started.authorizationUrl) {
+          // Full-page navigation to the provider; it redirects back to ARC.
+          window.location.href = started.authorizationUrl;
+          return;
+        } else {
+          setError('Authorization server did not return an authorization URL.');
+        }
+      } else if (action === 'forget') {
+        if (!window.confirm('Remove the stored OAuth authorization for this server? You will need to authorize again to use it.')) {
+          return;
+        }
+        await mcpApi.forgetMcpOAuth(id);
+        setOauthStatus((s) => ({ ...s, [id]: null }));
       } else if (action === 'refresh') {
         const payload = await mcpApi.refreshMcpServer(id);
         setToolsCache((c) => ({ ...c, [id]: payload }));
@@ -277,6 +404,17 @@ const McpSettings = ({ isGuest }) => {
         Credentials stay server-side — only variable names and connection metadata appear here.
       </p>
 
+      {oauthNotice ? (
+        <div
+          className={`mb-3 px-3 py-2 rounded-[var(--radius-md)] border text-xs text-foreground ${oauthNotice.ok ? 'border-success/40 bg-success/10' : 'border-destructive/40 bg-destructive/10'}`}
+          role="status"
+        >
+          {oauthNotice.ok ? 'OAuth authorization succeeded' : 'OAuth authorization failed'}
+          {oauthNotice.detail ? ` — ${oauthNotice.detail}` : ''}
+          <button type="button" className="ml-2 underline" onClick={() => setOauthNotice(null)}>Dismiss</button>
+        </div>
+      ) : null}
+
       {error ? (
         <div className="mb-3 px-3 py-2 rounded-[var(--radius-md)] border border-destructive/40 bg-destructive/10 text-xs text-foreground" role="alert">
           {error}
@@ -323,13 +461,30 @@ const McpSettings = ({ isGuest }) => {
                       {toolCount} tool{toolCount === 1 ? '' : 's'}
                       {server?.status?.protocolVersion ? ` · protocol ${server.status.protocolVersion}` : ''}
                       {server?.auth?.type === 'header' ? ` · auth via ${server.auth.envVar || 'env var'}${server.auth.configured ? '' : ' (not configured)'}` : ''}
+                      {server?.auth?.type === 'oauth' ? ` · OAuth${oauthStatus[id]?.authorized ? ' authorized' : ''}` : ''}
                     </p>
+                    {server?.auth?.type === 'oauth' ? (
+                      <OAuthStatusLine
+                        status={oauthStatus[id]}
+                        onReload={() => loadOAuthStatus(id)}
+                      />
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <Button size="sm" variant="ghost" onClick={() => toggleTools(server)} disabled={busy('tools')}>
                       {toolsOpen[id] ? 'Hide tools' : 'Tools'}
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => openEdit(server)}>Configure</Button>
+                    {server?.auth?.type === 'oauth' && !(meta.label === 'Connected' || toolCount > 0) ? (
+                      <Button size="sm" variant="primary" onClick={() => runAction(server, 'authorize')} disabled={!enabled || busy('authorize')}>
+                        {busy('authorize') ? '…' : (oauthStatus[id]?.authorized || oauthStatus[id]?.expired ? 'Reauthorize' : 'Authorize')}
+                      </Button>
+                    ) : null}
+                    {server?.auth?.type === 'oauth' && (oauthStatus[id]?.authorized || oauthStatus[id]?.expired) ? (
+                      <Button size="sm" variant="ghost" onClick={() => runAction(server, 'forget')} disabled={busy('forget')}>
+                        {busy('forget') ? '…' : 'Forget authorization'}
+                      </Button>
+                    ) : null}
                     {meta.label === 'Connected' || toolCount > 0 ? (
                       <Button size="sm" variant="ghost" onClick={() => runAction(server, 'disconnect')} disabled={busy('disconnect')}>
                         {busy('disconnect') ? '…' : 'Disconnect'}
@@ -468,7 +623,8 @@ const McpSettings = ({ isGuest }) => {
                   className="w-full h-10 bg-card text-foreground border border-border rounded-[var(--radius-md)] px-3 text-sm outline-none focus:border-primary"
                 >
                   <option value="none">None</option>
-                  <option value="header">Header (env var reference)</option>
+                  <option value="header">Static Header (env var reference)</option>
+                  <option value="oauth">OAuth / Automatic Authorization</option>
                 </select>
               </Field>
               {form.authType === 'header' ? (
@@ -480,6 +636,11 @@ const McpSettings = ({ isGuest }) => {
             {form.authType === 'header' ? (
               <Field label="Auth env-var name" hint="Name only — the secret value is read from the server environment at connect time.">
                 <Input value={form.authEnvVar} onChange={set('authEnvVar')} placeholder="e.g. MCP_API_TOKEN" autoComplete="off" />
+              </Field>
+            ) : null}
+            {form.authType === 'oauth' ? (
+              <Field label="OAuth scope (optional)" hint="Space-separated scopes to request. Leave empty to use the server's default. Tokens stay server-side — never shown here.">
+                <Input value={form.oauthScope} onChange={set('oauthScope')} placeholder="e.g. tools:read tools:write" autoComplete="off" />
               </Field>
             ) : null}
           </>
