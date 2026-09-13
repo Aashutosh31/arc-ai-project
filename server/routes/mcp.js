@@ -24,8 +24,18 @@ const {
   parseNameList,
   buildToolsPayload
 } = require('../lib/mcp/configApi');
+const oauthTx = require('../lib/mcp/oauthTransactions');
+const oauthProvider = require('../lib/mcp/oauthProvider');
+const secureTokens = require('../lib/mcp/secureTokens');
+const mcpLogger = require('../lib/mcp/logger');
 
 const router = express.Router();
+
+// ---- public OAuth callback (transaction-bound, NOT session-bound) -------------
+// Mounted BEFORE `protect`: the authorization server redirects the browser
+// here without an ARC session cookie/header. Authorization comes from the
+// single-use transaction id embedded in `state`, never from callback params.
+router.get('/oauth/callback', handleOAuthCallback);
 
 router.use(protect);
 
@@ -278,8 +288,18 @@ router.post('/servers/:id/connect', async (req, res) => {
 
     let conn;
     try {
-      conn = await McpToolSource.manager.ensureConnected(docToConfig(doc));
+      conn = await McpToolSource.manager.ensureConnected(docToConfig(doc), {
+        authProvider: silentOAuthProvider(doc, req)
+      });
     } catch (connectErr) {
+      if (connectErr && connectErr.authRequired) {
+        return res.status(401).json({
+          error: 'Authorization required — reconnect',
+          authRequired: true,
+          category: 'mcp.auth_required',
+          detail: null
+        });
+      }
       return res.status(502).json({
         error: 'Failed to connect to MCP server.',
         category: connectErr?.category || null,
@@ -445,5 +465,321 @@ const toolsForClient = (conn, doc) => {
   } catch { /* snapshot must never throw */ }
   return out;
 };
+
+// ---- OAuth (Phase 3) ----------------------------------------------------------
+// Generic authorization-code + PKCE flow for OAuth-protected remote MCP
+// servers, driven by the official SDK (`auth()`, discovery, DCR/CIMD).
+//
+// Endpoints:
+//  POST /servers/:id/oauth/start    (owner, non-guest) → { authorizationUrl }
+//  GET  /oauth/callback              (public, transaction-bound) → browser redirect
+//  GET  /servers/:id/oauth/status   (viewer; owner-only details)
+//  POST /servers/:id/oauth/forget   (owner, non-guest) → deletes credentials
+//
+// Tokens, verifiers, codes, and client secrets never appear in responses,
+// logs, or browser state.
+
+// Silent provider for normal connects: stored tokens + SDK refresh, fail
+// closed when interactive authorization is required. Null for non-OAuth
+// configs (static auth path untouched).
+const silentOAuthProvider = (doc, req) => {
+  try {
+    if (!doc || !doc.auth || doc.auth.type !== 'oauth') return null;
+    if (doc.transport !== 'streamable-http' || !doc.url) return null;
+    if (!secureTokens.isEncryptionAvailable()) return null;
+    const userId = actorId(req) || (doc.owner ? String(doc.owner) : null);
+    if (!userId) return null;
+    return oauthProvider.createSilentProvider({ userId, config: docToConfig(doc) });
+  } catch {
+    return null;
+  }
+};
+
+const requireOAuthConfig = (doc, res) => {
+  if (!doc) {
+    res.status(404).json({ error: 'MCP server configuration not found.' });
+    return false;
+  }
+  if (!doc.auth || doc.auth.type !== 'oauth') {
+    res.status(400).json({ error: 'This MCP server is not configured for OAuth.' });
+    return false;
+  }
+  if (doc.transport !== 'streamable-http' || !doc.url) {
+    res.status(400).json({ error: 'OAuth requires a streamable-http server with an endpoint URL.' });
+    return false;
+  }
+  return true;
+};
+
+// ---- POST /api/mcp/servers/:id/oauth/start -----------------------------------
+// Begins (or resumes, via stored refresh) authorization. Creates a short-lived
+// single-use transaction bound to the caller, then runs the SDK discovery +
+// first-leg flow. Responds with the browser authorization URL, or with
+// { authorized: true } when stored tokens are still valid.
+router.post('/servers/:id/oauth/start', async (req, res) => {
+  try {
+    if (forbidGuests(req, res)) return;
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid server ID.' });
+    }
+    const doc = await McpServerConfig.findById(req.params.id).lean();
+    if (!doc) return res.status(404).json({ error: 'MCP server configuration not found.' });
+    if (!requireOwner(doc, req, res)) return;
+    if (!requireOAuthConfig(doc, res)) return;
+    if (doc.enabled === false) return res.status(400).json({ error: 'Server is disabled. Enable it before authorizing.' });
+    if (!secureTokens.isEncryptionAvailable()) {
+      return res.status(500).json({ error: 'OAuth credential storage is not configured on this server.' });
+    }
+
+    const config = docToConfig(doc);
+    const userId = actorId(req);
+    const tx = oauthTx.createTransaction({
+      userId,
+      configId: String(doc._id),
+      workspaceId: doc.workspace ? String(doc.workspace) : null,
+      scope: doc.oauthScope || null
+    });
+
+    let authorizationUrl = null;
+    const provider = oauthProvider.createInteractiveProvider({
+      userId,
+      config,
+      transaction: tx,
+      onRedirect: async (url) => { authorizationUrl = url; }
+    });
+
+    try {
+      const { auth: sdkAuth } = require('@modelcontextprotocol/client');
+      const result = await sdkAuth(provider, {
+        serverUrl: config.url,
+        ...(config.oauthScope ? { scope: config.oauthScope } : {})
+      });
+      if (result === 'AUTHORIZED') {
+        // Stored tokens (possibly refreshed) are valid — no browser needed.
+        oauthTx.deleteTransaction(tx.txId);
+        let conn = null;
+        try {
+          conn = await McpToolSource.manager.ensureConnected(config, {
+            authProvider: silentOAuthProvider(doc, req)
+          });
+        } catch (connectErr) {
+          if (connectErr && connectErr.authRequired) {
+            return res.status(401).json({ error: 'Authorization required — reconnect', authRequired: true });
+          }
+          throw connectErr;
+        }
+        mcpLogger.log(mcpLogger.LOG_EVENTS.OAUTH_AUTHORIZED, { configId: String(doc._id) });
+        return res.json({
+          authorized: true,
+          connected: conn ? conn.connected === true : false,
+          toolCount: conn && Array.isArray(conn.tools) ? conn.tools.length : 0
+        });
+      }
+      if (!authorizationUrl) {
+        oauthTx.deleteTransaction(tx.txId);
+        return res.status(502).json({ error: 'Authorization server did not return an authorization URL.' });
+      }
+      mcpLogger.log(mcpLogger.LOG_EVENTS.OAUTH_STARTED, { configId: String(doc._id) });
+      return res.json({
+        authorized: false,
+        authRequired: true,
+        authorizationUrl,
+        transactionId: tx.txId,
+        expiresAt: tx.expiresAt
+      });
+    } catch (flowErr) {
+      oauthTx.deleteTransaction(tx.txId);
+      mcpLogger.log(mcpLogger.LOG_EVENTS.OAUTH_FAILED, { configId: String(doc._id), reason: 'start_failed' });
+      return res.status(502).json({
+        error: 'Failed to start OAuth authorization.',
+        category: flowErr?.category || flowErr?.code || null,
+        detail: null
+      });
+    }
+  } catch (err) {
+    console.error('[MCP] oauth start failed:', err);
+    res.status(500).json({ error: 'Failed to start OAuth authorization.' });
+  }
+});
+
+// ---- GET /api/mcp/servers/:id/oauth/status ------------------------------------
+// Safe metadata only: authorization state, issuers, scopes, expiry flags.
+// Owner sees their own status; anyone else (including guests on guestAllowed
+// configs) sees { authorized: false } so one user can never inspect or reuse
+// another user's authorization.
+router.get('/servers/:id/oauth/status', async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid server ID.' });
+    }
+    const doc = await McpServerConfig.findById(req.params.id).lean();
+    if (!doc) return res.status(404).json({ error: 'MCP server configuration not found.' });
+    if (!canView(doc, req)) return res.status(403).json({ error: 'Not authorized to view this MCP server.' });
+    if (!doc.auth || doc.auth.type !== 'oauth') {
+      return res.json({ oauth: false, authType: doc?.auth?.type || 'none' });
+    }
+    if (!isOwner(doc, req)) {
+      return res.json({ oauth: true, authorized: false, reason: 'not_owner' });
+    }
+    const status = await oauthProvider.credentialStatus(actorId(req), String(doc._id));
+    const live = liveStatus(doc._id);
+    res.json({ oauth: true, ...status, connectionState: live.connectionState, toolCount: live.toolCount });
+  } catch (err) {
+    console.error('[MCP] oauth status failed:', err);
+    res.status(500).json({ error: 'Failed to fetch OAuth status.' });
+  }
+});
+
+// ---- POST /api/mcp/servers/:id/oauth/forget ------------------------------------
+// Explicit "Forget authorization": removes stored credentials for the caller
+// (optionally per-issuer) and drops the live connection. Disconnect alone
+// does NOT delete credentials.
+router.post('/servers/:id/oauth/forget', async (req, res) => {
+  try {
+    if (forbidGuests(req, res)) return;
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid server ID.' });
+    }
+    const doc = await McpServerConfig.findById(req.params.id).lean();
+    if (!doc) return res.status(404).json({ error: 'MCP server configuration not found.' });
+    if (!requireOwner(doc, req, res)) return;
+    const issuer = typeof req.body?.issuer === 'string' && req.body.issuer ? req.body.issuer : null;
+    let removed = 0;
+    try {
+      removed = await oauthProvider.deleteCredentials(actorId(req), String(doc._id), issuer);
+    } catch (e) {
+      return res.status(500).json({ error: 'Failed to remove stored OAuth credentials.' });
+    }
+    try { await McpToolSource.manager.disconnect(String(doc._id)); } catch { /* best effort */ }
+    mcpLogger.log(mcpLogger.LOG_EVENTS.OAUTH_TOKENS_FORGOTTEN, { configId: String(doc._id) });
+    res.json({ forgotten: true, removed });
+  } catch (err) {
+    console.error('[MCP] oauth forget failed:', err);
+    res.status(500).json({ error: 'Failed to remove stored OAuth credentials.' });
+  }
+});
+
+// ---- GET /api/mcp/oauth/callback (public, transaction-bound) -------------------
+async function handleOAuthCallback(req, res) {
+  const frontendBase = oauthProvider.publicFrontendBase();
+  const failRedirect = (serverId, reason) => {
+    const params = new URLSearchParams({ mcp_oauth: 'error', reason });
+    if (serverId) params.set('server', String(serverId));
+    return res.redirect(302, `${frontendBase}/dashboard?${params.toString()}`);
+  };
+  try {
+    const code = typeof req.query.code === 'string' ? req.query.code : null;
+    const state = typeof req.query.state === 'string' ? req.query.state : null;
+    const iss = typeof req.query.iss === 'string' ? req.query.iss : null;
+    const providerError = typeof req.query.error === 'string' ? req.query.error : null;
+
+    // Resolve the transaction WITHOUT trusting callback params for identity.
+    const txId = oauthTx.txIdFromState(state);
+    const tx = txId ? oauthTx.getTransaction(txId) : null;
+    if (!tx) {
+      return failRedirect(null, 'invalid_or_expired_transaction');
+    }
+    // Constant-time state comparison (CSRF protection).
+    if (!oauthTx.statesEqual(state, tx.state)) {
+      oauthTx.deleteTransaction(tx.txId);
+      return failRedirect(tx.configId, 'invalid_state');
+    }
+    if (providerError) {
+      oauthTx.deleteTransaction(tx.txId);
+      return failRedirect(tx.configId, 'provider_error');
+    }
+    if (!code) {
+      oauthTx.deleteTransaction(tx.txId);
+      return failRedirect(tx.configId, 'missing_code');
+    }
+    // RFC 9207 issuer check BEFORE redeeming the code.
+    if (!oauthTx.issuerMatches(tx, iss)) {
+      oauthTx.deleteTransaction(tx.txId);
+      mcpLogger.log(mcpLogger.LOG_EVENTS.OAUTH_FAILED, { configId: tx.configId, reason: 'issuer_mismatch' });
+      return failRedirect(tx.configId, 'issuer_mismatch');
+    }
+
+    const doc = await McpServerConfig.findById(tx.configId).lean();
+    if (!doc || doc.enabled === false) {
+      oauthTx.deleteTransaction(tx.txId);
+      return failRedirect(tx.configId, 'server_unavailable');
+    }
+    // The transaction owner must still own the config (prevents cross-user
+    // completion if ownership changed mid-flow).
+    if (!doc.owner || String(doc.owner) !== String(tx.userId)) {
+      oauthTx.deleteTransaction(tx.txId);
+      return failRedirect(tx.configId, 'not_owner');
+    }
+    if (!doc.auth || doc.auth.type !== 'oauth' || doc.transport !== 'streamable-http' || !doc.url) {
+      oauthTx.deleteTransaction(tx.txId);
+      return failRedirect(tx.configId, 'not_oauth');
+    }
+
+    // Single-use: consume BEFORE the exchange (codes are single-use anyway).
+    const consumed = oauthTx.consumeTransaction(tx.txId);
+    if (!consumed) {
+      return failRedirect(tx.configId, 'invalid_or_expired_transaction');
+    }
+
+    const config = docToConfig(doc);
+    const provider = oauthProvider.createInteractiveProvider({
+      userId: tx.userId,
+      config,
+      transaction: consumed,
+      onRedirect: null
+    });
+
+    try {
+      const { auth: sdkAuth } = require('@modelcontextprotocol/client');
+      const result = await sdkAuth(provider, {
+        serverUrl: config.url,
+        authorizationCode: code,
+        ...(iss ? { iss } : {}),
+        ...(config.oauthScope ? { scope: config.oauthScope } : {})
+      });
+      if (result !== 'AUTHORIZED') {
+        mcpLogger.log(mcpLogger.LOG_EVENTS.OAUTH_FAILED, { configId: tx.configId, reason: 'not_authorized' });
+        return failRedirect(tx.configId, 'exchange_failed');
+      }
+    } catch (exchangeErr) {
+      // SDK throws AuthorizationServerMismatchError on AS mix-up; every
+      // other failure is a failed exchange. Never render raw error text.
+      const reason = exchangeErr && exchangeErr.name === 'AuthorizationServerMismatchError'
+        ? 'issuer_mismatch'
+        : 'exchange_failed';
+      mcpLogger.log(mcpLogger.LOG_EVENTS.OAUTH_FAILED, { configId: tx.configId, reason });
+      return failRedirect(tx.configId, reason);
+    }
+
+    // Reconnect with the silent provider (stored tokens) + discover tools.
+    let toolCount = 0;
+    try {
+      try { await McpToolSource.manager.disconnect(String(doc._id)); } catch { /* best effort */ }
+      const conn = await McpToolSource.manager.ensureConnected(config, {
+        authProvider: oauthProvider.createSilentProvider({ userId: tx.userId, config })
+      });
+      toolCount = Array.isArray(conn.tools) ? conn.tools.length : 0;
+    } catch (connectErr) {
+      mcpLogger.log(mcpLogger.LOG_EVENTS.OAUTH_FAILED, { configId: tx.configId, reason: 'reconnect_failed' });
+      return failRedirect(tx.configId, 'reconnect_failed');
+    }
+
+    mcpLogger.log(mcpLogger.LOG_EVENTS.OAUTH_AUTHORIZED, { configId: tx.configId });
+    const params = new URLSearchParams({
+      mcp_oauth: 'success',
+      server: String(doc._id),
+      tools: String(toolCount)
+    });
+    return res.redirect(302, `${frontendBase}/dashboard?${params.toString()}`);
+  } catch (err) {
+    console.error('[MCP] oauth callback failed:', err);
+    try {
+      const frontendBase2 = oauthProvider.publicFrontendBase();
+      return res.redirect(302, `${frontendBase2}/dashboard?mcp_oauth=error&reason=callback_failed`);
+    } catch {
+      return res.status(500).json({ error: 'OAuth callback failed.' });
+    }
+  }
+}
 
 module.exports = router;

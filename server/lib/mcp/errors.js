@@ -17,7 +17,12 @@ const CATEGORIES = Object.freeze({
   OUTPUT_TOO_LARGE: `${PREFIX}output_too_large`,
   CANCELLED: `${PREFIX}cancelled`,
   NOT_AUTHORIZED: `${PREFIX}not_authorized`,
-  NOT_CONNECTED: `${PREFIX}not_connected`
+  NOT_CONNECTED: `${PREFIX}not_connected`,
+  // OAuth (Phase 3): interactive authorization required. Classification in
+  // classifySdkError is UNCHANGED (401 → authentication_failed) so existing
+  // contracts hold; the connection/route layer sets `authRequired: true` on
+  // oauth-mode failures and maps to this category for UX signalling.
+  AUTH_REQUIRED: `${PREFIX}auth_required`
 });
 
 class McpToolError extends Error {

@@ -53,13 +53,13 @@ class McpServerConnection {
 
   // --- public API ------------------------------------------------------------
 
-  async connect({ signal = null, timeoutMs = limits.CONNECT_TIMEOUT_MS } = {}) {
+  async connect({ signal = null, timeoutMs = limits.CONNECT_TIMEOUT_MS, authProvider = null } = {}) {
     if (this.state === STATES.CONNECTED) return this;
     if (this.state === STATES.CLOSED) throw toMcpToolError(new Error('Connection is permanently closed.'), { category: CATEGORIES.NOT_CONNECTED });
 
     if (this._connectingPromise) return this._connectingPromise;
 
-    this._connectingPromise = this._doConnect({ signal, timeoutMs });
+    this._connectingPromise = this._doConnect({ signal, timeoutMs, authProvider });
     try {
       await this._connectingPromise;
       return this;
@@ -124,7 +124,7 @@ class McpServerConnection {
 
   // --- internals -------------------------------------------------------------
 
-  async _doConnect({ signal, timeoutMs }) {
+  async _doConnect({ signal, timeoutMs, authProvider }) {
     this.state = STATES.CONNECTING;
     this._connectStartAt = Date.now();
     logger.log(logger.LOG_EVENTS.CONNECTION_STARTED, {
@@ -137,7 +137,7 @@ class McpServerConnection {
     try {
       const opts = { versionNegotiation: { mode: 'auto' } };
       this._client = new Client({ name: `arc-mcp-client`, version: '1.0.0' }, opts);
-      this._transport = createTransportForConfig(this.config);
+      this._transport = createTransportForConfig(this.config, { authProvider });
 
       // Allow the ARC abort signal to cancel the connect handshake.
       await this._client.connect(this._transport, { timeout: timeoutMs, signal });
@@ -161,6 +161,16 @@ class McpServerConnection {
         serverId: this.config.id,
         isCancelled: signal?.aborted === true || raw?.name === 'AbortError'
       });
+      // OAuth (Phase 3): surface an explicit auth-required signal for
+      // oauth-mode configs so routes/UI can offer [Authorize] instead of a
+      // bare 401. Error CATEGORY mapping is unchanged (regression-safe).
+      try {
+        const { isOAuthAuthorizationRequired } = require('./oauthProvider');
+        if ((this.config.auth && this.config.auth.type === 'oauth') &&
+            (isOAuthAuthorizationRequired(raw) || isOAuthAuthorizationRequired(err))) {
+          err.authRequired = true;
+        }
+      } catch { /* flagging must never break error mapping */ }
       logger.log(logger.LOG_EVENTS.CONNECTION_FAILED, {
         configId: this.config.id,
         slug: this.config.slug,
@@ -274,7 +284,7 @@ class McpServerConnection {
 
 // --- transport factory dispatch ---------------------------------------------
 
-function createTransportForConfig(config) {
+function createTransportForConfig(config, { authProvider = null } = {}) {
   // Test/embedded hook: lets the suite inject an InMemoryTransport client end
   // into the REAL connection pipeline (discovery, listChanged, cancellation,
   // adapter) without spawning a child process. Never present in production
@@ -286,7 +296,7 @@ function createTransportForConfig(config) {
     return createStdioTransport(config);
   }
   if (config.transport === 'streamable-http') {
-    return createStreamableHTTPTransport(config);
+    return createStreamableHTTPTransport(config, { authProvider });
   }
   throw toMcpToolError(new Error(`Unknown transport: ${config.transport}`), {
     category: CATEGORIES.PROTOCOL_ERROR,

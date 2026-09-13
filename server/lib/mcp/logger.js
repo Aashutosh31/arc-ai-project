@@ -20,7 +20,14 @@ const LOG_EVENTS = Object.freeze({
   TOOL_FAILED: 'mcp.tool.failed',
   TOOL_CANCELLED: 'mcp.tool.cancelled',
   CONFIG_REJECTED: 'mcp.config.rejected',
-  TOOL_DENIED: 'mcp.tool.denied'
+  TOOL_DENIED: 'mcp.tool.denied',
+  // OAuth (Phase 3) — metadata only, never credentials/codes/verifiers.
+  OAUTH_STARTED: 'mcp.oauth.started',
+  OAUTH_AUTHORIZED: 'mcp.oauth.authorized',
+  OAUTH_FAILED: 'mcp.oauth.failed',
+  OAUTH_TOKENS_SAVED: 'mcp.oauth.tokens_saved',
+  OAUTH_TOKENS_FORGOTTEN: 'mcp.oauth.tokens_forgotten',
+  OAUTH_REFRESHED: 'mcp.oauth.refreshed'
 });
 
 const enqueueMicrotask = (fn) => {
@@ -36,7 +43,9 @@ const SAFE_FIELDS = new Set([
   'serverId', 'serverName', 'transport', 'tool', 'workspaceId',
   'scope', 'status', 'category', 'durationMs', 'resultSize',
   'resultBlocks', 'truncated', 'toolCount', 'toolNames', 'reason',
-  'protocolVersion', 'provider', 'retryable', 'configId', 'slug'
+  'protocolVersion', 'provider', 'retryable', 'configId', 'slug',
+  // OAuth metadata (safe identifiers only — never tokens/codes/verifiers).
+  'issuer', 'transactionId', 'expired'
 ]);
 
 const prune = (fields) => {

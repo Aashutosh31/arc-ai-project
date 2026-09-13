@@ -72,6 +72,7 @@ const docToConfig = (doc) => ({
   url: doc.url || null,
   envVarNames: doc.envVarNames || [],
   auth: doc.auth || { type: 'none' },
+  oauthScope: doc.oauthScope || null,
   enabled: doc.enabled !== false,
   disabled: doc.enabled === false,
   guestAllowed: doc.guestAllowed === true,

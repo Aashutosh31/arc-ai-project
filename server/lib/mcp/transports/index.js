@@ -52,7 +52,7 @@ const createStdioTransport = (config) => {
   });
 };
 
-const createStreamableHTTPTransport = (config) => {
+const createStreamableHTTPTransport = (config, { authProvider = null } = {}) => {
   const url = config.url;
   if (!url || typeof url !== 'string' || !url.trim()) {
     throw toMcpToolError(new Error('streamable-http transport requires a url.'), {
@@ -61,7 +61,12 @@ const createStreamableHTTPTransport = (config) => {
     });
   }
   const requestInit = { headers: buildAuthHeaders(config) };
-  return new StreamableHTTPClientTransport(url, { requestInit });
+  const options = { requestInit };
+  // OAuth (Phase 3): the SDK adapts an OAuthClientProvider automatically —
+  // bearer injection, 401 refresh, and ONE controlled retry. Static header
+  // auth above is untouched and keeps working.
+  if (authProvider) options.authProvider = authProvider;
+  return new StreamableHTTPClientTransport(url, options);
 };
 
 const buildAuthHeaders = (config) => {

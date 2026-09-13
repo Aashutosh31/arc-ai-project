@@ -19,7 +19,7 @@ const { sanitizeSlug } = require('../lib/mcp/names');
 
 const authSchema = new mongoose.Schema(
   {
-    type: { type: String, enum: ['none', 'header'], default: 'none' },
+    type: { type: String, enum: ['none', 'header', 'oauth'], default: 'none' },
     headerName: { type: String, default: 'Authorization' },
     envVar: { type: String }
   },
@@ -50,6 +50,9 @@ const mcpServerConfigSchema = new mongoose.Schema(
     allowedTools: [{ type: String }],
     deniedTools: [{ type: String }],
     auth: { type: authSchema, default: () => ({ type: 'none' }) },
+    // OAuth scope hint for authorization (Phase 3). Tokens/credentials live
+    // in McpOAuthCredential (encrypted, per-user) — never here.
+    oauthScope: { type: String, default: null, maxlength: 512 },
     enabled: { type: Boolean, default: true },
     guestAllowed: { type: Boolean, default: false }
   },
