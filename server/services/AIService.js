@@ -16,6 +16,15 @@ const ToolRecoveryManager = require('./ToolRecoveryManager');
 const { upsertTextVector } = require('./workspaceIndexService');
 const { buildProviderContinuationMessages, normalizeProviderError, describeProviderFailure, classifyProviderFailure } = require('../lib/llm/utils');
 const { selectToolSchemas, detectOutputIntent, activeToolNamesFromCalls, selectContinuationTools, partitionToolCallsByExposure } = require('../lib/llm/toolSelection');
+const {
+    requiredParams,
+    validateArgs,
+    extractArgValues,
+    buildClarification,
+    createPending,
+    advancePending,
+    isCancelText
+} = require('../lib/llm/pendingArgs');
 const { McpToolSource } = require('../lib/mcp');
 const {
     OUTPUT_BUDGET_DEFAULT,
@@ -288,6 +297,69 @@ class AIService {
         }
 
         return originalToolName;
+    }
+
+    // ---- Pending tool-call persistence (multi-turn argument collection) ----
+    // Stored on the Conversation document so fragmentary follow-ups merge
+    // into the SAME tool call across stateless turns. Guests have no
+    // conversation record, so pending is disabled for them (single-turn
+    // behavior unchanged). All methods are failure-silent: pending is an
+    // optimization over the normal flow, never load-bearing for it.
+    async loadPendingToolCall(conversationId, userId) {
+        if (isGuestActorId(userId) || !conversationId) return null;
+        try {
+            const doc = await Conversation.findById(conversationId).select('pendingToolCall').lean();
+            const p = doc?.pendingToolCall;
+            if (!p || typeof p.toolName !== 'string' || !p.args || typeof p.args !== 'object') return null;
+            return p;
+        } catch {
+            return null;
+        }
+    }
+
+    async savePendingToolCall(conversationId, userId, pending) {
+        if (isGuestActorId(userId) || !conversationId || !pending) return;
+        try {
+            await Conversation.findByIdAndUpdate(conversationId, { pendingToolCall: pending });
+        } catch {
+            // Persistence must never break the request path.
+        }
+    }
+
+    async clearPendingToolCall(conversationId, userId) {
+        if (isGuestActorId(userId) || !conversationId) return;
+        try {
+            await Conversation.findByIdAndUpdate(conversationId, { pendingToolCall: null });
+        } catch {
+            // Persistence must never break the request path.
+        }
+    }
+
+    // Schema lookup for pending validation/extraction. Offered request tools
+    // first (what the model saw), then the native registry, then the
+    // policy-permitted MCP set. Generic over native and MCP tools.
+    resolvePendingSchema(toolName, offeredTools, mcpSchemas) {
+        if (!toolName) return null;
+        const pools = [offeredTools, (() => { try { return toolRegistry.getSchemas(); } catch { return []; } })(), mcpSchemas];
+        for (const pool of pools) {
+            const hit = (Array.isArray(pool) ? pool : []).find((s) => s?.function?.name === toolName);
+            if (hit) return hit;
+        }
+        return null;
+    }
+
+    // Deny-wins gate for pending state: native tools resolve via the local
+    // registry; MCP tools ONLY via the currently exposed (policy-permitted)
+    // set — a denied or allowlisted-out tool can never enter or resume a
+    // pending execution, even if the user explicitly names it.
+    isPendingPermitted(toolName, mcpSchemas) {
+        if (!toolName) return false;
+        try {
+            if (toolRegistry.getTool(toolName)) return true;
+        } catch {
+            // fall through to the MCP check below
+        }
+        return (Array.isArray(mcpSchemas) ? mcpSchemas : []).some((s) => s?.function?.name === toolName);
     }
 
     async emitAssistantText(socket, text) {
@@ -718,6 +790,102 @@ class AIService {
             const outputIntent = detectOutputIntent(baseMessageContent);
             const outputBudget = outputIntent === 'extended' ? OUTPUT_BUDGET_EXTENDED : OUTPUT_BUDGET_DEFAULT;
 
+            // ---- Pending tool-call resume (multi-turn argument collection) ----
+            // Each turn is otherwise stateless: provider messages carry only
+            // the current user turn, so fragmentary follow-ups ("success",
+            // then "true") reselect zero tools and previously supplied values
+            // live nowhere. A pending record preserves the SAME tool call and
+            // merges answers deterministically — never via model recall.
+            // Structured diagnostics log names/rounds only, never values.
+            let syntheticResponse = null;
+            {
+                let pendingState = await this.loadPendingToolCall(conversationId, userId);
+                const failClosed = async (reason, extra = {}) => {
+                    console.log('[AIService] pendingTool.abandoned', { reason, ...extra });
+                    await this.clearPendingToolCall(conversationId, userId);
+                    pendingState = null;
+                };
+                if (pendingState) {
+                    const pTool = pendingState.toolName;
+                    if (!this.isPendingPermitted(pTool, mcpSchemas)) {
+                        console.error('[AIService] pendingTool.denied', { tool: pTool });
+                        await failClosed('denied', { tool: pTool });
+                    } else if (isCancelText(baseMessageContent)) {
+                        await failClosed('cancelled', { tool: pTool });
+                    } else if (Array.isArray(toolPick.mcpExplicit) && toolPick.mcpExplicit.length > 0
+                        && !toolPick.mcpExplicit.includes(pTool)) {
+                        // User pivoted to a different explicit tool — replace.
+                        console.log('[AIService] pendingTool.replaced', { from: pTool, to: toolPick.mcpExplicit[0] });
+                        await failClosed('replaced', { from: pTool, to: toolPick.mcpExplicit[0] });
+                    } else {
+                        const schema = this.resolvePendingSchema(pTool, toolPick.tools, mcpSchemas);
+                        if (!schema) {
+                            await failClosed('schema-unavailable', { tool: pTool });
+                        } else {
+                            const advanced = advancePending(pendingState, baseMessageContent, schema);
+                            if (advanced.action === 'execute') {
+                                console.log('[AIService] pendingTool.execute', { tool: pTool, missing: [] });
+                                await this.clearPendingToolCall(conversationId, userId);
+                                pendingState = null;
+                                // Issue the SAME tool call through the normal
+                                // execution/continuation machinery below.
+                                syntheticResponse = {
+                                    text: '',
+                                    toolCalls: [{
+                                        id: `pending-${Date.now().toString(36)}`,
+                                        function: { name: pTool, arguments: advanced.args }
+                                    }],
+                                    provider: null,
+                                    model: null,
+                                    tokens: { input: 0, output: 0 }
+                                };
+                            } else if (advanced.action === 'ask') {
+                                console.log('[AIService] pendingTool.ask', { tool: pTool, missing: advanced.missing });
+                                await this.savePendingToolCall(conversationId, userId, advanced.pending);
+                                if (socket && !socket.isInterrupted) {
+                                    await this.emitAssistantText(socket, advanced.question);
+                                }
+                                return advanced.question;
+                            } else {
+                                await failClosed(advanced.reason || 'abandoned', { tool: pTool });
+                            }
+                        }
+                    }
+                }
+                // Silent pending creation: a single explicitly requested tool
+                // whose required args are missing from the user text. Records
+                // state so the model's prose clarification can be answered
+                // incrementally; if the text already supplies everything, the
+                // call is issued deterministically right away.
+                if (!pendingState && !syntheticResponse
+                    && Array.isArray(toolPick.mcpExplicit) && toolPick.mcpExplicit.length === 1) {
+                    const target = toolPick.mcpExplicit[0];
+                    const schema = this.resolvePendingSchema(target, toolPick.tools, mcpSchemas);
+                    if (schema && requiredParams(schema).length > 0 && this.isPendingPermitted(target, mcpSchemas)) {
+                        const params = requiredParams(schema);
+                        const extracted = extractArgValues(baseMessageContent, params);
+                        const check = validateArgs(schema, extracted);
+                        if (!check.ok) {
+                            const created = createPending(target, extracted, schema);
+                            console.log('[AIService] pendingTool.created', { tool: target, missing: created.missing });
+                            await this.savePendingToolCall(conversationId, userId, created);
+                        } else {
+                            console.log('[AIService] pendingTool.execute-immediate', { tool: target, missing: [] });
+                            syntheticResponse = {
+                                text: '',
+                                toolCalls: [{
+                                    id: `pending-${Date.now().toString(36)}`,
+                                    function: { name: target, arguments: check.coerced }
+                                }],
+                                provider: null,
+                                model: null,
+                                tokens: { input: 0, output: 0 }
+                            };
+                        }
+                    }
+                }
+            }
+
             const systemTemplate = `You are ARC-AI, an advanced, highly intelligent autonomous agent.
                     The current system date and time is: ${currentDateString}.
                     
@@ -815,7 +983,7 @@ class AIService {
             } catch {
                 // Diagnostics must never break the request path.
             }
-            const response = await this.llmRouter.generate({
+            const response = syntheticResponse || await this.llmRouter.generate({
                 messages,
                 systemPrompt,
                 tools,
@@ -1059,6 +1227,46 @@ class AIService {
 
             if (toolCalls && toolCalls.length > 0) {
                 console.log(`[Agent Router] AI requested ${toolCalls.length} tool(s).`);
+                // Required-argument gate (generic, native + MCP): a tool call
+                // with missing/invalid required args is NEVER executed. A
+                // single partial call enters the pending flow with one
+                // deterministic question — previously it failed remotely and
+                // degraded into an ask-again loop with no preserved state.
+                // Any fresh tool transaction supersedes a stored pending one.
+                await this.clearPendingToolCall(conversationId, userId);
+                if (toolCalls.length === 1 && !syntheticResponse) {
+                    const rawName = toolCalls[0]?.function?.name;
+                    const execName = this.mapCalendarToolName(rawName, calendarIntent);
+                    const argSchema = this.resolvePendingSchema(execName, tools, mcpSchemas)
+                        || this.resolvePendingSchema(rawName, tools, mcpSchemas);
+                    const permitted = this.isPendingPermitted(execName, mcpSchemas)
+                        || this.isPendingPermitted(rawName, mcpSchemas);
+                    if (argSchema && permitted && requiredParams(argSchema).length > 0) {
+                        let parsed = {};
+                        try {
+                            parsed = typeof toolCalls[0].function.arguments === 'string'
+                                ? JSON.parse(toolCalls[0].function.arguments)
+                                : { ...(toolCalls[0].function.arguments || {}) };
+                        } catch { parsed = {}; }
+                        const checked = validateArgs(argSchema, parsed);
+                        if (!checked.ok) {
+                            const params = requiredParams(argSchema);
+                            const missed = checked.errors.map((e) => e.name);
+                            const pend = createPending(execName, checked.coerced, argSchema);
+                            console.log('[AIService] pendingTool.ask', { tool: execName, missing: missed });
+                            await this.savePendingToolCall(conversationId, userId, pend);
+                            const question = buildClarification(
+                                execName,
+                                params.filter((p) => missed.includes(p.name)),
+                                checked.coerced
+                            );
+                            if (socket && !socket.isInterrupted) {
+                                await this.emitAssistantText(socket, question);
+                            }
+                            return question;
+                        }
+                    }
+                }
                 messages.push({
                     role: 'assistant',
                     content: finalOutputText || '',
