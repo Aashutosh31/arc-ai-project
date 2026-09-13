@@ -30,6 +30,15 @@ const ConversationSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  // Pending multi-turn tool-call state (argument collection). Set only by
+  // the deterministic pending-args flow: { toolName, args, missing, rounds,
+  // updatedAt }. Lets fragmentary follow-ups ("success", then "true") merge
+  // into the SAME tool call instead of restarting selection each turn.
+  // Never holds credentials — just the tool name and user-supplied values.
+  pendingToolCall: {
+    type: Object,
+    default: null
+  },
   archived: {
     type: Boolean,
     default: false
