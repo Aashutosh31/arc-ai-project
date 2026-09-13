@@ -187,6 +187,63 @@ function scoreMcpSchemasDetailed(text, mcpSchemas) {
   return scored;
 }
 
+// Explicit MCP tool-name protection (production 400 fix).
+//
+// Scoring is best-effort: an explicitly named, policy-permitted MCP tool can
+// still be omitted (6-slot cap filled by natives, IDF threshold miss on
+// follow-up turns like "do it again", budget trim dropping MCP first). The
+// model then emits a tool call for the user-named tool anyway and Groq
+// rejects the request: "Tool call validation failed ... not in
+// request.tools". An explicitly requested valid tool must therefore survive
+// selection deterministically.
+//
+// Matching is separator/case-insensitive: the query and each candidate
+// identity are folded to bare alphanumerics, so all of these name the same
+// tool: `mcp_mcp_reference_annotatedMessage`, pasted with any separators or
+// casing, and the bare original name `annotatedMessage` / "annotated
+// message". Two match tiers:
+//   1. full wire identity (always namespaced `mcp_<slug>_<tool>`, min 8
+//      folded chars) — distinctive, always honored;
+//   2. bare original tool name — only when the folded name is >= 8 chars,
+//      so short everyday words ("echo", "read") can never force-include.
+// Candidates come ONLY from the policy-permitted exposed set: a denied or
+// allowlisted-out tool is never in `exposed`, so deny-wins is preserved and
+// an explicitly named blocked tool stays excluded (no-substitution rule
+// still applies to the scored remainder).
+const MCP_EXPLICIT_MIN_WIRE_CHARS = 8;
+const MCP_EXPLICIT_MIN_BARE_CHARS = 8;
+
+const foldMcpIdentity = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+function matchExplicitMcpSchemas(text, exposed = []) {
+  const foldedText = foldMcpIdentity(text);
+  if (!foldedText || !Array.isArray(exposed) || !exposed.length) return [];
+  const matched = [];
+  for (const schema of exposed) {
+    const wire = schema?.function?.name || '';
+    const foldedWire = foldMcpIdentity(wire);
+    if (foldedWire.length >= MCP_EXPLICIT_MIN_WIRE_CHARS && foldedText.includes(foldedWire)) {
+      matched.push(schema);
+      continue;
+    }
+    // Bare original tool name: the slug boundary is unknowable here (slugs
+    // themselves contain underscores, e.g. `mcp_reference`), so every
+    // `_`-separated suffix of the post-`mcp_` remainder is tried longest-
+    // first. Length-gated so short everyday words ("echo") never match.
+    const rest = wire.replace(/^mcp_/i, '');
+    const parts = rest.split('_').filter(Boolean);
+    for (let i = 0; i < parts.length; i += 1) {
+      const foldedBare = foldMcpIdentity(parts.slice(i).join(''));
+      if (foldedBare.length < MCP_EXPLICIT_MIN_BARE_CHARS) continue;
+      if (foldedText.includes(foldedBare)) {
+        matched.push(schema);
+        break;
+      }
+    }
+  }
+  return matched;
+}
+
 function selectMcpSchemasWithPolicy(text, exposed = [], blocked = []) {
   const lowered = normalizeText(text);
   const tokens = (lowered.match(/[a-z][a-z0-9]{2,}/g) || []).filter((t) => !MCP_STOPWORDS.has(t));
@@ -238,15 +295,25 @@ function selectToolSchemas(text, getSchemasFn = null, options = {}) {
     if (name) byName.set(name, s);
   }
   const ordered = [];
+  // Explicitly named, policy-permitted MCP tools take the first slots: the
+  // user asked for that exact tool, so it outranks heuristic group matches
+  // and can never be crowded out by the cap (the production 400).
+  const explicitMcp = matchExplicitMcpSchemas(text, options.mcpSchemas);
+  for (const schema of explicitMcp) {
+    if (ordered.length >= maxTools) break;
+    if (!ordered.includes(schema)) ordered.push(schema);
+  }
   for (const group of groups) {
     for (const name of CAPABILITY_GROUPS[group] || []) {
+      if (ordered.length >= maxTools) break;
       const schema = byName.get(name);
       if (schema && !ordered.includes(schema)) ordered.push(schema);
     }
   }
-  // MCP tools ride the same deterministic append path, ranked by query score —
-  // unless the request targets a policy-blocked capability, in which case no
-  // MCP tool is offered at all (no-substitution rule; see above).
+  // Scored MCP tools fill remaining slots — unless the request targets a
+  // policy-blocked capability, in which case none are offered
+  // (no-substitution rule; see above). Explicit matches above are unaffected
+  // by suppression: offering a user-named allowed tool is never substitution.
   const mcpPick = selectMcpSchemasWithPolicy(text, options.mcpSchemas, options.mcpBlocked);
   for (const schema of mcpPick.schemas) {
     if (ordered.length >= maxTools) break;
@@ -262,7 +329,8 @@ function selectToolSchemas(text, getSchemasFn = null, options = {}) {
     mcpAvailable: Array.isArray(options.mcpSchemas) ? options.mcpSchemas.length : 0,
     mcpMatched: mcpPick.mcpMatched,
     mcpSuppressed: mcpPick.suppressed,
-    mcpBlockedNames: mcpPick.blockedNames
+    mcpBlockedNames: mcpPick.blockedNames,
+    mcpExplicit: explicitMcp.map((s) => s?.function?.name).filter(Boolean)
   };
 }
 
@@ -276,6 +344,30 @@ function activeToolNamesFromCalls(toolCalls) {
   return names;
 }
 
+// Hard invariant: every tool call the model emitted must name a tool present
+// in the exact request.tools set supplied to the provider. Groq enforces
+// this server-side ("Tool call validation failed ... not in request.tools");
+// this helper lets request builders check it client-side before sending.
+// Returns { exposedCalls, unexposedNames } — pure, never throws.
+function partitionToolCallsByExposure(toolCalls, tools) {
+  const offered = new Set();
+  for (const schema of tools || []) {
+    const name = schema?.function?.name;
+    if (typeof name === 'string' && name) offered.add(name);
+  }
+  const exposedCalls = [];
+  const unexposedNames = [];
+  for (const tc of toolCalls || []) {
+    const name = tc?.function?.name || tc?.name;
+    if (typeof name === 'string' && name && offered.has(name)) {
+      exposedCalls.push(tc);
+    } else if (typeof name === 'string' && name && !unexposedNames.includes(name)) {
+      unexposedNames.push(name);
+    }
+  }
+  return { exposedCalls, unexposedNames };
+}
+
 // TOOL-CONTINUATION turn (NOT a new intent classification event).
 // The continuation belongs to the same tool-use transaction, so the tools
 // referenced by the active tool calls are MANDATORY: dropping them produces
@@ -284,6 +376,14 @@ function activeToolNamesFromCalls(toolCalls) {
 // tools fill the remainder up to the cap. Unknown names are skipped — the
 // registry is the source of truth, so a renamed tool can never break the
 // request. Schemas are passed through untouched, never edited.
+//
+// MCP addition (production 400 fix): `options.mcpSchemas` carries the
+// policy-permitted MCP schemas for this request. The native registry lookup
+// alone cannot resolve an active `mcp_...` tool that was absent from the
+// previous tool set (scoring miss, cap crowd-out, budget trim), which left
+// continuation messages referencing a tool missing from continuation tools.
+// Exposed-only lookup preserves deny-wins: a denied tool is absent from
+// `mcpSchemas`, so it stays unresolvable here exactly as in selection.
 function selectContinuationTools(previousTools, activeNames, getSchemasFn = null, options = {}) {
   const maxTools = Math.max(0, Number(options.maxTools ?? MAX_TOOLS_PER_REQUEST));
   const prev = Array.isArray(previousTools) ? previousTools : [];
@@ -293,8 +393,9 @@ function selectContinuationTools(previousTools, activeNames, getSchemasFn = null
   } catch {
     registry = [];
   }
+  const mcpSchemas = Array.isArray(options.mcpSchemas) ? options.mcpSchemas : [];
   const byName = new Map();
-  for (const s of [...prev, ...(Array.isArray(registry) ? registry : [])]) {
+  for (const s of [...prev, ...mcpSchemas, ...(Array.isArray(registry) ? registry : [])]) {
     const name = s?.function?.name;
     if (typeof name === 'string' && name && !byName.has(name)) byName.set(name, s);
   }
@@ -325,6 +426,8 @@ module.exports = {
   scoreMcpSchemas,
   scoreMcpSchemasDetailed,
   selectMcpSchemasWithPolicy,
+  matchExplicitMcpSchemas,
+  partitionToolCallsByExposure,
   selectToolSchemas,
   activeToolNamesFromCalls,
   selectContinuationTools
