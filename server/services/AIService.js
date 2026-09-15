@@ -366,6 +366,215 @@ class AIService {
         await this.streamingRuntime.emitText(socket, text);
     }
 
+    // ---- Recent conversation context + working/agent state ----
+    // CORE continuity fix: every processQuery turn is otherwise stateless
+    // (provider messages carried only the current user turn), so "its",
+    // "that", "the second one" had nothing to resolve against. These helpers
+    // are generic — no pronoun/one-off handling anywhere: the model simply
+    // receives a bounded recent window + compact structured refs and resolves
+    // references naturally. All failure-silent: absence degrades to the old
+    // single-turn shape, never an error.
+    //
+    // Display history (paginated UI reads) and provider context stay
+    // separate: this window is capped (MAX_RECENT_TURNS / per-turn chars) no
+    // matter how many messages the conversation visually holds.
+    async loadRecentTurns(conversationId, userId, limit = 10) {
+        if (isGuestActorId(userId) || !conversationId) return [];
+        try {
+            // Newest-first fetch, then chronological. Excludes nothing: the
+            // just-saved current user message is appended by the budget
+            // pipeline itself, so fetching limit+1 and dropping a trailing
+            // duplicate keeps exactly `limit` PRIOR turns.
+            const docs = await Message.find({ conversationId })
+                .sort({ createdAt: -1, _id: -1 })
+                .limit(Math.max(1, limit + 1))
+                .select('role content createdAt')
+                .lean();
+            const chronological = (Array.isArray(docs) ? docs : []).reverse();
+            const turns = [];
+            for (const d of chronological) {
+                const content = String(d?.content || '').trim();
+                if (!content) continue;
+                turns.push({
+                    role: d?.role === 'ai' ? 'assistant' : 'user',
+                    // Per-turn bound: a giant single turn can never evict the
+                    // rest of the window; the budget pipeline enforces the
+                    // final cap. 1500 chars mirrors PER_TURN_CHAR_CAP.
+                    content: content.length > 1500 ? content.slice(0, 1500) : content
+                });
+            }
+            // Drop the just-saved current user message if present at the end.
+            if (turns.length > limit) return turns.slice(-limit);
+            if (turns.length && turns[turns.length - 1].role === 'user') {
+                return turns.slice(0, -1).slice(-limit);
+            }
+            return turns.slice(-limit);
+        } catch {
+            return [];
+        }
+    }
+
+    async loadWorkingState(conversationId, userId) {
+        if (isGuestActorId(userId) || !conversationId) return null;
+        try {
+            const doc = await Conversation.findById(conversationId)
+                .select('workingState conversationSummary pendingToolCall')
+                .lean();
+            return doc || null;
+        } catch {
+            return null;
+        }
+    }
+
+    async saveWorkingState(conversationId, userId, workingState, summary = undefined) {
+        if (isGuestActorId(userId) || !conversationId || !workingState) return;
+        try {
+            const update = { workingState };
+            if (typeof summary === 'string' && summary) update.conversationSummary = summary.slice(0, 1200);
+            await Conversation.findByIdAndUpdate(conversationId, update);
+        } catch {
+            // Persistence must never break the request path.
+        }
+    }
+
+    // Derive compact working-state refs from recent tool activity stored on
+    // Message.toolCalls ({ toolName, input, output }). Bounded references
+    // only — titles/ids/queries, max 3 search results — never full outputs.
+    // Merged UNDER any persisted workingState (fresh activity wins per slot).
+    buildWorkingStateFromMessages(recentMessageDocs, persisted = null, pendingState = null) {
+        const state = {};
+        if (persisted && typeof persisted === 'object') {
+            for (const k of ['activeMedia', 'activeSearch', 'activeResource', 'activeTask']) {
+                if (persisted[k] != null) state[k] = persisted[k];
+            }
+        }
+        const compactStr = (v, cap = 140) => {
+            let s = '';
+            try { s = typeof v === 'string' ? v : JSON.stringify(v ?? ''); }
+            catch { s = ''; }
+            s = String(s || '').replace(/\s+/g, ' ').trim();
+            return s.length > cap ? s.slice(0, cap) : s;
+        };
+        try {
+            const docs = Array.isArray(recentMessageDocs) ? recentMessageDocs : [];
+            for (const doc of docs) {
+                const calls = Array.isArray(doc?.toolCalls) ? doc.toolCalls : [];
+                for (const call of calls) {
+                    const name = String(call?.toolName || '');
+                    if (!name) continue;
+                    const input = call?.input && typeof call.input === 'object' ? call.input : {};
+                    const output = call?.output;
+                    if (['playMedia', 'stopMedia'].includes(name)) {
+                        const title = compactStr(input.searchQuery || input.query || output?.title || output?.message);
+                        if (title) state.activeMedia = { tool: name, title: title.slice(0, 140) };
+                    } else if (['webSearch', 'scrapeWebsite', 'getTopNews'].includes(name)) {
+                        const query = compactStr(input.query || input.q || input.url || input.topic);
+                        let refs = [];
+                        try {
+                            const results = output?.results || output?.articles || output?.items;
+                            if (Array.isArray(results)) {
+                                refs = results.slice(0, 3).map((r) => compactStr(r?.title || r?.url || r, 100)).filter(Boolean);
+                            }
+                        } catch { refs = []; }
+                        if (query || refs.length) state.activeSearch = { tool: name, query: query.slice(0, 140), results: refs };
+                    } else if (['openWebsite', 'scheduleMeeting', 'checkCalendar', 'sendEmail', 'sendWhatsAppMessage', 'executeCode', 'copyToClipboard'].includes(name)) {
+                        const ref = compactStr(input.url || input.summary || input.to || input.code || input.text || output?.message || output?.title);
+                        if (ref) state.activeResource = { tool: name, ref: ref.slice(0, 140) };
+                    } else if (name.startsWith('mcp_')) {
+                        // Generic MCP activity: wire name + compact input refs so
+                        // "update that page" / "open the second one" resolve.
+                        const ref = compactStr(input.page_id || input.pageId || input.id || input.title || input.query || input.url || Object.values(input)[0]);
+                        if (ref || output) {
+                            state.activeResource = {
+                                tool: name.slice(0, 80),
+                                ref: ref.slice(0, 140)
+                            };
+                        }
+                    }
+                }
+            }
+        } catch {
+            // Derivation must never throw; persisted state still applies.
+        }
+        if (pendingState && typeof pendingState.toolName === 'string') {
+            state.pendingTool = { tool: pendingState.toolName, missing: pendingState.missing || [] };
+        }
+        return Object.keys(state).length ? state : null;
+    }
+
+    // Context-aware tool selection query: the CURRENT text decides, but the
+    // last two user turns ride along as background so follow-ups without an
+    // explicit capability verb ("make it slower", "summarize the second
+    // result", "do it again") still surface the prior turn's tools. Bounded
+    // (2 x 300 chars) and generic — no pronoun/entity special-casing.
+    buildToolSelectionQuery(currentText, recentTurns) {
+        const current = String(currentText || '');
+        try {
+            const priorUsers = (Array.isArray(recentTurns) ? recentTurns : [])
+                .filter((t) => t && t.role === 'user' && String(t.content || '').trim())
+                .slice(-2)
+                .map((t) => String(t.content).slice(0, 300));
+            if (!priorUsers.length) return current;
+            return `${priorUsers.join('\n')}\n${current}`.slice(0, 900);
+        } catch {
+            return current;
+        }
+    }
+
+    // Refresh persisted working state after tool executions (inline + planner
+    // paths share this): extracts compact refs from executed tool results and
+    // merges them over the stored state. Bounded inputs, failure-silent.
+    async refreshWorkingStateFromResults(conversationId, userId, executedResults, pendingState = null) {
+        if (isGuestActorId(userId) || !conversationId || !Array.isArray(executedResults) || !executedResults.length) return null;
+        try {
+            const convo = await this.loadWorkingState(conversationId, userId);
+            const base = (convo && convo.workingState && typeof convo.workingState === 'object') ? { ...convo.workingState } : {};
+            const compactStr = (v, cap = 140) => {
+                let s = '';
+                try { s = typeof v === 'string' ? v : JSON.stringify(v ?? ''); }
+                catch { s = ''; }
+                s = String(s || '').replace(/\s+/g, ' ').trim();
+                return s.length > cap ? s.slice(0, cap) : s;
+            };
+            for (const entry of executedResults) {
+                const name = String(entry?.name || '');
+                let content = entry?.content;
+                if (typeof content === 'string') {
+                    try { content = JSON.parse(content); } catch { content = { message: String(entry.content).slice(0, 300) }; }
+                }
+                const payload = content && typeof content === 'object' ? content : {};
+                if (!name) continue;
+                if (['playMedia', 'stopMedia'].includes(name)) {
+                    const title = compactStr(payload?.clientAction?.title || payload?.message || payload?.title);
+                    if (title) base.activeMedia = { tool: name, title };
+                } else if (['webSearch', 'scrapeWebsite', 'getTopNews'].includes(name)) {
+                    let refs = [];
+                    try {
+                        const results = payload?.results || payload?.articles || payload?.items;
+                        if (Array.isArray(results)) refs = results.slice(0, 3).map((r) => compactStr(r?.title || r?.url || r, 100)).filter(Boolean);
+                    } catch { refs = []; }
+                    base.activeSearch = { tool: name, results: refs };
+                } else if (name.startsWith('mcp_')) {
+                    const ref = compactStr(payload?.title || payload?.id || payload?.message);
+                    if (ref) base.activeResource = { tool: name.slice(0, 80), ref };
+                } else {
+                    const ref = compactStr(payload?.message || payload?.title || payload?.summary);
+                    if (ref) base.activeTask = { tool: name, ref };
+                }
+            }
+            if (pendingState && typeof pendingState.toolName === 'string') {
+                base.pendingTool = { tool: pendingState.toolName };
+            } else if (base.pendingTool && executedResults.length) {
+                delete base.pendingTool;
+            }
+            if (!Object.keys(base).length) return null;
+            await this.saveWorkingState(conversationId, userId, base);
+            return base;
+        } catch {
+            return null;
+        }
+    }
+
     async executeSchedulingPipeline(userId, rawText, socket, signal = null) {
         const userCommand = String(rawText || '').trim();
         console.log(`[Planner] Incoming user command: ${userCommand}`);
@@ -755,9 +964,12 @@ class AIService {
             // Memories are compacted to short bullets (never verbatim
             // messages[] turns), facts/RAG are capped, tools are the
             // intent-matched subset (never all 22), and output is explicit.
-            // provider-context (messages[]) carries ONLY the current user
-            // turn; short-term continuity arrives via RAG message snippets.
-            // Display history (pagination) and provider context stay separate.
+            // Provider messages[] carry a BOUNDED recent window (prior turns
+            // verbatim, most-recent-first) + the current user turn, so
+            // follow-ups ("its", "that", "the second one") resolve against
+            // real conversation context. Display history (pagination) and
+            // provider context stay separate: the window is capped no matter
+            // how many messages the UI shows.
             // MCP tools ride the same budget pipeline: their schemas are
             // keyword-scored below and then held to the SAME 6-tool cap and
             // the 7K context budget (unknown-group rank → dropped first).
@@ -776,7 +988,30 @@ class AIService {
                 mcpSchemas = [];
                 mcpBlocked = [];
             }
-            const toolPick = selectToolSchemas(baseMessageContent, () => toolRegistry.getSchemas(), { mcpSchemas, mcpBlocked });
+            // ---- Recent conversation window + working state (core continuity) ----
+            // Loaded BEFORE tool selection so follow-ups without an explicit
+            // capability verb still surface the prior turn's tools. Bounded
+            // (10 turns x ~1500 chars) and failure-silent: [] / null degrades
+            // to the old single-turn shape, never an error. Guests have no
+            // conversation record, so both stay empty for them.
+            let recentTurns = [];
+            let persistedWorkingState = null;
+            let persistedSummary = '';
+            try {
+                recentTurns = await this.loadRecentTurns(conversationId, userId, 10);
+            } catch { recentTurns = []; }
+            try {
+                const convoState = await this.loadWorkingState(conversationId, userId);
+                persistedWorkingState = (convoState && convoState.workingState && typeof convoState.workingState === 'object')
+                    ? convoState.workingState : null;
+                persistedSummary = String(convoState?.conversationSummary || '');
+            } catch { persistedWorkingState = null; persistedSummary = ''; }
+            // Tool-selection background: last two user turns ride along so
+            // "make it slower" / "summarize the second result" / "do it
+            // again" resurface the prior turn's capability. Generic — no
+            // pronoun or entity special-casing.
+            const toolSelectionQuery = this.buildToolSelectionQuery(baseMessageContent, recentTurns);
+            const toolPick = selectToolSchemas(toolSelectionQuery, () => toolRegistry.getSchemas(), { mcpSchemas, mcpBlocked });
             // No-substitution truthfulness: the request targets an MCP
             // capability removed by workspace policy. No MCP tool was
             // offered, so guide the model to say so instead of substituting
@@ -907,6 +1142,9 @@ class AIService {
                     MEMORY DIRECTIVE:
                     Use the ranked retrieval context below only when it is relevant. Prefer the most recent and semantically matching items. Ignore duplicates.
 
+                    CONVERSATION CONTINUITY:
+                    The recent conversation turns below are the live dialogue — resolve follow-up references ("it", "its", "that", "the previous one", "the second result", "do it again", "same song") against them and the WORKING STATE block. Never ask the user to repeat information already present in the recent turns or working state.
+
                     __LONG_TERM_MEMORY_SLOT____RETRIEVAL_CONTEXT_SLOT__
 
                     IDENTITY DIRECTIVE:
@@ -914,6 +1152,30 @@ class AIService {
 
                     "I am ARC-AI, an autonomous multimodal AI platform created by Aashutosh Bairagi — an AI systems engineer focused on realtime architectures, autonomous agents, and next-generation intelligent software systems."
                     ${mcpPolicyNote}`;
+
+            // Working state for this turn: persisted refs (previous tool
+            // activity) merged with pending-tool state. Fresh tool results
+            // below refresh the stored copy via refreshWorkingStateFromResults.
+            let turnWorkingState = persistedWorkingState;
+            try {
+                const pendingForState = await this.loadPendingToolCall(conversationId, userId);
+                if (pendingForState || persistedWorkingState) {
+                    turnWorkingState = {
+                        ...(persistedWorkingState && typeof persistedWorkingState === 'object' ? persistedWorkingState : {}),
+                        ...(pendingForState && typeof pendingForState.toolName === 'string'
+                            ? { pendingTool: { tool: pendingForState.toolName, missing: pendingForState.missing || [] } }
+                            : {})
+                    };
+                    if (!Object.keys(turnWorkingState).length) turnWorkingState = null;
+                }
+            } catch { turnWorkingState = persistedWorkingState; }
+            // Active native tool continuity: the working state's live tool
+            // survives budget trimming so "make it slower" keeps playMedia
+            // even when the follow-up text alone selects nothing.
+            const activeStateTool = turnWorkingState?.activeMedia?.tool
+                || turnWorkingState?.activeSearch?.tool
+                || turnWorkingState?.activeResource?.tool
+                || null;
 
             const budgeted = assembleBudgetedRequest({
                 systemTemplate,
@@ -925,10 +1187,18 @@ class AIService {
                 selectedTools: toolPick.tools,
                 outputBudget,
                 query: baseMessageContent,
-                // Explicitly requested MCP tools must survive context budgeting:
-                // dropping a user-named tool makes the model call it anyway
-                // and the provider rejects the request ("not in request.tools").
-                protectedToolNames: toolPick.mcpExplicit || []
+                recentTurns,
+                workingState: turnWorkingState,
+                conversationSummary: persistedSummary,
+                // Explicitly requested and capability-driven MCP tools must
+                // survive context budgeting: dropping a tool the model is
+                // about to call makes the provider reject the request ("not
+                // in request.tools").
+                protectedToolNames: [
+                    ...(toolPick.mcpExplicit || []),
+                    ...(toolPick.mcpCapability || []),
+                    ...(activeStateTool ? [activeStateTool] : [])
+                ]
             });
 
             if (!budgeted.ok) {
@@ -1309,6 +1579,13 @@ class AIService {
                             content: step.result || {}
                         }));
 
+                        // Persist compact working-state refs so the NEXT turn
+                        // can resolve "that"/"it" against this tool activity.
+                        // Failure-silent; never blocks synthesis.
+                        try {
+                            await this.refreshWorkingStateFromResults(conversationId, userId, plannerToolResults);
+                        } catch { /* working state is advisory */ }
+
                         if (execResult.status === 'CANCELLED' || (controller.signal && controller.signal.aborted)) {
                             finalOutputText = assistantDraftContent || finalOutputText || '';
                             if (assistantDraftMessageId && conversationId) {
@@ -1471,6 +1748,13 @@ class AIService {
                         } : null;
                     }).filter(Boolean);
 
+                    // Persist compact working-state refs so the NEXT turn can
+                    // resolve "it"/"that"/"the second one" against this tool
+                    // activity. Failure-silent; never blocks synthesis.
+                    try {
+                        await this.refreshWorkingStateFromResults(conversationId, userId, providerToolResults);
+                    } catch { /* working state is advisory */ }
+
                     const finalGeneration = await makeContinuationGeneration({
                         assistantMessage: assistantToolMessage,
                         toolResults: providerToolResults
@@ -1540,12 +1824,36 @@ class AIService {
 
                         const storedOutput = sanitizeForStorage(finalOutputText || '');
 
+                        // Compact tool-activity records for next-turn working
+                        // state derivation + audit trail. Bounded refs only
+                        // (name + compact input summary + success flag) —
+                        // never full outputs verbatim.
+                        let storedToolCalls = [];
+                        try {
+                            storedToolCalls = (toolCalls || []).slice(0, 6).map((tc) => {
+                                let argSummary = '';
+                                try {
+                                    const rawArgs = typeof tc?.function?.arguments === 'string'
+                                        ? JSON.parse(tc.function.arguments) : (tc?.function?.arguments || {});
+                                    const vals = Object.values(rawArgs).map((v) => String(v ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+                                    argSummary = vals.join(' | ').slice(0, 200);
+                                } catch { argSummary = ''; }
+                                return {
+                                    toolName: String(tc?.function?.name || ''),
+                                    input: { summary: argSummary },
+                                    output: { summarized: true },
+                                    status: 'success'
+                                };
+                            }).filter((e) => e.toolName);
+                        } catch { storedToolCalls = []; }
+
                         let savedMessage = null;
                         if (assistantDraftMessageId) {
                             await Message.findByIdAndUpdate(assistantDraftMessageId, {
                                 content: storedOutput,
                                 provider: assistantResponseMeta.provider,
                                 model: assistantResponseMeta.model,
+                                toolCalls: storedToolCalls,
                                 metadata: {
                                     tokens: assistantResponseMeta.tokens || { input: 0, output: 0 },
                                     streaming: false,
@@ -1561,6 +1869,7 @@ class AIService {
                                 content: storedOutput,
                                 provider: assistantResponseMeta.provider,
                                 model: assistantResponseMeta.model,
+                                toolCalls: storedToolCalls,
                                 metadata: {
                                     tokens: assistantResponseMeta.tokens || { input: 0, output: 0 },
                                     streaming: false,
