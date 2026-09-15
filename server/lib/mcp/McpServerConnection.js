@@ -224,6 +224,10 @@ class McpServerConnection {
         originalToolName: mcpTool.name,
         description: mcpTool.description || '',
         inputSchema: mcpTool.inputSchema || { type: 'object', properties: {}, required: [] },
+        // MCP behavior hints (readOnlyHint/destructiveHint/...) travel with
+        // the entry so capability planning can read them generically. The
+        // ARC schema sent to providers never carries them (see withMetadata).
+        annotations: adapter.sanitizeAnnotations(mcpTool.annotations),
         keywords: extractKeywords(mcpTool)
       });
 

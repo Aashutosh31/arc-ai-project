@@ -12,6 +12,17 @@
 // configs directly via the `register` / `registerMany` API.
 
 const { sanitizeSlug } = require('./names');
+const { sanitizeAnnotations } = require('./McpToolAdapter');
+
+// Registry-side annotation passthrough (same sanitizer as live discovery).
+// Kept as a named wrapper so the pure-helper section stays dependency-light.
+const sanitizeToolAnnotations = (annotations) => {
+  try {
+    return sanitizeAnnotations(annotations);
+  } catch {
+    return null;
+  }
+};
 
 class McpRegistry {
   constructor() {
@@ -284,6 +295,9 @@ const buildToolEntry = (config, tool, takenCanonical, takenWire) => {
     originalToolName: tool.name || tool.originalToolName,
     description: tool.description || '',
     inputSchema: tool.inputSchema || { type: 'object', properties: {}, required: [] },
+    // Same annotation passthrough as live discovery (McpServerConnection):
+    // sanitized behavior hints only, never credentials or free-form objects.
+    annotations: sanitizeToolAnnotations(tool.annotations),
     keywords: Array.isArray(tool.keywords) ? tool.keywords : []
   });
 };

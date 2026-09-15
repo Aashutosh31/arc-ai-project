@@ -237,6 +237,25 @@ const wrapAsToolEntry = (arcSchema, execFn) => ({
   execute: execFn
 });
 
+// --- MCP annotation passthrough (generic, spec-shaped) ----------------------
+// MCP tool definitions may carry `annotations` behavior hints
+// (readOnlyHint, destructiveHint, idempotentHint, openWorldHint, title).
+// They describe the TOOL, not the vendor: capability planning reads them
+// without any tool-name knowledge. Only JSON-safe primitives are kept;
+// anything else is dropped so a hostile server cannot smuggle payloads.
+// Returns a frozen object or null when no usable hints exist. Pure.
+const sanitizeAnnotations = (annotations) => {
+  if (!annotations || typeof annotations !== 'object' || Array.isArray(annotations)) return null;
+  const out = {};
+  for (const key of ['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint']) {
+    if (typeof annotations[key] === 'boolean') out[key] = annotations[key];
+  }
+  if (typeof annotations.title === 'string' && annotations.title) {
+    out.title = annotations.title.slice(0, 200);
+  }
+  return Object.keys(out).length > 0 ? Object.freeze(out) : null;
+};
+
 module.exports = {
   toArcSchema,
   toArcResult,
@@ -245,5 +264,6 @@ module.exports = {
   createExecAdapter,
   wrapAsToolEntry,
   sanitizeParameters,
-  sanitizeProperty
+  sanitizeProperty,
+  sanitizeAnnotations,
 };

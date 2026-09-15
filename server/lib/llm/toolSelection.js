@@ -47,6 +47,323 @@ const EXTENDED_OUTPUT_PATTERNS = [/\bcode\b/, /\bfunction\b/, /\bclass\b/, /\bde
 
 const normalizeText = (text) => String(text || '').toLowerCase();
 
+// ---- Generic MCP capability model -----------------------------------------
+// The lexical scorer can only surface tools whose name/description tokens
+// overlap the query. It cannot select a tool the user never names: "add a new
+// section to the page you just created" contains none of `append_block_children`
+// / `update_page`, so write tools were never offered. This layer closes that
+// gap without any tool names or vendor knowledge: it classifies the INTENT of
+// the query and the CAPABILITIES each exposed MCP schema declares, then
+// guarantees a slot for every requested capability (action verbs before
+// lookups). It never weakens the no-substitution rule: capability picks come
+// only from the policy-permitted exposed set and are suppressed with the whole
+// request when policy blocks the requested capability.
+const CAPABILITY_PICK_ORDER = [
+  'CREATE', 'UPDATE', 'DELETE', 'SEND', 'UPLOAD', 'DOWNLOAD',
+  'EXECUTE', 'SEARCH', 'READ', 'LIST'
+];
+
+// Tool-declaration side: capability keywords over wire name + description +
+// parameter names. `remove` is DELETE (never UPDATE: `\bmov\w*` cannot match
+// inside `remove` because there is no word boundary before "mov").
+const CAP_TOOL_PATTERNS = {
+  READ: [/\b(read\w*|get\b|fetch\w*|retriev\w*|view\w*|open\w*|load\w*|display\w*|show\w*|see\w*|preview\w*)\b/],
+  SEARCH: [/\b(search\w*|find\w*|lookup\w*|look\s+up\b|query\w*)\b/],
+  LIST: [/\b(list\w*|enumerat\w*)\b/],
+  CREATE: [/\b(creat\w*|generat\w*|build\w*|insert\w*|compos\w*)\b/],
+  UPDATE: [/\b(updat\w*|edit\w*|modify\w*|chang\w*|alter\w*|renam\w*|mov\w*|set\b|append\w*|replac\w*|adjust\w*|revise\w*|toggl\w*|patch\w*)\b/],
+  DELETE: [/\b(delet\w*|remov\w*|erase\w*|wipe\w*|destroy\w*|truncat\w*|trash\w*|archiv\w*|discard\w*)\b/],
+  SEND: [/\b(send\w*|post\b|publish\w*|notify\w*|deliver\w*|email\w*|share\w*|messag\w*|comment\w*|forward\w*|reply\w*|sms\b)\b/],
+  UPLOAD: [/\b(upload\w*|attach\w*)\b/],
+  DOWNLOAD: [/\b(download\w*|export\w*)\b/],
+  EXECUTE: [/\b(execut\w*|run\w*|invoke\w*|trigger\w*|start\b|launch\w*|apply\w*|process\w*|compile\w*)\b/]
+};
+
+// Intent side: same verb families, applied to the user's message, with one
+// asymmetry: users saying "clear …" mean removal ("clear the old pages"),
+// while tool descriptions saying "clear" usually mean the adjective ("a
+// clear best match"). Intent keeps `clear` as DELETE; declaration drops it.
+// `add/insert` are handled separately by the add-rule below.
+const CAP_INTENT_PATTERNS = Object.fromEntries(
+  Object.entries(CAP_TOOL_PATTERNS).map(([cap, list]) => [
+    cap,
+    cap === 'DELETE'
+      ? [/(\bclear\b)/, ...list]
+      : [...list]
+  ])
+);
+
+// Parts/rows/blocks that are added INTO an existing entity: strong UPDATE
+// evidence for "add X to Y". Whole entities (page/document/file/...) tell us
+// "add a new page" = CREATE — but only when no existing-target evidence exists.
+const PART_ENTITIES = new Set([
+  'section', 'block', 'content', 'snippet', 'row', 'column', 'comment',
+  'field', 'entry', 'line', 'paragraph', 'heading', 'subheading', 'property',
+  'value', 'attachment', 'bullet', 'item', 'link', 'quote', 'checklist',
+  'summary', 'child', 'body', 'text', 'notes', 'data', 'media', 'button',
+  'step', 'bullet point'
+]);
+const ADD_VERB_RE = /\b(add\w*|insert\w*|put\b)\b/;
+// Existing-target evidence: "add X to the page", "add X to it", "add X into
+// this doc" — or any part-entity present at all ("add a section").
+const ADD_TARGET_RE = /\b(add\w*|insert\w*|put\b)\b[\s\S]*\b(to|into|in)\b\s+(the|it|this|that|its|a|an)/;
+// Creating a whole new object: "add a new page", "add a file to the vault".
+// Only indefinite articles/new evidence counts — "add a section to the page"
+// (part, existing target) must stay UPDATE. The bridge between the verb and
+// the entity is clause-bounded ([^.!?;,\n], ≤40 chars): without that bound,
+// "… add a section … multiple sentences later 'a new page' …" would match the
+// FIRST add verb against a FAR LATER "a new page", misclassifying an update
+// request as a create request. Bounded, an "add" only ever counts the noun in
+// its own clause ("add a new page" = CREATE; "add a new section … to the page"
+// has 'page' after the add but 'section' is the object's part, so UPDATE).
+const WHOLE_NEW_RE = /\b(add\w*|insert\w*)\b[^.!?;,\n]{0,40}\b(?:a|an|new|another|fresh)\s+(?:new\s+)?(page|document|doc|file|folder|meeting|event|issue|ticket|project|task|note|record|contact|repo|repository|database|board|todo|reminder|draft|message|email|customer|product|workspace)\b/;
+
+// Capability verbs whose immediately preceding word marks them as NEGATED or
+// DESCRIPTIVE rather than a requested capability:
+//   "do not create a page"            → 'create' is forbidden, not requested
+//   "the page you created earlier"    → past description of an existing object
+//   "the page we opened last week"    → relative clause, not an instruction
+// Only the immediate predecessor counts, so "please create", "I want you to
+// create", "… and update …" still trigger their capabilities.
+const INTENT_VERB_DROP_PREV = new Set([
+  'not', "don't", 'dont', 'never', 'no', 'avoid', 'stop',
+  'you', 'i', 'we', 'they', 'he', 'she', 'it', 'that', 'which', 'who',
+  'when', 'how', 'what', 'has', 'had', 'have', 'been', 'this', 'one'
+]);
+
+const CAP_VERB_ANY_RE = new RegExp(
+  `(?:${Object.values(CAP_INTENT_PATTERNS)
+    .flatMap((list) => list.map((re) => re.source))
+    .join('|')
+  }|${ADD_VERB_RE.source})`,
+  'g'
+);
+
+function classifyIntentCapabilities(text) {
+  const lowered = normalizeText(text);
+  const caps = new Set();
+  const hits = [];
+  for (const m of lowered.matchAll(CAP_VERB_ANY_RE)) {
+    hits.push({ verb: m[0], index: m.index });
+  }
+  for (const hit of hits) {
+    const before = lowered.slice(0, hit.index);
+    const prev = before.trim().match(/[a-z0-9']+$/);
+    if (prev && INTENT_VERB_DROP_PREV.has(prev[0])) continue;
+    if (ADD_VERB_RE.test(hit.verb)) {
+      caps.add('__ADD__');
+      continue;
+    }
+    for (const cap of CAPABILITY_PICK_ORDER) {
+      const patterns = CAP_INTENT_PATTERNS[cap];
+      if (patterns && patterns.some((re) => new RegExp(re.source).test(hit.verb))) {
+        caps.add(cap);
+      }
+    }
+  }
+  if (caps.has('__ADD__')) {
+    caps.delete('__ADD__');
+    // CREATE a whole new object ("add a new page") vs UPDATE an existing one
+    // ("add a section to the page" / "add a section" / "add a checklist").
+    const tokens = lowered.match(/[a-z][a-z0-9]{2,}/g) || [];
+    const hasPart = tokens.some((t) => PART_ENTITIES.has(t));
+    const hasNewWhole = WHOLE_NEW_RE.test(lowered);
+    const addsToExisting = !hasNewWhole && (hasPart || ADD_TARGET_RE.test(lowered));
+    caps.delete('CREATE');
+    caps.delete('UPDATE');
+    caps.add(addsToExisting ? 'UPDATE' : 'CREATE');
+  }
+  return caps;
+}
+
+// Which capabilities does an MCP schema declare? Generic MCP metadata only:
+// wire name + description prose + argument (parameter) names + MCP
+// annotations when the server exposes them. No vendor/tool-name knowledge.
+//
+// Two hygiene rules keep long real-world descriptions honest:
+//   - backtick-quoted spans are code/field references (`truncated`,
+//     `update_data_source`), not capability claims, and are stripped before
+//     matching — otherwise every tool that MENTIONS another tool declares
+//     that tool's capability;
+//   - `readOnlyHint: true` (MCP spec) declares READ and strips mutating
+//     capabilities a read-only tool can never perform. `destructiveHint` is
+//     deliberately NOT a DELETE declaration: servers mark even search/query
+//     tools destructive (non-GET transport), so it cannot identify deletion.
+const READONLY_STRIP_CAPS = new Set(['CREATE', 'UPDATE', 'DELETE', 'SEND', 'UPLOAD']);
+
+const stripCodeSpans = (text) => String(text || '').replace(/`[^`]*`/g, ' ');
+
+const readMcpAnnotations = (schema) => {
+  try {
+    const direct = schema?.function?.annotations;
+    if (direct && typeof direct === 'object' && !Array.isArray(direct)) return direct;
+    const sidecar = schema?.mcpMetadata?.annotations;
+    if (sidecar && typeof sidecar === 'object' && !Array.isArray(sidecar)) return sidecar;
+    for (const key of ['annotations', 'mcpAnnotations']) {
+      const cand = schema?.[key];
+      if (cand && typeof cand === 'object' && !Array.isArray(cand)) return cand;
+    }
+  } catch {
+    // Declaration must never throw on odd shapes.
+  }
+  return null;
+};
+
+// Argument/schema semantics: property names (recursively, depth-limited)
+// are purpose evidence ("content", "page_id"). Free-prose property
+// descriptions are excluded — they reintroduce the incidental-mention
+// problem code-span stripping just removed.
+const collectParamHay = (schema) => {
+  const parts = [];
+  try {
+    const params = schema?.function?.parameters;
+    if (!params || typeof params !== 'object') return '';
+    const seen = new Set();
+    const walk = (node, depth) => {
+      if (!node || typeof node !== 'object' || depth > 3 || seen.has(node)) return;
+      seen.add(node);
+      const props = node.properties;
+      if (props && typeof props === 'object') {
+        const keys = Object.keys(props);
+        if (keys.length > 64) return;
+        for (const k of keys) {
+          if (typeof k === 'string' && k) parts.push(k);
+          walk(props[k], depth + 1);
+        }
+      }
+      if (Array.isArray(node.required)) {
+        for (const r of node.required) if (typeof r === 'string' && r) parts.push(r);
+      }
+      if (node.items && typeof node.items === 'object') walk(node.items, depth + 1);
+    };
+    walk(params, 0);
+  } catch {
+    // Declaration must never throw on odd shapes.
+  }
+  return parts.join(' ').toLowerCase();
+};
+
+function declareToolCapabilities(schema) {
+  // Separators are not word characters for \b (snake_case `x_update` hides
+  // "update" from `\bupdat`), so names are space-normalized first. Real wire
+  // names mix `-` and `_`; without this, name-declared capabilities silently
+  // vanish depending on which separator a server chose.
+  const name = String(schema?.function?.name || '').toLowerCase().replace(/[_-]+/g, ' ');
+  const desc = stripCodeSpans(String(schema?.function?.description || '')).toLowerCase();
+  const hay = `${name} ${desc} ${collectParamHay(schema)}`;
+  const caps = new Set();
+  for (const cap of CAPABILITY_PICK_ORDER) {
+    const patterns = CAP_TOOL_PATTERNS[cap];
+    if (patterns.some((re) => re.test(hay)) || (cap === 'UPDATE' && ADD_VERB_RE.test(hay))) {
+      caps.add(cap);
+    }
+  }
+  const ann = readMcpAnnotations(schema);
+  if (ann) {
+    if (ann.readOnlyHint === true) {
+      caps.add('READ');
+      for (const c of READONLY_STRIP_CAPS) caps.delete(c);
+    }
+  }
+  return caps;
+}
+
+// Token-exact domain matching (stemmed plurals): query token "section" must
+// match a real word in the candidate, not a substring of another word.
+// Substring matching picked create-comment for "add a section" ("section" ⊂
+// "selection") and update-data-source for "current state" ("state" ⊂
+// "statements"). Names/descriptions tokenize on non-alphanumerics, so
+// snake_case wire names still match their segments.
+const stemEntityToken = (t) => (
+  t.length > 4 && t.endsWith('s') && !t.endsWith('ss') ? t.slice(0, -1) : t
+);
+
+const tokenSetOf = (text) => {
+  const set = new Set();
+  for (const t of String(text || '').toLowerCase().match(/[a-z][a-z0-9]{2,}/g) || []) {
+    set.add(stemEntityToken(t));
+  }
+  return set;
+};
+
+const tokenFreqOf = (text) => {
+  const freq = new Map();
+  for (const t of String(text || '').toLowerCase().match(/[a-z][a-z0-9]{2,}/g) || []) {
+    const s = stemEntityToken(t);
+    freq.set(s, (freq.get(s) || 0) + 1);
+  }
+  return freq;
+};
+
+// Shared-domain evidence: stemmed query TOKENS that are not capability verbs
+// / stop-words and that appear as whole words in the candidate's name or
+// description. This is the anti-substitution guard — a candidate with zero
+// domain overlap with the request is never added by capability alone (unless
+// the nameCap fallback below applies).
+function sharedEntityCount(candidate, entityTokens) {
+  if (!entityTokens || !entityTokens.length) return 0;
+  const set = candidate.tokenSet || tokenSetOf(`${candidate.nameLower || ''} ${candidate.descLower || ''}`);
+  let shared = 0;
+  for (const tok of entityTokens) {
+    if (set.has(stemEntityToken(String(tok).toLowerCase()))) shared += 1;
+  }
+  return shared;
+}
+
+const collectEntityTokens = (text) => {
+  const lowered = normalizeText(text);
+  const tokens = (lowered.match(/[a-z][a-z0-9]{2,}/g) || [])
+    .filter((t) => !MCP_STOPWORDS.has(t) && t !== 'mcp' && t !== 'tool' && t !== 'server' && t !== 'new');
+  const capVerbs = new Set();
+  for (const list of Object.values(CAP_INTENT_PATTERNS)) {
+    for (const re of list) {
+      for (const t of tokens) if (re.test(t) || ADD_VERB_RE.test(t)) capVerbs.add(t);
+    }
+  }
+  // Adjectival verbs stay domain evidence: "shared pages", "saved notes" —
+  // the verb directly classifies the noun it touches. Adjacency is judged on
+  // the RAW word stream (articles intact): "shared pages" keeps "shared",
+  // but "add a section" drops "add" (the article intervenes — "add" is the
+  // action, not a classifier) and "created earlier" drops "created" (an
+  // adverb follows, not the classified noun). Without this, DDL "ADD
+  // COLUMN" would match user "add", and prose "created" would match "the
+  // page you created earlier".
+  const NON_NOUN_FOLLOWERS = new Set([
+    'a', 'an', 'the', 'this', 'that', 'these', 'those', 'my', 'our', 'your',
+    'its', 'their', 'it', 'them', 'me', 'you', 'him', 'her', 'us',
+    'earlier', 'later', 'before', 'after', 'now', 'today', 'yesterday',
+    'again', 'already', 'just', 'soon', 'recently', 'currently', 'always',
+    'never', 'not', 'here', 'there', 'away', 'back', 'over', 'new'
+  ]);
+  const isNounLike = (t) => t
+    && !MCP_STOPWORDS.has(t)
+    && !NON_NOUN_FOLLOWERS.has(t)
+    && ![...Object.values(CAP_INTENT_PATTERNS).flat(), ADD_VERB_RE].some((re) => re.test(t));
+  // Raw stream positions of each kept token (first occurrence).
+  const rawWords = lowered.match(/[a-z0-9']+/g) || [];
+  const keep = new Set();
+  const usedIndex = new Map();
+  for (const t of tokens) {
+    if (!capVerbs.has(t) || keep.has(t)) continue;
+    let from = usedIndex.get(t) || 0;
+    let idx = rawWords.indexOf(t, from);
+    while (idx !== -1) {
+      const next = rawWords[idx + 1];
+      usedIndex.set(t, idx + 1);
+      if (next && isNounLike(next)) {
+        // Direct classifier only when nothing intervenes: the raw words
+        // between must be empty, i.e. next raw word IS the token-stream
+        // neighbor. (Articles/pronouns/adverbs in between disqualify.)
+        keep.add(t);
+        break;
+      }
+      if (next && (MCP_STOPWORDS.has(next) || NON_NOUN_FOLLOWERS.has(next))) break;
+      idx = rawWords.indexOf(t, idx + 1);
+    }
+  }
+  return [...new Set(tokens.filter((t) => !capVerbs.has(t) || keep.has(t)))];
+};
+
 // Pure: which capability groups does this request match?
 function matchGroups(text) {
   const lowered = normalizeText(text);
@@ -134,12 +451,26 @@ const MCP_STOPWORDS = new Set([
 // ("tool", "get") never offers a substitute on its own.
 const MCP_MIN_SCORE = 5;
 
-const toMcpCandidate = (schema) => ({
-  schema,
-  name: schema?.function?.name || '',
-  nameLower: (schema?.function?.name || '').toLowerCase(),
-  descLower: (schema?.function?.description || '').toLowerCase()
-});
+const toMcpCandidate = (schema) => {
+  const nameLower = (schema?.function?.name || '').toLowerCase();
+  // Code spans stripped here too: `update_data_source` references must not
+  // count as domain evidence for "update"/"data"/"source".
+  const descStripped = stripCodeSpans(schema?.function?.description || '').toLowerCase();
+  return {
+    schema,
+    name: schema?.function?.name || '',
+    nameLower,
+    descLower: (schema?.function?.description || '').toLowerCase(),
+    tokenSet: tokenSetOf(`${nameLower} ${descStripped}`),
+    tokenFreq: tokenFreqOf(descStripped),
+    nameTokenSet: tokenSetOf(nameLower),
+    // MCP destructive hint (spec-shaped, server-supplied). Used ONLY as
+    // pick-eligibility for DELETE: servers mark even search tools
+    // destructive, so it never declares deletion by itself.
+    destructive: readMcpAnnotations(schema)?.destructiveHint === true,
+    caps: declareToolCapabilities(schema)
+  };
+};
 
 // Evidence rarity is measured over the FULL discovered set (exposed AND
 // blocked): a token naming a blocked tool is just as distinctive when the
@@ -250,13 +581,26 @@ function selectMcpSchemasWithPolicy(text, exposed = [], blocked = []) {
   const exposedCands = (Array.isArray(exposed) ? exposed : []).map(toMcpCandidate);
   const blockedCands = (Array.isArray(blocked) ? blocked : []).map(toMcpCandidate);
   if (!tokens.length || exposedCands.length === 0) {
-    return { schemas: [], suppressed: false, blockedNames: [], mcpMatched: 0 };
+    return { schemas: [], suppressed: false, blockedNames: [], mcpMatched: 0, capabilityNames: [] };
   }
+  const intentCaps = classifyIntentCapabilities(text);
+  const entityTokens = collectEntityTokens(text);
   const combined = [...exposedCands, ...blockedCands];
   const N = combined.length;
   const df = mcpTokenDf(tokens, combined);
+  // scoreAll applies the SAME capability top-up to exposed and blocked sides,
+  // so suppression comparisons stay symmetric.
   const scoreAll = (cands) => cands
-    .map((c) => ({ schema: c.schema, score: scoreMcpCandidate(c, tokens, df, N), name: c.name }))
+    .map((c) => {
+      const score = scoreMcpCandidate(c, tokens, df, N);
+      return {
+        schema: c.schema,
+        score,
+        shared: sharedEntityCount(c, entityTokens),
+        name: c.name,
+        caps: c.caps
+      };
+    })
     .filter((s) => s.name && s.score >= MCP_MIN_SCORE)
     .sort((a, b) => (b.score - a.score) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const exposedScored = scoreAll(exposedCands);
@@ -268,14 +612,126 @@ function selectMcpSchemasWithPolicy(text, exposed = [], blocked = []) {
       schemas: [],
       suppressed: true,
       blockedNames: blockedScored.map((s) => s.name),
-      mcpMatched: 0
+      mcpMatched: 0,
+      capabilityNames: []
     };
   }
+  // Capability-driven picks: for every requested capability, offer ONE exposed
+  // tool that declares it AND shares domain evidence with the request (or
+  // already scores lexically). Candidates span all exposed tools — a scored
+  // tool (update-page, fetch) must be eligible, otherwise the top action tool
+  // for a capability can be crowd-out by unscored noise. Defaults already
+  // cover the no-substitution rule: candidates come only from the
+  // policy-permitted exposed set and picks are suppressed with the whole
+  // request when policy blocks it.
+  const scoredByName = new Map(exposedScored.map((s) => [s.name, s]));
+  const picked = new Set();
+  const capabilityPicks = [];
+  // Add-part requests ("add a section") want content-bearing tools, not any
+  // tool that can "update" something (reparent a page, edit a view schema).
+  // PART_ENTITIES is intent vocabulary, not vendor knowledge; reused here
+  // symmetrically to prefer candidates that mention part nouns.
+  const queryTokens = lowered.match(/[a-z][a-z0-9]{2,}/g) || [];
+  const addPartBoost = intentCaps.has('UPDATE')
+    && ADD_VERB_RE.test(lowered)
+    && !WHOLE_NEW_RE.test(lowered)
+    && queryTokens.some((t) => PART_ENTITIES.has(t));
+  const partStems = new Set([...PART_ENTITIES].map((t) => stemEntityToken(t)));
+  for (const cap of CAPABILITY_PICK_ORDER) {
+    if (!intentCaps.has(cap)) continue;
+    const candidates = exposedCands
+      .filter((c) => c.caps.has(cap) && !picked.has(c.name))
+      .map((c) => {
+        const sc = scoredByName.get(c.name);
+        // A capability declared by the tool NAME (update-page, create-pages,
+        // fetch) is primary-purpose evidence; a declaration that only appears
+        // in the description (search-skills' "…rename a skill…") is incidental.
+        // Names are space-normalized: \b cannot see through snake_case.
+        const nameCap = CAP_TOOL_PATTERNS[cap].some((re) => re.test(c.nameLower.replace(/[_-]+/g, ' ')));
+        // Entity-token FREQUENCY over whole words, not substrings: a page
+        // tool is saturated with the word "page", while a user-listing tool
+        // mentions it only inside generic examples. Token-exact (stemmed)
+        // so "section" never matches "selection" nor "state" "statements".
+        // Name hits count once; every description occurrence counts.
+        let entityHits = 0;
+        for (const tok of entityTokens) {
+          const stemmed = stemEntityToken(String(tok).toLowerCase());
+          if (c.nameTokenSet && c.nameTokenSet.has(stemmed)) entityHits += 1;
+          entityHits += (c.tokenFreq && c.tokenFreq.get(stemmed)) || 0;
+        }
+        let partHits = 0;
+        if (addPartBoost && c.tokenSet) {
+          for (const p of partStems) if (c.tokenSet.has(p)) partHits += 1;
+        }
+        // Whole-word lexical overlap over DOMAIN tokens only (capability
+        // verbs excluded): the IDF `score` below is substring-based, so
+        // "state" matches "statements" and DDL "ADD COLUMN" matches user
+        // "add" — both boost the wrong tool. Exact overlap keeps ranking
+        // honest when domain evidence is otherwise tied.
+        let exactScore = 0;
+        for (const tok of entityTokens) {
+          const stemmed = stemEntityToken(String(tok).toLowerCase());
+          if (c.nameTokenSet && c.nameTokenSet.has(stemmed)) exactScore += 3;
+          exactScore += (c.tokenFreq && c.tokenFreq.get(stemmed)) || 0;
+        }
+        return {
+          cand: c,
+          nameCap: nameCap ? 1 : 0,
+          entityHits,
+          partHits,
+          exactScore,
+          score: sc ? sc.score : 0,
+          shared: sharedEntityCount(c, entityTokens)
+        };
+      })
+      .sort((a, b) =>
+        (b.nameCap - a.nameCap) ||
+        (b.entityHits - a.entityHits) ||
+        (b.partHits - a.partHits) ||
+        (b.exactScore - a.exactScore) ||
+        (a.cand.caps.size - b.cand.caps.size) ||
+        (a.cand.name < b.cand.name ? -1 : a.cand.name > b.cand.name ? 1 : 0)
+      );
+    const pickedBefore = picked.size;
+    for (const cand of candidates) {
+      // Destructive capabilities need primary-purpose evidence: a DELETE
+      // declaration from description prose alone ("are deleted once they
+      // expire", "remove all filters") must never surface a tool that
+      // cannot delete user content. Require a name-declared verb or a
+      // server-supplied destructive hint.
+      if (cap === 'DELETE' && !cand.nameCap && !cand.cand.destructive) continue;
+      // Name-declared capability (update-page for UPDATE) is primary-purpose
+      // evidence that needs no domain overlap: short follow-ups ("add a
+      // section to it") carry no domain noun at all.
+      if (cand.shared < 1 && cand.score < MCP_MIN_SCORE && !cand.nameCap) continue;
+      picked.add(cand.cand.name);
+      capabilityPicks.push(cand.cand.schema);
+      break;
+    }
+    if (picked.size > pickedBefore) continue;
+    // Fallback: a short follow-up ("add a section to it") carries no domain
+    // noun, so nothing passes the shared-evidence gate. A tool whose NAME
+    // declares the capability (update-page for UPDATE) is primary-purpose
+    // evidence with no domain confusion — prefer the most specific such
+    // tool (fewest declared capabilities). Never fires when a domain match
+    // exists, and never from description-only declarations.
+    const fallback = candidates.filter((cand) => cand.nameCap > 0)
+      .sort((a, b) =>
+        (b.exactScore - a.exactScore) ||
+        (a.cand.caps.size - b.cand.caps.size) ||
+        (a.cand.name < b.cand.name ? -1 : a.cand.name > b.cand.name ? 1 : 0)
+      )[0];
+    if (fallback) {
+      picked.add(fallback.cand.name);
+      capabilityPicks.push(fallback.cand.schema);
+    }
+  }
   return {
-    schemas: exposedScored.map((s) => s.schema),
+    schemas: [...capabilityPicks, ...exposedScored.map((s) => s.schema)],
     suppressed: false,
     blockedNames: [],
-    mcpMatched: exposedScored.length
+    mcpMatched: exposedScored.length,
+    capabilityNames: capabilityPicks.map((s) => s?.function?.name).filter(Boolean)
   };
 }
 
@@ -330,7 +786,8 @@ function selectToolSchemas(text, getSchemasFn = null, options = {}) {
     mcpMatched: mcpPick.mcpMatched,
     mcpSuppressed: mcpPick.suppressed,
     mcpBlockedNames: mcpPick.blockedNames,
-    mcpExplicit: explicitMcp.map((s) => s?.function?.name).filter(Boolean)
+    mcpExplicit: explicitMcp.map((s) => s?.function?.name).filter(Boolean),
+    mcpCapability: Array.isArray(mcpPick.capabilityNames) ? mcpPick.capabilityNames : []
   };
 }
 
@@ -421,6 +878,9 @@ module.exports = {
   CAPABILITY_GROUPS,
   GROUP_PRIORITY,
   DEFAULT_GROUPS,
+  CAPABILITY_PICK_ORDER,
+  classifyIntentCapabilities,
+  declareToolCapabilities,
   matchGroups,
   detectOutputIntent,
   scoreMcpSchemas,

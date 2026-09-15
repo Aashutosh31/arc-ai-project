@@ -157,7 +157,10 @@ const McpToolSource = {
           serverId: entry.configId,
           wireName: entry.wireName,
           canonicalName: entry.canonicalName,
-          originalToolName: entry.originalToolName
+          originalToolName: entry.originalToolName,
+          // Sanitized MCP behavior hints for capability planning (generic:
+          // no tool names). Non-enumerable: never serialized to providers.
+          annotations: entry.annotations || null
         }));
         metadata.set(entry.wireName, {
           serverId: entry.configId,
@@ -207,7 +210,8 @@ const McpToolSource = {
         serverId: entry.configId,
         wireName: entry.wireName,
         canonicalName: entry.canonicalName,
-        originalToolName: entry.originalToolName
+        originalToolName: entry.originalToolName,
+        annotations: entry.annotations || null
       }));
     }
     return out;
