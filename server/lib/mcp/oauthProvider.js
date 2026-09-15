@@ -468,6 +468,27 @@ class ArcOAuthProvider {
 const createSilentProvider = ({ userId, config } = {}) =>
   new ArcOAuthProvider({ userId, config, transaction: null, onRedirect: null, failClosed: true });
 
+// Silent provider for AUTOMATIC (non-interactive) reconnect paths: agent
+// schema supply, continuation schemas, execution fallback, refresh. Same
+// guards everywhere so /connect, /refresh and the agent runtime share one
+// authentication behavior: OAuth streamable-http configs with a userId and
+// available credential storage get a fail-closed provider; everything else
+// (static/header/stdio, missing userId, no encryption) gets null and keeps
+// current behavior. Never initiates interactive authorization — unusable
+// credentials fail with the existing auth-required classification and the
+// normal UI authorization path takes over.
+const silentProviderForConfig = (config, userId) => {
+  try {
+    if (!config || !config.auth || config.auth.type !== 'oauth') return null;
+    if (config.transport !== 'streamable-http' || !config.url) return null;
+    if (!userId) return null;
+    if (!secureTokens.isEncryptionAvailable()) return null;
+    return createSilentProvider({ userId: String(userId), config });
+  } catch {
+    return null;
+  }
+};
+
 const createInteractiveProvider = ({ userId, config, transaction, onRedirect } = {}) => {
   if (!transaction) throw new Error('Interactive OAuth provider requires a transaction.');
   return new ArcOAuthProvider({ userId, config, transaction, onRedirect, failClosed: false });
@@ -506,6 +527,7 @@ module.exports = {
   defaultClientMetadata,
   ArcOAuthProvider,
   createSilentProvider,
+  silentProviderForConfig,
   createInteractiveProvider,
   discoverProtectedResource,
   discoverAuthServer

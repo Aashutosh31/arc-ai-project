@@ -20,6 +20,17 @@ const limits = require('./limits');
 
 const METADATA_KEY = 'mcpMetadata';
 
+// Shared silent-provider plumbing for automatic reconnects (lazy require:
+// oauthProvider pulls in models + token storage, kept out of the module
+// graph until an OAuth-mode config actually needs it).
+const silentProviderFor = (config, userId) => {
+  try {
+    return require('./oauthProvider').silentProviderForConfig(config, userId);
+  } catch {
+    return null;
+  }
+};
+
 // ---- production wiring (lazy, Mongo-backed when connected) ----
 
 const createProductionCore = () => {
@@ -92,7 +103,12 @@ const McpToolSource = {
 
   // ---- schema supply for intent selection ----
 
-  async schemasForRequest({ workspaceId = null, isGuest = false } = {}) {
+  // All automatic connects on this path carry the silent OAuth provider
+  // (null for non-OAuth configs): after a backend restart the live
+  // connection is gone while stored credentials survive, and connecting
+  // without the provider 401s before any tool can be used. Same behavior
+  // as /connect and /refresh. Never interactive.
+  async schemasForRequest({ workspaceId = null, isGuest = false, userId = null } = {}) {
     const core = this._core();
     await core.refreshConfigs();
 
@@ -117,7 +133,9 @@ const McpToolSource = {
       if (schemas.length >= limits.MAX_TOOLS_PER_SERVER) break;
       let conn;
       try {
-        conn = await core.manager.ensureConnected(config);
+        conn = await core.manager.ensureConnected(config, {
+          authProvider: silentProviderFor(config, userId)
+        });
       } catch (err) {
         // Degradation: an unreachable MCP server never blocks the request.
         failures.push({ configId: config.id, reason: err && err.message ? err.message : 'connect failed' });
@@ -185,7 +203,7 @@ const McpToolSource = {
     if (!Array.isArray(activeWireNames) || !activeWireNames.length) return [];
     const core = this._core();
     await core.refreshConfigs();
-    const { workspaceId = null, isGuest = false } = opts || {};
+    const { workspaceId = null, isGuest = false, userId = null } = opts || {};
     const out = [];
     for (const wireName of activeWireNames) {
       const entry = core.registry.toolByWireName(wireName);
@@ -200,7 +218,9 @@ const McpToolSource = {
       }
       let conn;
       try {
-        conn = await core.manager.ensureConnected(config);
+        conn = await core.manager.ensureConnected(config, {
+          authProvider: silentProviderFor(config, userId)
+        });
       } catch {
         continue;
       }

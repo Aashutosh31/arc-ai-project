@@ -365,8 +365,19 @@ const refreshTools = async (doc, req, res) => {
   let conn;
   const failures = [];
   try {
-    conn = await McpToolSource.manager.ensureConnected(docToConfig(doc));
+    conn = await connectForRefresh(doc, req);
   } catch (connectErr) {
+    // Mirror /connect: dead/stale OAuth tokens are an AUTHORIZE signal
+    // (401 + authRequired), not a generic 502 — otherwise the UI shows a
+    // dead-end toast with no recovery path.
+    if (connectErr && connectErr.authRequired) {
+      return res.status(401).json({
+        error: 'Authorization required — reconnect',
+        authRequired: true,
+        category: 'mcp.auth_required',
+        detail: null
+      });
+    }
     failures.push({ reason: connectErr?.message || 'connect failed', category: connectErr?.category || null });
     return res.status(502).json({
       error: 'Failed to refresh tools from MCP server.',
@@ -394,6 +405,17 @@ const refreshTools = async (doc, req, res) => {
     })
   });
 };
+
+// Refresh-path connect (single place: router + tests). MUST carry the
+// silent OAuth provider like /connect and the OAuth callback do —
+// ensureConnected without one sends no bearer material at all, so every
+// refresh of an OAuth streamable-http server deterministically 401s right
+// after refresh's own disconnect() drops the working connection. Returns
+// null provider for non-OAuth configs (static path untouched).
+const connectForRefresh = (doc, req) =>
+  McpToolSource.manager.ensureConnected(docToConfig(doc), {
+    authProvider: silentOAuthProvider(doc, req)
+  });
 
 // ---- GET /api/mcp/servers/:id/tools ----------------------------------------------
 // Read-only discovery snapshot. Guests may call this for guestAllowed configs
@@ -783,3 +805,6 @@ async function handleOAuthCallback(req, res) {
 }
 
 module.exports = router;
+// Exported for the refresh regression test (route needs Mongo; the helper
+// does not). Not part of the HTTP surface.
+module.exports.connectForRefresh = connectForRefresh;

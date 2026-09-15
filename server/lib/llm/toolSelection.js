@@ -117,6 +117,12 @@ const ADD_TARGET_RE = /\b(add\w*|insert\w*|put\b)\b[\s\S]*\b(to|into|in)\b\s+(th
 // its own clause ("add a new page" = CREATE; "add a new section … to the page"
 // has 'page' after the add but 'section' is the object's part, so UPDATE).
 const WHOLE_NEW_RE = /\b(add\w*|insert\w*)\b[^.!?;,\n]{0,40}\b(?:a|an|new|another|fresh)\s+(?:new\s+)?(page|document|doc|file|folder|meeting|event|issue|ticket|project|task|note|record|contact|repo|repository|database|board|todo|reminder|draft|message|email|customer|product|workspace)\b/;
+// Explicit do-not-modify-existing suppression: "do not modify existing
+// pages", "don't change any existing …", "never update other …". Generic
+// English negations (mirrors the negated-create rule), never tool names.
+// The existing/other qualifier keeps it narrow: bare "don't update the
+// title, update the body" does not match and keeps UPDATE.
+const NEGATED_MODIFY_RE = /\b(do\s+not|don't|dont|never)\s+(modify|modif\w*|change|chang\w*|alter\w*|updat\w*|edit\w*|touch)\s+(existing|other|any\s+(existing|other))\b/;
 
 // Capability verbs whose immediately preceding word marks them as NEGATED or
 // DESCRIPTIVE rather than a requested capability:
@@ -163,6 +169,19 @@ function classifyIntentCapabilities(text) {
   }
   if (caps.has('__ADD__')) {
     caps.delete('__ADD__');
+    // Direct-verb evidence must survive part-add recomputation: the ADD
+    // branch below recomputes CREATE/UPDATE from add-verb context, but an
+    // explicit "create a new page" (CREATE verb) or "update the old report"
+    // (UPDATE verb) elsewhere in the text is independent evidence. Without
+    // this, "create a new page called X. Put content in the page" collapses
+    // to UPDATE-only: the add-verb ('put … in the page') + part noun
+    // ('content') wipes the explicit CREATE, and downstream the request is
+    // planned as update-an-existing-target (asking for parent/page IDs for
+    // a page that does not exist yet). Descriptive past-tense uses ("the
+    // page you created earlier") never reach here — the predecessor filter
+    // above already drops them.
+    const hadExplicitCreate = caps.has('CREATE');
+    const hadDirectUpdate = caps.has('UPDATE');
     // CREATE a whole new object ("add a new page") vs UPDATE an existing one
     // ("add a section to the page" / "add a section" / "add a checklist").
     const tokens = lowered.match(/[a-z][a-z0-9]{2,}/g) || [];
@@ -172,7 +191,17 @@ function classifyIntentCapabilities(text) {
     caps.delete('CREATE');
     caps.delete('UPDATE');
     caps.add(addsToExisting ? 'UPDATE' : 'CREATE');
+    if (hadExplicitCreate) caps.add('CREATE');
+    if (hadDirectUpdate) caps.add('UPDATE');
   }
+  // Explicit do-not-modify suppression (mirrors the negated-create rule):
+  // "Do not modify existing pages. Create only this new test page" is a
+  // CREATE-only request — a part-add elsewhere in the text ("put content
+  // in the page", scoped to the page being created) must not re-add UPDATE
+  // and divert planning toward existing-target resolution. Narrowly scoped
+  // to modification verbs with an existing/other qualifier so ordinary
+  // "don't update the title, update the body" requests are untouched.
+  if (NEGATED_MODIFY_RE.test(lowered)) caps.delete('UPDATE');
   return caps;
 }
 

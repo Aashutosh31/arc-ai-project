@@ -122,71 +122,62 @@ class GroqProvider {
   }
 
   sanitizeSchema(schema) {
-    if (!schema || typeof schema !== 'object') {
-      return { type: 'object', properties: {} };
-    }
+    const clean = this.sanitizeCompositional(schema, 0);
+    if (!clean) return { type: 'object', properties: {} };
+    // Top level stays object-shaped (legacy contract) unless the server
+    // declared a composition there.
+    if (!clean.type && !clean.anyOf && !clean.oneOf && !clean.allOf) clean.type = 'object';
+    return clean;
+  }
 
-    const sanitized = { type: schema.type || 'object' };
-
-    if (schema.description) {
-      sanitized.description = toWellFormedUnicode(String(schema.description));
-    }
-
-    if (schema.properties && typeof schema.properties === 'object') {
-      sanitized.properties = {};
-      for (const [key, value] of Object.entries(schema.properties)) {
-        sanitized.properties[key] = this.sanitizeProperty(value);
+  // Compositional schema sanitizer (mirrors lib/mcp/McpToolAdapter): anyOf /
+  // oneOf / allOf branches are preserved RECURSIVELY so a typeless
+  // composition is never mistranslated into a defaulted 'string' for the
+  // model. Depth-bounded; unknown keywords fail open (dropped, never fatal).
+  sanitizeCompositional(node, depth) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return null;
+    if (depth > 8) return null;
+    const out = {};
+    if (typeof node.type === 'string' && node.type) out.type = node.type;
+    for (const key of ['anyOf', 'oneOf', 'allOf']) {
+      if (Array.isArray(node[key]) && node[key].length) {
+        const branches = [];
+        for (const branch of node[key].slice(0, 16)) {
+          const clean = this.sanitizeCompositional(branch, depth + 1);
+          if (clean) branches.push(clean);
+        }
+        if (branches.length) out[key] = branches;
       }
     }
-
-    if (Array.isArray(schema.required)) {
-      sanitized.required = schema.required.filter((r) => typeof r === 'string');
+    if (node.properties && typeof node.properties === 'object') {
+      out.properties = {};
+      for (const [key, value] of Object.entries(node.properties)) {
+        out.properties[key] = this.sanitizeCompositional(value, depth + 1) || { type: 'string' };
+      }
     }
-
-    if (Array.isArray(schema.enum)) {
-      sanitized.enum = schema.enum;
+    if (Array.isArray(node.required)) {
+      out.required = node.required.filter((r) => typeof r === 'string');
     }
-
-    if (schema.default !== undefined) {
-      sanitized.default = schema.default;
+    if (node.items && typeof node.items === 'object') {
+      const clean = this.sanitizeCompositional(node.items, depth + 1);
+      if (clean) out.items = clean;
     }
-
-    if (schema.minimum !== undefined) sanitized.minimum = schema.minimum;
-    if (schema.maximum !== undefined) sanitized.maximum = schema.maximum;
-
-    return sanitized;
+    if (Array.isArray(node.enum)) out.enum = node.enum;
+    if (node.default !== undefined) out.default = node.default;
+    if (node.description) out.description = toWellFormedUnicode(String(node.description));
+    if (node.minimum !== undefined) out.minimum = node.minimum;
+    if (node.maximum !== undefined) out.maximum = node.maximum;
+    if (typeof node.additionalProperties === 'boolean') out.additionalProperties = node.additionalProperties;
+    // No type AND no compositional content: legacy string default so
+    // schemaless properties keep today's pass-through behavior.
+    if (!out.type && !out.anyOf && !out.oneOf && !out.allOf && !out.properties && !out.items && !out.enum) {
+      out.type = 'string';
+    }
+    return out;
   }
 
   sanitizeProperty(prop) {
-    if (!prop || typeof prop !== 'object') return { type: 'string' };
-
-    const sanitized = { type: prop.type || 'string' };
-
-    if (prop.description) {
-      sanitized.description = toWellFormedUnicode(String(prop.description));
-    }
-
-    if (prop.enum) sanitized.enum = prop.enum;
-    if (prop.default !== undefined) sanitized.default = prop.default;
-
-    if (prop.type === 'object' && prop.properties) {
-      sanitized.properties = {};
-      for (const [key, value] of Object.entries(prop.properties)) {
-        sanitized.properties[key] = this.sanitizeProperty(value);
-      }
-      if (Array.isArray(prop.required)) {
-        sanitized.required = prop.required.filter((r) => typeof r === 'string');
-      }
-    }
-
-    if (prop.type === 'array' && prop.items) {
-      sanitized.items = this.sanitizeProperty(prop.items);
-    }
-
-    if (prop.minimum !== undefined) sanitized.minimum = prop.minimum;
-    if (prop.maximum !== undefined) sanitized.maximum = prop.maximum;
-
-    return sanitized;
+    return this.sanitizeCompositional(prop, 0) || { type: 'string' };
   }
 
   buildRequestParams(request = {}) {

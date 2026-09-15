@@ -336,9 +336,22 @@ const McpSettings = ({ isGuest }) => {
         await mcpApi.forgetMcpOAuth(id);
         setOauthStatus((s) => ({ ...s, [id]: null }));
       } else if (action === 'refresh') {
-        const payload = await mcpApi.refreshMcpServer(id);
-        setToolsCache((c) => ({ ...c, [id]: payload }));
-        setToolsOpen((o) => ({ ...o, [id]: true }));
+        try {
+          const payload = await mcpApi.refreshMcpServer(id);
+          setToolsCache((c) => ({ ...c, [id]: payload }));
+          setToolsOpen((o) => ({ ...o, [id]: true }));
+        } catch (refreshErr) {
+          // Refresh of an OAuth server with dead/stale tokens answers
+          // 401 + authRequired (same shape as Connect) — surface the
+          // [Authorize] path rather than a dead-end toast.
+          if (refreshErr && (refreshErr.status === 401 || refreshErr.authRequired || refreshErr.category === 'mcp.auth_required') && server?.auth?.type === 'oauth') {
+            await loadOAuthStatus(id);
+            setError('Authorization required — click Authorize to connect this server.');
+            await refresh();
+            return;
+          }
+          throw refreshErr;
+        }
       } else if (action === 'toggle') {
         await mcpApi.updateMcpServer(id, { enabled: !(server.enabled !== false) });
       }

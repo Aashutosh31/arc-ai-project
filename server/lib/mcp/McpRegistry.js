@@ -345,6 +345,11 @@ const normalizeConfig = (raw, slugCounts, existing) => {
       ? raw.deniedTools.map((t) => String(t))
       : (existing && Array.isArray(existing.deniedTools) ? [...existing.deniedTools] : []),
     auth: normalizeAuth(raw.auth),
+    // OAuth scope hint (metadata string, never a secret): the silent
+    // provider reads it when deriving tokens for automatic reconnects.
+    // Dropped here, scope would silently fall back on every registry
+    // round-trip (seed, discovery re-sync).
+    oauthScope: typeof raw.oauthScope === 'string' ? raw.oauthScope : null,
     createdAt: raw.createdAt || new Date(),
     updatedAt: raw.updatedAt || new Date(),
     tools: Array.isArray(raw.tools) ? raw.tools : []
@@ -361,10 +366,19 @@ const resolveUniqueSlug = (raw, id, slugCounts) => {
 
 const normalizeAuth = (auth) => {
   if (!auth || typeof auth !== 'object') return { type: 'none' };
-  return {
-    type: auth.type === 'header' ? 'header' : 'none',
-    envVar: auth.envVar || auth.envVarName || null
-  };
+  // Auth metadata must survive registry round-trips (seed, discovery
+  // re-sync): dropping oauth here makes every registry-sourced config look
+  // unauthenticated, so automatic reconnects skip the silent OAuth provider
+  // and 401. Type strings only — no secret values are ever stored.
+  if (auth.type === 'oauth') return { type: 'oauth' };
+  if (auth.type === 'header') {
+    return {
+      type: 'header',
+      headerName: auth.headerName || 'Authorization',
+      envVar: auth.envVar || auth.envVarName || null
+    };
+  }
+  return { type: 'none' };
 };
 
 module.exports = McpRegistry;

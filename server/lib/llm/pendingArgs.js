@@ -27,6 +27,56 @@ const CANCEL_RE = /^(cancel|stop|never\s?mind|forget\s(it|about\sit)|no\s?thanks
 const TRUE_TOKENS = new Set(['true', 'yes', 'y', '1', 'on']);
 const FALSE_TOKENS = new Set(['false', 'no', 'n', '0', 'off']);
 
+// Generic identifier-shaped parameter names (page_id, user_id, id,
+// source_url, discussion_id, ...). Vendor-neutral: matches the universal
+// target-reference shape, never a specific tool or server. The (^|_)
+// anchor matters: 'valid'/'invalid' must NOT match.
+const IDENTIFIER_PARAM_RE = /(^|_)(id|url|uri|urn|uuid|guid|handle|slug)$/i;
+// camelCase twin (pageId, sourceUrl): suffix after a lowercase letter.
+// 'valid'/'invalid' end in lowercase "lid" — never matched by either arm.
+const IDENTIFIER_CAMEL_RE = /[a-z](Id|Url|Uri|Urn|Uuid|Guid|Handle|Slug)$/;
+const URL_PARAM_RE = /(url|uri|link)$/i;
+
+function isIdentifierParam(name) {
+  if (typeof name !== 'string' || !name.trim()) return false;
+  return IDENTIFIER_PARAM_RE.test(name.trim()) || IDENTIFIER_CAMEL_RE.test(name.trim());
+}
+
+// Universal identifier shapes in free text. UUIDs and bare 32-hex IDs
+// (Notion-style page IDs with or without dashes) plus plain URLs —
+// resolvable target references the user can paste instead of typing an ID.
+const URL_RE = /https?:\/\/[^\s"'<>`]+/i;
+const UUID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+const HEX32_RE = /\b[0-9a-f]{32}\b/i;
+
+const IDENTIFIER_FILL_MAX_CHARS = 500;
+
+// Pull a confident identifier value for one identifier-shaped param from
+// free text. URL-ish params take URLs only; ID-ish params prefer UUID /
+// 32-hex, falling back to a URL (several servers accept URLs as IDs — a
+// rejection surfaces truthfully at execution). Returns undefined on no
+// pattern hit — never guesses prose. Pure, never throws.
+function extractIdentifierValue(text, paramName) {
+  try {
+    const raw = String(text || '');
+    if (!raw.trim()) return undefined;
+    if (URL_PARAM_RE.test(String(paramName || ''))) {
+      const m = raw.match(URL_RE);
+      const v = (m && m[0]) ? m[0].trim() : '';
+      return v && v.length <= IDENTIFIER_FILL_MAX_CHARS ? v : undefined;
+    }
+    const uuid = raw.match(UUID_RE);
+    if (uuid && uuid[0]) return uuid[0];
+    const hex = raw.match(HEX32_RE);
+    if (hex && hex[0]) return hex[0];
+    const url = raw.match(URL_RE);
+    const v = (url && url[0]) ? url[0].trim() : '';
+    return v && v.length <= IDENTIFIER_FILL_MAX_CHARS ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const wordsOf = (text) => String(text || '').toLowerCase().match(/[a-z0-9]+/g) || [];
 
 // Required params in schema order: [{ name, def }].
@@ -114,14 +164,25 @@ function extractArgValues(text, params) {
   const tokens = wordsOf(text);
   if (!tokens.length) return out;
 
-  const missingStrings = list.filter(({ def }) => {
+  const missingStrings = list.filter(({ name, def }) => {
     const d = (def && typeof def === 'object') ? def : {};
+    // Identifier slots never take the prose fallback below: a title is not
+    // an ID — pattern extraction above is their only confident source.
+    if (isIdentifierParam(name)) return false;
     return !(Array.isArray(d.enum) && d.enum.length)
       && !['boolean', 'bool', 'integer', 'number'].includes(String(d.type || 'string').toLowerCase());
   });
 
   for (const { name, def } of list) {
     const d = (def && typeof def === 'object') ? def : {};
+    // Identifier-shaped params fill from universal reference patterns
+    // (pasted page URLs, UUIDs, 32-hex IDs) — pattern-confident, so this
+    // applies per-param even when several slots are missing. Prose titles
+    // ("ARC-AI MCP Live Test") never match and still need resolution.
+    if (isIdentifierParam(name)) {
+      const v = extractIdentifierValue(text, name);
+      if (v !== undefined) { out[name] = v; continue; }
+    }
     if (Array.isArray(d.enum) && d.enum.length) {
       const hit = d.enum.find((e) => {
         const v = String(e).toLowerCase();
@@ -264,6 +325,8 @@ module.exports = {
   MAX_CLARIFICATION_ROUNDS,
   PENDING_TTL_MS,
   CANCEL_RE,
+  isIdentifierParam,
+  extractIdentifierValue,
   requiredParams,
   missingRequired,
   coerceArgValue,

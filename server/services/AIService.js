@@ -15,7 +15,7 @@ const TaskPlanner = require('./TaskPlanner');
 const ToolRecoveryManager = require('./ToolRecoveryManager');
 const { upsertTextVector } = require('./workspaceIndexService');
 const { buildProviderContinuationMessages, normalizeProviderError, describeProviderFailure, classifyProviderFailure } = require('../lib/llm/utils');
-const { selectToolSchemas, detectOutputIntent, activeToolNamesFromCalls, selectContinuationTools, partitionToolCallsByExposure } = require('../lib/llm/toolSelection');
+const { selectToolSchemas, detectOutputIntent, activeToolNamesFromCalls, selectContinuationTools, partitionToolCallsByExposure, declareToolCapabilities, classifyIntentCapabilities } = require('../lib/llm/toolSelection');
 const {
     requiredParams,
     validateArgs,
@@ -23,7 +23,8 @@ const {
     buildClarification,
     createPending,
     advancePending,
-    isCancelText
+    isCancelText,
+    isIdentifierParam
 } = require('../lib/llm/pendingArgs');
 const { McpToolSource } = require('../lib/mcp');
 const {
@@ -364,6 +365,213 @@ class AIService {
 
     async emitAssistantText(socket, text) {
         await this.streamingRuntime.emitText(socket, text);
+    }
+
+    // ---- Target-resolution chaining (generic MCP write fix) ----
+    // Failure shape: the model calls an MCP write/update tool with the
+    // target reference missing (no page ID yet — the user named a TITLE).
+    // The required-arg gate below would previously end the turn by asking
+    // the user for an internal ID. When the exposed (policy-permitted) set
+    // contains SEARCH/READ-capable MCP tools, the agent resolves the target
+    // ITSELF in-turn instead: one bounded resolve round (search/read), then
+    // one retry round for the original call. Generic over all MCP servers:
+    // capability declarations + identifier-shaped param names only, never
+    // tool names, vendors, or URL shapes. Deny-wins preserved: resolvers
+    // come solely from the exposed set, and a denied tool can never enter
+    // or be retried here. Returns { toolCalls, text } on success, null when
+    // resolution is inapplicable or fails (caller falls back to asking).
+    findResolverSchemas(mcpSchemas, excludeName = null) {
+        const out = [];
+        try {
+            for (const s of (Array.isArray(mcpSchemas) ? mcpSchemas : []).slice(0, 24)) {
+                const name = s?.function?.name;
+                if (typeof name !== 'string' || !name || name === excludeName) continue;
+                let caps = null;
+                try { caps = declareToolCapabilities(s); } catch { caps = null; }
+                if (caps && (caps.has('SEARCH') || caps.has('READ'))) out.push(s);
+                if (out.length >= 4) break;
+            }
+        } catch {
+            return [];
+        }
+        return out;
+    }
+
+    async tryTargetResolution({
+        originalCall, execName, argSchema, missing, intentCaps,
+        messages, systemPrompt, mcpSchemas,
+        maxTokens, userId, isGuest, calendarIntent, requestKey,
+        signal, conversationId, workspaceId, socket
+    }) {
+        try {
+            if (!originalCall || !execName || !argSchema) return null;
+            const missed = Array.isArray(missing) ? missing : [];
+            // Only identifier-shaped gaps are self-resolvable ("which page").
+            // Anything else (missing content/body/payload) genuinely needs
+            // the user or the model — never burn resolve rounds on it.
+            if (!missed.length || !missed.every((n) => isIdentifierParam(n))) return null;
+            // Action gate (§4 rule): resolution operates ON EXISTING
+            // resources only (UPDATE/DELETE …). A CREATE request ("create a
+            // new page") must NEVER be reinterpreted as update-an-existing-
+            // target: a missing parent is a DESTINATION choice (often
+            // optional/draftable per the tool's own schema), not a target to
+            // hunt down. Without this, a create missing a parent identifier
+            // gets diverted into search-existing-pages + "give me a parent
+            // ID" instead of creating directly. The caps come from the
+            // generic intent classifier — no tool/vendor names involved.
+            // Absent caps (direct API use) fail open to preserve behavior.
+            if (intentCaps && !intentCaps.has('UPDATE') && !intentCaps.has('DELETE')) return null;
+            const resolvers = this.findResolverSchemas(mcpSchemas, execName);
+            if (!resolvers.length) return null;
+
+            const callId = originalCall?.id || `resolve-${Date.now().toString(36)}`;
+            let originalArgs = {};
+            try {
+                originalArgs = typeof originalCall?.function?.arguments === 'string'
+                    ? JSON.parse(originalCall.function.arguments)
+                    : { ...(originalCall?.function?.arguments || {}) };
+            } catch { originalArgs = {}; }
+            const resolverNames = resolvers.map((s) => s?.function?.name).filter(Boolean);
+            console.log('[AIService] targetResolution.start', { tool: execName, missing: missed, resolvers: resolverNames });
+
+            const assistantAttempt = {
+                role: 'assistant',
+                content: '',
+                toolCalls: [{
+                    id: callId,
+                    function: { name: originalCall?.function?.name, arguments: originalCall?.function?.arguments || {} }
+                }]
+            };
+            const hintToolMessage = {
+                role: 'tool',
+                name: execName,
+                toolCallId: callId,
+                content: JSON.stringify({
+                    success: false,
+                    error: `Missing required arguments: ${missed.join(', ')}.`,
+                    hint: `Resolve the target with one of [${resolverNames.join(', ')}] first (search by title or fetch by reference), then call ${execName} again with the resolved identifier. Do not ask the user for IDs you can look up yourself.`
+                })
+            };
+            const baseUserContext = {
+                userId, isGuest, calendarIntent, requestKey, taskMode: 'text'
+            };
+            // Round 1: resolve. Resolvers + the original schema (the model
+            // may already know the ID and retry immediately).
+            const round1 = await this.llmRouter.generate({
+                messages: [...messages, assistantAttempt, hintToolMessage],
+                systemPrompt,
+                tools: [...resolvers, argSchema].slice(0, 6),
+                stream: false,
+                maxTokens,
+                temperature: 0.3,
+                userContext: baseUserContext,
+                attachments: [],
+                signal
+            });
+            const round1Calls = Array.isArray(round1?.toolCalls) ? round1.toolCalls : [];
+            // Immediate retry with complete args — no second round needed.
+            const directRetry = round1Calls.find((c) => (c?.function?.name || c?.name) === execName);
+            if (directRetry) {
+                let parsed = {};
+                try {
+                    parsed = typeof directRetry.function.arguments === 'string'
+                        ? JSON.parse(directRetry.function.arguments) : { ...(directRetry.function.arguments || {}) };
+                } catch { parsed = {}; }
+                const check = validateArgs(argSchema, { ...originalArgs, ...parsed });
+                if (check.ok) {
+                    console.log('[AIService] targetResolution.direct-retry', { tool: execName });
+                    await this.clearPendingToolCall(conversationId, userId);
+                    return {
+                        toolCalls: [{
+                            id: directRetry?.id || `resolved-${Date.now().toString(36)}`,
+                            function: { name: execName, arguments: check.coerced }
+                        }],
+                        text: round1?.text || ''
+                    };
+                }
+            }
+            // Execute resolver calls only (never the original with bad args).
+            const resolverCalls = round1Calls.filter((c) => {
+                const n = c?.function?.name || c?.name;
+                return n && n !== execName && resolverNames.includes(n);
+            }).slice(0, 3);
+            if (!resolverCalls.length) {
+                console.log('[AIService] targetResolution.no-resolver-call', { tool: execName });
+                return null;
+            }
+            const resolverResults = [];
+            for (const tc of resolverCalls) {
+                const fname = tc?.function?.name || tc?.name;
+                let args = {};
+                try {
+                    args = typeof tc.function.arguments === 'string'
+                        ? JSON.parse(tc.function.arguments) : tc.function.arguments || {};
+                } catch { args = {}; }
+                console.log('[AIService] targetResolution.resolve', { tool: fname });
+                let result = null;
+                try {
+                    result = await TaskExecutor.executeTool(fname, args, userId, socket, { signal, conversationId, workspaceId });
+                } catch (execErr) {
+                    result = { success: false, error: execErr?.message || 'Tool execution failed.' };
+                }
+                if (result?.clientAction && socket) socket.emit('ai:client:action', result.clientAction);
+                resolverResults.push({ toolCallId: tc.id, name: fname, content: result });
+            }
+            // Round 2: retry the original with resolver evidence in context.
+            const round1Assistant = {
+                role: 'assistant',
+                content: round1?.text || '',
+                toolCalls: resolverCalls.map((tc) => ({
+                    id: tc.id,
+                    function: { name: tc?.function?.name || tc?.name, arguments: tc?.function?.arguments || {} }
+                }))
+            };
+            const round2 = await this.llmRouter.generate({
+                messages: [
+                    ...messages, assistantAttempt, hintToolMessage, round1Assistant,
+                    ...resolverResults.map((r) => ({
+                        role: 'tool', name: r.name, toolCallId: r.toolCallId,
+                        content: typeof r.content === 'string' ? r.content : JSON.stringify(r.content ?? {})
+                    }))
+                ],
+                systemPrompt,
+                tools: [argSchema],
+                stream: false,
+                maxTokens,
+                temperature: 0.3,
+                userContext: baseUserContext,
+                attachments: [],
+                signal
+            });
+            const round2Calls = Array.isArray(round2?.toolCalls) ? round2.toolCalls : [];
+            const retry = round2Calls.find((c) => (c?.function?.name || c?.name) === execName);
+            if (!retry) {
+                console.log('[AIService] targetResolution.no-retry', { tool: execName });
+                return null;
+            }
+            let parsed = {};
+            try {
+                parsed = typeof retry.function.arguments === 'string'
+                    ? JSON.parse(retry.function.arguments) : { ...(retry.function.arguments || {}) };
+            } catch { parsed = {}; }
+            const check = validateArgs(argSchema, { ...originalArgs, ...parsed });
+            if (!check.ok) {
+                console.log('[AIService] targetResolution.retry-invalid', { tool: execName, missing: check.errors.map((e) => e.name) });
+                return null;
+            }
+            console.log('[AIService] targetResolution.resolved', { tool: execName });
+            await this.clearPendingToolCall(conversationId, userId);
+            return {
+                toolCalls: [{
+                    id: retry?.id || `resolved-${Date.now().toString(36)}`,
+                    function: { name: execName, arguments: check.coerced }
+                }],
+                text: round2?.text || ''
+            };
+        } catch (err) {
+            console.log('[AIService] targetResolution.failed', { tool: execName, reason: err?.message || 'error' });
+            return null;
+        }
     }
 
     // ---- Recent conversation context + working/agent state ----
@@ -978,7 +1186,12 @@ class AIService {
             try {
                 const mcpPick = await McpToolSource.schemasForRequest({
                     workspaceId: workspaceContext?.workspaceId || null,
-                    isGuest
+                    isGuest,
+                    // Automatic reconnects need the silent OAuth provider:
+                    // after a restart the live connection is gone while
+                    // stored credentials survive. Same behavior as /connect
+                    // and /refresh; never interactive.
+                    userId
                 });
                 mcpSchemas = mcpPick?.schemas || [];
                 // Server-side only: policy-removed tools, used solely for
@@ -1306,7 +1519,9 @@ class AIService {
             }
 
             finalOutputText = response?.text || "";
-            const toolCalls = response?.toolCalls || [];
+            // Mutable: a target-resolution retry below may REPLACE this
+            // turn's tool transaction with the resolved retry.
+            let toolCalls = response?.toolCalls || [];
             const assistantToolMessage = {
                 role: 'assistant',
                 content: finalOutputText || '',
@@ -1522,18 +1737,65 @@ class AIService {
                         if (!checked.ok) {
                             const params = requiredParams(argSchema);
                             const missed = checked.errors.map((e) => e.name);
-                            const pend = createPending(execName, checked.coerced, argSchema);
-                            console.log('[AIService] pendingTool.ask', { tool: execName, missing: missed });
-                            await this.savePendingToolCall(conversationId, userId, pend);
-                            const question = buildClarification(
+                            // Target-resolution chaining (generic MCP write
+                            // fix): when ONLY identifier-shaped args are
+                            // missing (a title was named, no ID yet) and
+                            // SEARCH/READ resolvers are exposed, resolve the
+                            // target in-turn via those tools instead of
+                            // asking the user for an internal ID. Gated on
+                            // UPDATE/DELETE intent (existing-resource
+                            // actions): pure CREATE requests never resolve —
+                            // a missing parent is a destination choice, not
+                            // an existing target. Bounded (one resolve + one
+                            // retry round); on any miss falls through to the
+                            // ask flow below.
+                            let resolveIntentCaps = null;
+                            try { resolveIntentCaps = classifyIntentCapabilities(baseMessageContent); } catch { resolveIntentCaps = null; }
+                            const resolved = await this.tryTargetResolution({
+                                originalCall: toolCalls[0],
                                 execName,
-                                params.filter((p) => missed.includes(p.name)),
-                                checked.coerced
-                            );
-                            if (socket && !socket.isInterrupted) {
-                                await this.emitAssistantText(socket, question);
+                                argSchema,
+                                missing: missed,
+                                intentCaps: resolveIntentCaps,
+                                messages,
+                                systemPrompt,
+                                mcpSchemas,
+                                maxTokens,
+                                userId,
+                                isGuest,
+                                calendarIntent,
+                                requestKey: key,
+                                signal: controller.signal,
+                                conversationId,
+                                workspaceId: workspaceContext.workspaceId,
+                                socket
+                            });
+                            if (resolved && Array.isArray(resolved.toolCalls) && resolved.toolCalls.length > 0) {
+                                toolCalls = resolved.toolCalls;
+                                if (typeof resolved.text === 'string' && resolved.text) {
+                                    finalOutputText = resolved.text;
+                                }
+                                assistantToolMessage.toolCalls = toolCalls.map((toolCall) => ({
+                                    id: toolCall?.id,
+                                    function: {
+                                        name: toolCall?.function?.name,
+                                        arguments: toolCall?.function?.arguments || {}
+                                    }
+                                }));
+                            } else {
+                                const pend = createPending(execName, checked.coerced, argSchema);
+                                console.log('[AIService] pendingTool.ask', { tool: execName, missing: missed });
+                                await this.savePendingToolCall(conversationId, userId, pend);
+                                const question = buildClarification(
+                                    execName,
+                                    params.filter((p) => missed.includes(p.name)),
+                                    checked.coerced
+                                );
+                                if (socket && !socket.isInterrupted) {
+                                    await this.emitAssistantText(socket, question);
+                                }
+                                return question;
                             }
-                            return question;
                         }
                     }
                 }
