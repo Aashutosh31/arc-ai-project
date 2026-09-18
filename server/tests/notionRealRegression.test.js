@@ -59,7 +59,9 @@ ok('R-02 real sentence yields update-page + fetch, no create-pages, ≤6 tools',
   assert.ok(names.includes('mcp_notion_notion-fetch'), 'missing fetch');
   assert.ok(!names.includes('mcp_notion_notion-create-pages'), 'create-pages must not appear');
   assert.ok(names.length <= 6, `tool count ${names.length} exceeds 6`);
-  assert.deepStrictEqual(r.mcpCapability, ['mcp_notion_notion-update-page', 'mcp_notion_notion-fetch']);
+  // Feasibility ordering ranks the parameter-free reader first; membership
+  // (not order) is the contract here.
+  assert.deepStrictEqual([...(r.mcpCapability || [])].sort(), ['mcp_notion_notion-fetch', 'mcp_notion_notion-update-page']);
 });
 
 ok('R-03 continuation retains update-page', () => {

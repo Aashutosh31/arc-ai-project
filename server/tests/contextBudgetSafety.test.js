@@ -116,7 +116,7 @@ async function run() {
     });
     require.cache[registryPath] = {
       id: registryPath, filename: registryPath, loaded: true,
-      exports: { getAvailableProviders: () => [throwing('groq'), throwing('mistral')] }
+      exports: { getAvailableProviders: () => [throwing('groq'), throwing('gemini')] }
     };
     delete require.cache[require.resolve('../lib/llm/LLMRouter')];
     const LLMRouter = require('../lib/llm/LLMRouter');
@@ -158,18 +158,18 @@ async function run() {
           throw Object.assign(new Error('Rate limit exceeded'), { statusCode: 429 });
         }
       },
-      mistral: {
-        id: 'mistral', priority: 1, defaultModel: 'm', isAvailable: () => true,
+      gemini: {
+        id: 'gemini', priority: 1, defaultModel: 'm', isAvailable: () => true,
         resolveModel: () => 'm',
         generate: async () => {
-          seen.push('mistral');
+          seen.push('gemini');
           return { text: 'ok', toolCalls: [], tokens: { input: 1, output: 1 } };
         }
       }
     };
     require.cache[registryPath] = {
       id: registryPath, filename: registryPath, loaded: true,
-      exports: { getAvailableProviders: () => [providers.groq, providers.mistral] }
+      exports: { getAvailableProviders: () => [providers.groq, providers.gemini] }
     };
     delete require.cache[require.resolve('../lib/llm/LLMRouter')];
     const LLMRouter = require('../lib/llm/LLMRouter');
@@ -183,7 +183,7 @@ async function run() {
       else process.env.GROQ_API_KEY = savedKey;
     }
     assert.strictEqual(result.text, 'ok');
-    assert.deepStrictEqual(seen, ['groq', 'mistral'], 'transient still fails over');
+    assert.deepStrictEqual(seen, ['groq', 'gemini'], 'transient still fails over');
   });
 }
 

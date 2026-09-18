@@ -1,5 +1,6 @@
 const { Pinecone } = require('@pinecone-database/pinecone');
 const { getNamespace } = require('../services/workspaceIndexService');
+const { getEmbedding } = require('../services/embeddingService');
 
 module.exports = {
     schema: {
@@ -32,22 +33,9 @@ module.exports = {
         uid = String(uid);
 
         try {
-            // 1. Ask Mistral to convert the text into a 1024-dimension Vector
-            const embedRes = await fetch('https://api.mistral.ai/v1/embeddings', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${process.env.MISTRAL_API_KEY}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    model: 'mistral-embed',
-                    input: [args.content]
-                })
-            });
-
-            const embedData = await embedRes.json();
-            if (!embedData.data || !embedData.data[0]) throw new Error("Failed to generate vector embedding.");
-            const vector = embedData.data[0].embedding;
+            // 1. Convert the text into a Vector (shared embedding provider)
+            const vector = await getEmbedding(args.content);
+            if (!vector) throw new Error("Failed to generate vector embedding.");
 
             // 2. Connect to Pinecone and Save it!
             const pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });

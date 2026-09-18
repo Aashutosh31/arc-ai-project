@@ -33,6 +33,11 @@ const RAG_BUDGET_TOKENS = 800;
 const HISTORY_BUDGET_TOKENS = 1500;
 const WORKING_STATE_BUDGET_TOKENS = 500;
 const SUMMARY_BUDGET_TOKENS = 300;
+// MCP capability inventory: bounded availability block naming the
+// already-authorized integrations + their exposed tools. Ranks just below
+// working state (the model must see what it can call) and above long-term
+// memory — it is never the first thing dropped.
+const MCP_INVENTORY_BUDGET_TOKENS = 1200;
 const MAX_RECENT_TURNS = 10;
 const PER_TURN_CHAR_CAP = 1500;
 const PER_TURN_CHAR_CAP_MIN = 300;
@@ -292,14 +297,16 @@ function trimToolsToBudget(tools, budgetTokens, options = {}) {
   return kept;
 }
 
-const buildSystemPrompt = (template, { longTermText, retrievalText, workingText, summaryText }) => {
+const buildSystemPrompt = (template, { longTermText, retrievalText, workingText, summaryText, mcpInventoryText }) => {
   const workingBlock = workingText
     ? `\n\nWORKING STATE (live task references — prefer these for "it/that/the previous one"):\n${workingText}` : '';
   const summaryBlock = summaryText
     ? `\n\nOLDER CONVERSATION SUMMARY (background only — recent turns below take precedence):\n${summaryText}` : '';
+  const mcpBlock = mcpInventoryText
+    ? `\n\n${mcpInventoryText}` : '';
   return String(template || '')
     .replace('__LONG_TERM_MEMORY_SLOT__', longTermText || '')
-    .replace('__RETRIEVAL_CONTEXT_SLOT__', `${workingBlock}${summaryBlock}${retrievalText || ''}`);
+    .replace('__RETRIEVAL_CONTEXT_SLOT__', `${workingBlock}${mcpBlock}${summaryBlock}${retrievalText || ''}`);
 };
 
 // Main pipeline: waterfall-fit all parts into inputBudget.
@@ -318,8 +325,9 @@ const buildSystemPrompt = (template, { longTermText, retrievalText, workingText,
 //   conversation (summary)  8. low-priority RAG.
 //
 // Compaction therefore drops in reverse: unprotected tools → RAG → memory
-// → facts → summary → history (oldest first, then per-turn cap) → working
-// state → document → minimal-profile refusal.
+// → facts → summary → history (oldest first, then per-turn cap) → MCP
+// inventory (headers survive longest) → working state → document →
+// minimal-profile refusal.
 //
 // Returns { ok, systemPrompt, messages, tools, maxTokens, report }.
 // ok:false ONLY when even the minimal profile overflows (gigantic user
@@ -337,7 +345,8 @@ function assembleBudgetedRequest(parts) {
     query = '',
     recentTurns = [],
     workingState = null,
-    conversationSummary = ''
+    conversationSummary = '',
+    mcpInventoryText = ''
   } = parts || {};
   // Tool names that must survive budgeting (explicitly requested / active
   // tools — dropping them causes provider "not in request.tools" 400s).
@@ -349,6 +358,14 @@ function assembleBudgetedRequest(parts) {
   const inputBudget = Math.max(0, SAFE_TOTAL_BUDGET_TOKENS - maxTokens);
   const compactionPasses = [];
 
+  const fullMcpInventory = String(mcpInventoryText || '');
+  const mcpHeadersOnly = (() => {
+    try {
+      const kept = String(fullMcpInventory || '').split('\n')
+        .filter((line) => !/^\s+•/.test(line));
+      return kept.join('\n');
+    } catch { return ''; }
+  })();
   const renderAll = (state) => {
     const longTermText = state.factsText
       ? `\n\nCRITICAL CONTEXT - You permanently know these facts about the user:\n${state.factsText}` : '';
@@ -358,7 +375,8 @@ function assembleBudgetedRequest(parts) {
       longTermText,
       retrievalText,
       workingText: state.workingText,
-      summaryText: state.summaryText
+      summaryText: state.summaryText,
+      mcpInventoryText: state.mcpInventoryText
     });
     const userContent = state.docText ? `${baseUserText}${state.docText}` : String(baseUserText || '');
     // Bounded recent window first, current turn always last and untouched.
@@ -385,6 +403,9 @@ function assembleBudgetedRequest(parts) {
   const sum0 = suppliedSummary
     ? { text: truncateTo(suppliedSummary, SUMMARY_BUDGET_TOKENS * CHARS_PER_TOKEN), chars: Math.min(suppliedSummary.length, SUMMARY_BUDGET_TOKENS * CHARS_PER_TOKEN) }
     : buildConversationSummary(droppedForSummary, SUMMARY_BUDGET_TOKENS);
+  const mcp0chars = fullMcpInventory.length > MCP_INVENTORY_BUDGET_TOKENS * CHARS_PER_TOKEN
+    ? `${fullMcpInventory.slice(0, MCP_INVENTORY_BUDGET_TOKENS * CHARS_PER_TOKEN)}\n…[inventory truncated to budget]`
+    : fullMcpInventory;
   const state = {
     tools: [...selectedTools],
     memoryText: mem0.text,
@@ -393,6 +414,7 @@ function assembleBudgetedRequest(parts) {
     historyTurns: hist0.turns,
     workingText: work0.text,
     summaryText: sum0.text,
+    mcpInventoryText: mcp0chars,
     docText: String(docText || '')
   };
   const counts = {
@@ -510,7 +532,22 @@ function assembleBudgetedRequest(parts) {
     });
     built = renderAll(state);
   }
-  // Pass 7: shrink working state (active/pending refs — shrunk late because
+  // Pass 7: shrink the MCP inventory (tool detail lines first, server
+  // headers survive longest so the model still knows what exists).
+  if (over(built) && state.mcpInventoryText) {
+    est = shrink('mcp-half', () => {
+      const target = Math.max(400, Math.floor(String(state.mcpInventoryText).length / 2));
+      state.mcpInventoryText = truncateTo(state.mcpInventoryText, target);
+    });
+    built = renderAll(state);
+  }
+  if (over(built) && state.mcpInventoryText && mcpHeadersOnly) {
+    est = shrink('mcp-headers-only', () => {
+      state.mcpInventoryText = truncateTo(mcpHeadersOnly, 1200);
+    });
+    built = renderAll(state);
+  }
+  // Pass 8: shrink working state (active/pending refs — shrunk late because
   // follow-ups like "send it" need them; the current turn itself is sacred).
   if (over(built) && state.workingText) {
     est = shrink('working-half', () => {
@@ -525,7 +562,7 @@ function assembleBudgetedRequest(parts) {
     });
     built = renderAll(state);
   }
-  // Pass 8: shrink the attached document (user's own text is never touched;
+  // Pass 9: shrink the attached document (user's own text is never touched;
   // the truncation notice pattern is preserved by the caller).
   if (over(built) && state.docText) {
     est = shrink('doc-shrink', () => {
@@ -534,12 +571,13 @@ function assembleBudgetedRequest(parts) {
     });
     built = renderAll(state);
   }
-  // Pass 9: minimal profile — system + current user (+ up to 2 most recent
+  // Pass 10: minimal profile — system + current user (+ up to 2 most recent
   // turns when they fit) + protected tools only. Explicitly requested /
   // active tools are retained even here: dropping a tool the model is about
   // to call fails loudly at the provider, so if the minimal profile plus
   // the protected tools still overflows, the pipeline honestly refuses
   // (ok:false) instead of sending a tool-less request the model cannot use.
+  // The MCP server headers survive minimally so availability stays explicit.
   if (over(built)) {
     compactionPasses.push('minimal-profile');
     const shielded = state.tools.filter((s) => protectedToolNames.includes(s?.function?.name));
@@ -549,6 +587,7 @@ function assembleBudgetedRequest(parts) {
     state.ragText = '';
     state.summaryText = '';
     state.workingText = '';
+    state.mcpInventoryText = mcpHeadersOnly ? truncateTo(mcpHeadersOnly, 800) : '';
     state.historyTurns = (state.historyTurns || []).slice(-2);
     if (state.docText) state.docText = truncateTo(state.docText, MINIMAL_DOC_CHARS);
     counts.memoryKept = 0; counts.factsKept = 0; counts.ragKept = 0;
@@ -577,6 +616,7 @@ function assembleBudgetedRequest(parts) {
     historyDropped: counts.historyDropped || 0,
     historyPerTurnCap: counts.historyPerTurnCap || PER_TURN_CHAR_CAP,
     workingStateChars: String(state.workingText || '').length,
+    mcpInventoryChars: String(state.mcpInventoryText || '').length,
     summaryChars: String(state.summaryText || '').length,
     historyChars: built.messages.reduce((a, m) => a + String(m?.content || '').length, 0),
     systemChars: String(built.systemPrompt || '').length,
@@ -598,6 +638,7 @@ module.exports = {
   RAG_BUDGET_TOKENS,
   HISTORY_BUDGET_TOKENS,
   WORKING_STATE_BUDGET_TOKENS,
+  MCP_INVENTORY_BUDGET_TOKENS,
   SUMMARY_BUDGET_TOKENS,
   MAX_RECENT_TURNS,
   PER_TURN_CHAR_CAP,

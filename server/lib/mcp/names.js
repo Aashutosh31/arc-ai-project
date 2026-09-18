@@ -12,7 +12,7 @@
 //
 // The underscore form is REQUIRED for the live LLM providers: Groq silently
 // drops any tool whose name is not ^[a-zA-Z0-9_-]+$ (GroqProvider.buildTools),
-// Mistral and Gemini are relaxed, so the canonical dotted form can never be
+// Gemini is relaxed, so the canonical dotted form can never be
 // sent to the model. The McpRegistry keeps the canonical -> wire map so a
 // model-produced wire name resolves back to the exact (server, tool).
 //

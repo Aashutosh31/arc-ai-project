@@ -38,12 +38,12 @@ const LIFECYCLE = [
 const RAGMemory = () => (
   <SeoPageLayout
     title="ARC-AI Memory (RAG System) | Long-Term Personalized Context"
-    description="How ARC-AI uses retrieval-augmented generation with Mistral embeddings, Pinecone, and a four-layer memory lifecycle to personalize conversations."
+      description="How ARC-AI uses retrieval-augmented generation with Gemini embeddings, Pinecone, and a four-layer memory lifecycle to personalize conversations."
     eyebrow="Memory system"
     heroTitle="Memory built on retrieval, not just a longer prompt"
     heroLead="RAG stands for retrieval-augmented generation. ARC-AI writes useful facts to a vector store, searches them semantically, and feeds the best matches back into the model — so conversations stay personalized without needing the entire history every time."
     stats={[
-      { value: 'Mistral embeddings', label: 'Converts user facts and context into vectors for semantic search.' },
+      { value: 'Gemini embeddings', label: 'Converts user facts and context into vectors for semantic search.' },
       { value: 'Pinecone, per workspace', label: 'Isolated vector namespaces keep memory scoped to the right project.' },
       { value: '4-layer lifecycle', label: 'History, working context, semantic memory, and long-term facts.' },
     ]}
@@ -94,12 +94,12 @@ const RAGMemory = () => (
       </SectionText>
       <BulletList>
         <li>User facts are extracted from conversation and written into a structured memory store.</li>
-        <li>Embeddings are generated with Mistral to capture meaning, not just keywords.</li>
+        <li>Embeddings are generated with Gemini to capture meaning, not just keywords.</li>
         <li>Pinecone returns the most relevant matches, scoped to an isolated namespace per workspace.</li>
         <li>Relevance scoring, recency weighting, and duplicate suppression keep the final context window clean.</li>
       </BulletList>
       <TechRow>
-        <TechChip>Mistral embeddings</TechChip>
+        <TechChip>Gemini embeddings</TechChip>
         <TechChip>Pinecone vector DB</TechChip>
         <TechChip>Workspace namespaces</TechChip>
         <TechChip>MongoDB Atlas</TechChip>

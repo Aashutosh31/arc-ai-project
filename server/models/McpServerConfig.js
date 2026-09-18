@@ -53,6 +53,25 @@ const mcpServerConfigSchema = new mongoose.Schema(
     // OAuth scope hint for authorization (Phase 3). Tokens/credentials live
     // in McpOAuthCredential (encrypted, per-user) — never here.
     oauthScope: { type: String, default: null, maxlength: 512 },
+    // OAuth client-registration strategy (generic pre-registered support).
+    // 'auto' (default): CIMD where advertised, else DCR where advertised,
+    // else a configured pre-registered client; 'cimd'/'dcr' pin the SDK
+    // mechanism; 'pre_registered' uses oauthClientId + the encrypted secret
+    // below directly and never attempts registration. Only read when
+    // auth.type === 'oauth'. Absent (legacy docs) means 'auto'.
+    registrationStrategy: {
+      type: String,
+      enum: ['auto', 'cimd', 'dcr', 'pre_registered'],
+      default: null
+    },
+    // Pre-registered OAuth client identifier (public, but kept server-side —
+    // never returned by list/get/status APIs, only presence flags).
+    oauthClientId: { type: String, default: null, maxlength: 512, trim: true },
+    // AES-256-GCM blob (see server/lib/mcp/secureTokens.js) holding
+    // { clientSecret }. Plaintext secrets are never persisted: routes encrypt
+    // on create/update and the provider decrypts transiently at
+    // clientInformation() time. Never returned by any API.
+    oauthClientSecretEncrypted: { type: String, default: null },
     enabled: { type: Boolean, default: true },
     guestAllowed: { type: Boolean, default: false }
   },

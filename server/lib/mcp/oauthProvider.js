@@ -66,8 +66,7 @@ const oauthCallbackUrl = () => `${publicBackendBase()}/api/mcp/oauth/callback`;
 // Thrown by the silent provider when the transport needs interactive
 // authorization (no tokens / refresh failed). The connection layer maps this
 // to an AUTH_REQUIRED failure instead of a generic 401.
-class OAuthAuthorizationRequired extends Error {
-  constructor(message, { configId = null, issuer = null } = {}) {
+class OAuthAuthorizationRequired extends Error {  constructor(message, { configId = null, issuer = null } = {}) {
     super(message || 'Authorization required — reconnect');
     this.name = 'OAuthAuthorizationRequired';
     this.configId = configId;
@@ -75,8 +74,7 @@ class OAuthAuthorizationRequired extends Error {
   }
 }
 
-const isOAuthAuthorizationRequired = (err) => {
-  if (!err) return false;
+const isOAuthAuthorizationRequired = (err) => {  if (!err) return false;
   if (err instanceof OAuthAuthorizationRequired) return true;
   if (err?.name === 'UnauthorizedError') return true;
   // SDK OAuth failures (e.g. refresh rejected with invalid_grant) mean the
@@ -345,6 +343,141 @@ const credentialStatus = async (userId, configId) => {
   };
 };
 
+// ---- pre-registered OAuth clients (generic registration strategy) ----------
+// Some authorization servers advertise neither a CIMD document nor a dynamic
+// registration endpoint, yet require OAuth for tool calls. For those, ARC
+// supports a pre-registered (developer-provisioned) client.
+//
+// DEVELOPER/USER BOUNDARY: client material lives SERVER-SIDE ONLY and is
+// NEVER part of the user-facing configuration path (no React, no API
+// echo, no browser state). Resolution order (generic — keyed off the server
+// slug, never vendor names/URLs):
+//   1. Environment: MCP_<SLUG_KEY>_OAUTH_CLIENT_ID / _OAUTH_CLIENT_SECRET,
+//      where SLUG_KEY is the upper-snake-cased config slug
+//      (e.g. slug `team_tools` → MCP_TEAM_TOOLS_OAUTH_CLIENT_ID).
+//   2. Encrypted config-doc fields (oauthClientId/oauthClientSecretEncrypted)
+//      — operator-provisioned, backward compatible, never exposed via APIs.
+// Plaintext secrets never touch Mongo, React, logs, or tool metadata.
+// Halves are never mixed across sources: if either half of a source is set,
+// that source must supply both, else startup/start fails with a clear error.
+
+// Thrown when pre-registered client material is incomplete or unusable.
+// Messages are safe by construction: they never embed identifiers or secrets.
+class OAuthRegistrationError extends Error {
+  constructor(message, { configId = null } = {}) {
+    super(message || 'OAuth client registration is not available for this server.');
+    this.name = 'OAuthRegistrationError';
+    this.configId = configId;
+  }
+}
+
+// Upper-snake-case slug for environment lookup. Canonical derivation lives
+// here; configApi mirrors it (dependency-free) for presence flags only.
+const serverKeyForEnv = (slug) =>
+  String(slug || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+
+const preregEnvNames = (config) => {
+  const key = serverKeyForEnv(config && config.slug);
+  if (!key) return null;
+  return { idName: `MCP_${key}_OAUTH_CLIENT_ID`, secretName: `MCP_${key}_OAUTH_CLIENT_SECRET` };
+};
+
+// Raw halves from each server-side source (values only read here — never logged).
+const preregEnvHalves = (config) => {
+  const names = preregEnvNames(config);
+  if (!names) return { hasId: false, hasSecret: false, id: '', secret: '' };
+  const id = String(process.env[names.idName] || '').trim();
+  const secret = String(process.env[names.secretName] || '');
+  return { hasId: Boolean(id), hasSecret: Boolean(secret), id, secret };
+};
+
+const preregDocHalves = (config) => {
+  const id = config && typeof config.oauthClientId === 'string' ? config.oauthClientId.trim() : '';
+  const blob = config && typeof config.oauthClientSecretEncrypted === 'string' ? config.oauthClientSecretEncrypted : '';
+  return { hasId: Boolean(id), hasSecret: Boolean(blob), id, blob };
+};
+
+// Any configuration signal (complete or half) from either server-side source.
+// Half-configured sources fail clearly in getPreRegisteredClientInfo rather
+// than silently falling through to a confusing SDK error.
+const hasPreRegisteredCredentials = (config) => {
+  const env = preregEnvHalves(config);
+  const doc = preregDocHalves(config);
+  return Boolean(env.hasId || env.hasSecret || doc.hasId || doc.hasSecret);
+};
+
+// Pure strategy resolution. asMetadata is the discovered authorization-server
+// metadata object (or null/undefined when unknown — without it the SDK can do
+// neither CIMD nor DCR, so only a configured pre-registered client can work).
+// Returns 'cimd' | 'dcr' | 'pre_registered' | null.
+const resolveRegistrationMode = ({ strategy = null, asMetadata = null, clientMetadataUrl = null, hasPreRegistered = false } = {}) => {
+  const normalized = typeof strategy === 'string' && strategy ? strategy : 'auto';
+  if (normalized === 'pre_registered') return hasPreRegistered ? 'pre_registered' : null;
+  if (normalized === 'cimd') return 'cimd';
+  if (normalized === 'dcr') return 'dcr';
+  // auto
+  const cimdUsable = asMetadata?.client_id_metadata_document_supported === true && Boolean(clientMetadataUrl);
+  if (cimdUsable) return 'cimd';
+  const dcrUsable = Boolean(asMetadata?.registration_endpoint);
+  if (dcrUsable) return 'dcr';
+  return hasPreRegistered ? 'pre_registered' : null;
+};
+
+// Clear, secret-free explanation for a null mode (surfaced by routes).
+const registrationUnavailableReason = ({ strategy = null, hasPreRegistered = false } = {}) => {
+  const normalized = typeof strategy === 'string' && strategy ? strategy : 'auto';
+  if (normalized === 'pre_registered' && !hasPreRegistered) {
+    return 'Pre-registered OAuth is selected but no client ID/secret is configured for this server.';
+  }
+  return 'The authorization server supports neither client metadata documents nor dynamic client registration, and no pre-registered OAuth client is configured for this server.';
+};
+
+// Encrypt a client secret for config-doc storage. Never logs or returns plaintext.
+const encryptClientSecret = (secret) => {
+  if (!secret || typeof secret !== 'string') throw new OAuthRegistrationError('Cannot store an empty OAuth client secret.');
+  return secureTokens.encryptJson({ clientSecret: secret });
+};
+
+const decryptClientSecret = (encryptedBlob) => {
+  let decoded = null;
+  try {
+    decoded = secureTokens.decryptJson(encryptedBlob);
+  } catch {
+    decoded = null;
+  }
+  const secret = decoded && typeof decoded.clientSecret === 'string' ? decoded.clientSecret : null;
+  if (!secret) throw new OAuthRegistrationError('The stored OAuth client secret cannot be decrypted. Re-save the client secret.');
+  return secret;
+};
+
+// Server-side pre-registered identity for clientInformation(). Environment
+// wins over doc storage; halves are never mixed across sources. Throws
+// OAuthRegistrationError (never returns partial material).
+const getPreRegisteredClientInfo = (config) => {
+  const configId = (config && (config.id || config._id)) || null;
+  const env = preregEnvHalves(config);
+  if (env.hasId || env.hasSecret) {
+    if (!env.hasId || !env.hasSecret) {
+      throw new OAuthRegistrationError(
+        'Pre-registered OAuth is incompletely configured on the server (client ID and secret are both required).',
+        { configId }
+      );
+    }
+    return { clientId: env.id, clientSecret: env.secret };
+  }
+  const doc = preregDocHalves(config);
+  if (!doc.hasId && !doc.hasSecret) {
+    throw new OAuthRegistrationError('Pre-registered OAuth client is not configured for this server.', { configId });
+  }
+  if (!doc.hasId || !doc.hasSecret) {
+    throw new OAuthRegistrationError(
+      'Pre-registered OAuth is incompletely configured on the server (client ID and secret are both required).',
+      { configId }
+    );
+  }
+  return { clientId: doc.id, clientSecret: decryptClientSecret(doc.blob) };
+};
+
 // ---- provider ---------------------------------------------------------------
 
 const defaultClientMetadata = (scope) => ({
@@ -393,7 +526,32 @@ class ArcOAuthProvider {
   }
 
   async clientInformation(ctx) {
-    return loadClientInformation(this._userId, this._config.id, ctx?.issuer || null);
+    // Stored registration (DCR/CIMD/pre-registered from a prior flow) always
+    // wins — reconnects and refreshes never re-register.
+    const stored = await loadClientInformation(this._userId, this._config.id, ctx?.issuer || null);
+    if (stored) return stored;
+    // Automatic (silent) paths keep their exact current behavior: stored
+    // material or nothing. Pre-registered supply engages only on the explicit
+    // interactive leg, so transports never pick up configured secrets.
+    if (this._failClosed) return undefined;
+    const mode = resolveRegistrationMode({
+      strategy: this._config.registrationStrategy || null,
+      asMetadata: this._tx?.discoveryState?.authorizationServerMetadata || null,
+      clientMetadataUrl: this.clientMetadataUrl,
+      hasPreRegistered: hasPreRegisteredCredentials(this._config)
+    });
+    if (mode !== 'pre_registered') return undefined;
+    // The SDK uses a returned clientInformation directly and skips CIMD/DCR
+    // entirely. No issuer stamp: the SDK stamps the discovered issuer and
+    // persists it via saveClientInformation (existing encrypted path), which
+    // preserves issuer binding and powers reconnects. Throws a clear
+    // OAuthRegistrationError when material is incomplete.
+    const { clientId, clientSecret } = getPreRegisteredClientInfo(this._config);
+    return {
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uris: [this.redirectUrl]
+    };
   }
 
   async saveClientInformation(info, ctx) {
@@ -511,7 +669,15 @@ module.exports = {
   publicFrontendBase,
   oauthCallbackUrl,
   OAuthAuthorizationRequired,
+  OAuthRegistrationError,
   isOAuthAuthorizationRequired,
+  serverKeyForEnv,
+  resolveRegistrationMode,
+  registrationUnavailableReason,
+  hasPreRegisteredCredentials,
+  encryptClientSecret,
+  decryptClientSecret,
+  getPreRegisteredClientInfo,
   modelAvailable,
   createMemoryBackend,
   __setCredentialBackend,

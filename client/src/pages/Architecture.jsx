@@ -198,18 +198,17 @@ const Architecture = () => (
       <SectionTag>Provider orchestration</SectionTag>
       <SectionHeading>Routing intelligence, not a single model</SectionHeading>
       <SectionText>
-        ARC-AI does not call one model for everything. A routing layer picks Gemini for reasoning, multimodal
-        input, and planning, or Mistral when speed and cost matter more — for example, fast summarization or
-        short tool replies.
+        ARC-AI does not call one model for everything. A routing layer picks Groq for fast text, tool
+        orchestration, and planning, or Gemini for reasoning and multimodal input.
       </SectionText>
       <CardGrid $min="220px">
         <Card>
-          <CardTitle>Gemini</CardTitle>
-          <CardText>Used for deeper reasoning, multimodal input from the live vision pipeline, and multi-step planning.</CardText>
+          <CardTitle>Groq</CardTitle>
+          <CardText>Used for fast, cost-effective responses — text, tool orchestration, summarization, and short replies.</CardText>
         </Card>
         <Card>
-          <CardTitle>Mistral</CardTitle>
-          <CardText>Used for fast, cost-effective responses — summarization, short replies, and embedding generation for memory.</CardText>
+          <CardTitle>Gemini</CardTitle>
+          <CardText>Used for deeper reasoning, multimodal input from the live vision pipeline, multi-step planning, and embedding generation for memory.</CardText>
         </Card>
         <Card>
           <CardTitle>Pixtral</CardTitle>

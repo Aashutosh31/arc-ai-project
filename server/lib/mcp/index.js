@@ -10,7 +10,7 @@
 //
 // MCP metadata rides each schema as a NON-ENUMERABLE property so that
 // JSON.stringify-based token estimation (contextBudget) and provider payloads
-// (JSON deep clones by Mistral, object slices by Groq) never serialize it and
+// (JSON deep clones by Gemini, object slices by Groq) never serialize it and
 // never leak server identity into the model's token stream.
 
 const { McpManager } = require('./McpManager');
@@ -130,7 +130,14 @@ const McpToolSource = {
     const blocked = [];
 
     for (const config of configs) {
-      if (schemas.length >= limits.MAX_TOOLS_PER_SERVER) break;
+      // Per-server contribution cap (MAX_TOOLS_PER_SERVER is PER SERVER by
+      // contract): counted per config, never cumulatively. A cumulative cap
+      // silently decimates later servers — e.g. 9 + 44 tools from two
+      // servers left only 11 of 66 Linear tools exposed, cutting out the
+      // issue mutation while same-worded readers survived, which no
+      // downstream capability layer can recover from. Request-level safety
+      // stays downstream (6-tool selection cap + context budgeting).
+      let serverCount = 0;
       let conn;
       try {
         conn = await core.manager.ensureConnected(config, {
@@ -163,7 +170,7 @@ const McpToolSource = {
       const permittedNameSet = new Set(permittedEntries.map(e => e.originalToolName));
 
       for (const toolEntry of conn.toolEntries.values()) {
-        if (schemas.length >= limits.MAX_TOOLS_PER_SERVER) break;
+        if (serverCount >= limits.MAX_TOOLS_PER_SERVER) break;
         const entry = toolEntry.entry;
         // Skip tools filtered out by the allow/deny policy (kept server-side
         // for no-substitution detection; never exposed to the model).
@@ -180,6 +187,7 @@ const McpToolSource = {
           // no tool names). Non-enumerable: never serialized to providers.
           annotations: entry.annotations || null
         }));
+        serverCount += 1;
         metadata.set(entry.wireName, {
           serverId: entry.configId,
           configName: config.name,

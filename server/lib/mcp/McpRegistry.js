@@ -350,6 +350,11 @@ const normalizeConfig = (raw, slugCounts, existing) => {
     // Dropped here, scope would silently fall back on every registry
     // round-trip (seed, discovery re-sync).
     oauthScope: typeof raw.oauthScope === 'string' ? raw.oauthScope : null,
+    // INVARIANT: pre-registered OAuth material (registrationStrategy,
+    // oauthClientId, oauthClientSecretEncrypted) is DROPPED here by
+    // construction — the registry never holds client identities or secrets.
+    // Interactive OAuth legs always use a fresh server-side config; automatic
+    // (silent) paths use stored per-user credentials only.
     createdAt: raw.createdAt || new Date(),
     updatedAt: raw.updatedAt || new Date(),
     tools: Array.isArray(raw.tools) ? raw.tools : []

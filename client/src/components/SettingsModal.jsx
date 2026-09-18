@@ -327,7 +327,7 @@ const SettingsModal = ({
                     <Badge tone="warning" outline className={BADGE_CLASS}>Fallback used</Badge>
                   </Row>
                 )}
-                <Note>Manual provider selection is not available yet. Supported backends: Groq, Gemini, Mistral.</Note>
+                <Note>Manual provider selection is not available yet. Supported backends: Groq, Gemini.</Note>
               </>
             )}
 

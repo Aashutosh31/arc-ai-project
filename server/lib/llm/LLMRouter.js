@@ -14,7 +14,8 @@ const summarizeRequest = (request = {}) => ({
   tools: Array.isArray(request.tools) ? request.tools.length : 0,
   hasAttachments: Array.isArray(request.attachments) && request.attachments.length > 0,
   stream: Boolean(request.stream),
-  messageCount: Array.isArray(request.messages) ? request.messages.length : 0
+  messageCount: Array.isArray(request.messages) ? request.messages.length : 0,
+  forcedTool: typeof request.forcedTool === 'string' && request.forcedTool ? true : false
 });
 
 const resolveProviderModel = (provider, request = {}) => {
@@ -127,7 +128,7 @@ class LLMRouter {
       if (needsMultimodal) {
         throw new Error('No multimodal-capable LLM providers are available for this request.');
       }
-      throw new Error('No LLM providers are available. Configure GROQ_API_KEY, GEMINI_API_KEY or MISTRAL_API_KEY.');
+      throw new Error('No LLM providers are available. Configure GROQ_API_KEY or GEMINI_API_KEY.');
     }
 
     return order;
@@ -146,10 +147,11 @@ class LLMRouter {
       return { providerId: this.defaultProvider, route };
     }
 
-    // Auto-routing: prefer Groq for heavy workloads (complex reasoning,
-    // tool orchestration, long context). Multimodal requests are routed to
-    // Gemini since Groq gpt-oss-120b is text-only via the OpenAI endpoint.
-    // Fall back to the existing lightweight providers for simple tasks.
+    // Auto-routing: Groq is ARC's active provider for text workloads
+    // (complex reasoning, tool orchestration, long context, lightweight,
+    // default). Multimodal requests route to Gemini since Groq gpt-oss-120b
+    // is text-only via the OpenAI endpoint. Gemini is the only fallback —
+    // there is no third provider.
     const groqAvailable = Boolean(process.env.GROQ_API_KEY);
 
     // Complex reasoning, tool orchestration, long context → Groq
@@ -164,15 +166,15 @@ class LLMRouter {
     }
 
     // Lightweight and memory compression → Groq if available,
-    // otherwise the existing cheap provider
+    // otherwise Gemini
     if (taskProfile === 'lightweight' || taskProfile === 'memory_compression') {
       if (groqAvailable) return { providerId: 'groq', route };
-      return { providerId: 'mistral', route };
+      return { providerId: 'gemini', route };
     }
 
-    // Default: Groq if available, otherwise Mistral
+    // Default: Groq if available, otherwise Gemini
     if (groqAvailable) return { providerId: 'groq', route };
-    return { providerId: 'mistral', route };
+    return { providerId: 'gemini', route };
   }
 
   isRetryable(error) {

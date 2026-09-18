@@ -171,16 +171,18 @@ const SidebarOverlay = styled.div`
 
 const ExecutionDrawer = styled.div`
   position: fixed;
-  bottom: ${({ $lifted }) => ($lifted ? '230px' : '80px')};
-  right: 16px;
-  width: min(340px, calc(100vw - 32px));
-  max-height: 50vh;
+  bottom: ${({ $lifted }) => ($lifted ? '230px' : '76px')};
+  right: 12px;
+  width: min(300px, calc(100vw - 24px));
+  max-height: 40vh;
   overflow-y: auto;
-  z-index: 100;
+  z-index: 50;
   border-radius: var(--radius-md);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
+  pointer-events: auto;
+
+  &:empty {
+    display: none;
+  }
 `;
 
 const DashboardPageContent = () => {

@@ -26,6 +26,25 @@ const getPineconeIndex = () => {
 
 const getNamespace = (userId, workspaceId = null) => (workspaceId ? `workspace_${String(workspaceId)}` : `user_${String(userId)}`);
 
+// Pinecone (and vector stores generally) reject null metadata values —
+// a single `provider: null` fails the whole upsert. Sanitize once, here,
+// so every caller is safe: drop null/undefined entries (never write null),
+// keep everything else untouched. Callers should pass `undefined` (not
+// null) for unknown values; this also guards callers that still pass null.
+const sanitizeMetadata = (metadata) => {
+  const out = {};
+  try {
+    const src = metadata && typeof metadata === 'object' ? metadata : {};
+    for (const [key, value] of Object.entries(src)) {
+      if (value === null || value === undefined) continue;
+      out[key] = value;
+    }
+  } catch {
+    // Sanitization must never break indexing.
+  }
+  return out;
+};
+
 const makeVectorId = (kind, entityId, text) => {
   const suffix = crypto.createHash('sha1').update(normalizeText(text)).digest('hex').slice(0, 12);
   return `${kind}_${String(entityId)}_${suffix}`;
@@ -55,7 +74,7 @@ const upsertTextVector = async ({ userId, kind, entityId, text, metadata = {}, s
       {
         id,
         values: vector,
-        metadata: {
+        metadata: sanitizeMetadata({
           userId: String(userId),
           kind,
           entityId: String(entityId),
@@ -63,7 +82,7 @@ const upsertTextVector = async ({ userId, kind, entityId, text, metadata = {}, s
           cacheKey: cacheKeyFor(text),
           timestamp: new Date().toISOString(),
           ...metadata
-        }
+        })
       }
     ],
     namespace
@@ -99,5 +118,6 @@ const removeVectorsByEntity = async ({ userId, kind, entityId, workspaceId = nul
 module.exports = {
   upsertTextVector,
   removeVectorsByEntity,
-  getNamespace
+  getNamespace,
+  sanitizeMetadata
 };

@@ -96,7 +96,7 @@ const RELEASES = [
   {
     version: 'v0.11.0-beta',
     title: 'Intelligent workspace & provider routing',
-    text: 'Established the intelligence layer: dynamic Gemini/Mistral routing, semantic workspace search, a four-layer memory lifecycle, and an intelligent retrieval layer with relevance scoring and recency weighting.',
+    text: 'Established the intelligence layer: dynamic Groq/Gemini routing, semantic workspace search, a four-layer memory lifecycle, and an intelligent retrieval layer with relevance scoring and recency weighting.',
   },
 ];
 
@@ -237,7 +237,7 @@ const About = () => (
         <TechChip>MongoDB Atlas</TechChip>
         <TechChip>Pinecone</TechChip>
         <TechChip>Gemini</TechChip>
-        <TechChip>Mistral AI</TechChip>
+        <TechChip>Groq</TechChip>
         <TechChip>Pixtral</TechChip>
         <TechChip>Google Apps Script</TechChip>
       </TechRow>

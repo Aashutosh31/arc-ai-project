@@ -364,7 +364,7 @@ exports.generateConversationTitle = async (conversationId, firstUserMessage) => 
 Return ONLY the title, with no quotes and no punctuation at the end.`;
 
         const result = await router.generate({
-          preferredProvider: 'mistral',
+          preferredProvider: 'groq',
           stream: false,
           temperature: 0.2,
           maxTokens: 18,

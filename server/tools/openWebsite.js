@@ -1,5 +1,5 @@
 module.exports = {
-    // 1. Mistral Function Calling Schema
+    // 1. Provider function-calling schema (Groq/Gemini compatible)
     schema: {
         type: "function",
         function: {

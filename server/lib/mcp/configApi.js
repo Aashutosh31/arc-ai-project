@@ -12,6 +12,9 @@
 
 const VALID_TRANSPORTS = ['stdio', 'streamable-http'];
 const VALID_SCOPES = ['workspace', 'global'];
+// NOTE: OAuth client-registration vocabulary (auto/cimd/dcr/pre_registered)
+// lives on the Mongoose model enum. Registration material is server-side
+// only and is never accepted through this user-facing validation path.
 
 // Fields the browser is allowed to see. Everything stored on the document
 // outside this list is either internal (owner ObjectId, __v) or must stay
@@ -26,9 +29,37 @@ const CLIENT_VISIBLE_FIELDS = [
   'createdAt', 'updatedAt'
 ];
 
-const sanitizeAuthForClient = (auth) => {
+// Keyed server-side credential names for presence flags. Mirrors
+// oauthProvider.serverKeyForEnv (duplicated to keep this module
+// dependency-free — presence booleans only, values never read).
+const preregEnvName = (slug, kind) => {
+  const key = String(slug || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  if (!key) return null;
+  return `MCP_${key}_OAUTH_${kind === 'secret' ? 'CLIENT_SECRET' : 'CLIENT_ID'}`;
+};
+
+const sanitizeAuthForClient = (auth, doc) => {
   if (!auth || typeof auth !== 'object') return { type: 'none' };
-  if (auth.type === 'oauth') return { type: 'oauth', configured: true };
+  if (auth.type === 'oauth') {
+    const out = { type: 'oauth', configured: true };
+    // Registration metadata only when explicitly configured (legacy docs
+    // without a strategy keep the exact historical shape). The client ID and
+    // secret themselves are NEVER returned — presence flags only, covering
+    // every server-side source (operator doc fields and keyed environment).
+    const strategy = doc && typeof doc.registrationStrategy === 'string' ? doc.registrationStrategy : null;
+    if (strategy) {
+      const idEnv = preregEnvName(doc && doc.slug, 'id');
+      const secretEnv = preregEnvName(doc && doc.slug, 'secret');
+      out.registrationStrategy = strategy;
+      out.clientIdConfigured = Boolean(
+        (doc && doc.oauthClientId) || (idEnv && process.env[idEnv])
+      );
+      out.clientSecretConfigured = Boolean(
+        (doc && doc.oauthClientSecretEncrypted) || (secretEnv && process.env[secretEnv])
+      );
+    }
+    return out;
+  }
   return {
     type: auth.type === 'header' ? 'header' : 'none',
     headerName: auth.type === 'header' ? (auth.headerName || 'Authorization') : undefined,
@@ -51,7 +82,7 @@ const sanitizeConfigForClient = (doc) => {
   out.allowedTools = Array.isArray(out.allowedTools) ? [...out.allowedTools] : [];
   out.deniedTools = Array.isArray(out.deniedTools) ? [...out.deniedTools] : [];
   out.args = Array.isArray(out.args) ? [...out.args] : [];
-  out.auth = sanitizeAuthForClient(out.auth);
+  out.auth = sanitizeAuthForClient(out.auth, doc);
   out.enabled = out.enabled !== false;
   out.guestAllowed = out.guestAllowed === true;
   return out;
@@ -183,6 +214,15 @@ const validateConfigInput = (body = {}, { isUpdate = false } = {}) => {
   if (has('enabled')) data.enabled = body.enabled !== false;
   if (has('guestAllowed')) data.guestAllowed = body.guestAllowed === true;
 
+  // DEVELOPER/USER BOUNDARY: OAuth client-registration material (strategy,
+  // client ID, client secret) is server-side configuration and is NEVER part
+  // of the user-facing configuration path. User payloads carrying these
+  // fields are rejected outright — the runtime resolves pre-registered
+  // credentials from server-side sources (environment / operator storage).
+  if (has('registrationStrategy') || has('oauthClientId') || has('oauthClientSecret')) {
+    return fail('OAuth client registration is server-side configuration and cannot be set from the API.');
+  }
+
   if (has('oauthScope')) {
     const scope = String(body.oauthScope ?? '').trim();
     if (scope.length > 512) return fail('OAuth scope must be 512 characters or fewer.');
@@ -194,7 +234,9 @@ const validateConfigInput = (body = {}, { isUpdate = false } = {}) => {
 
 // Read-only discovery payload for GET /:id/tools. Tool schemas stay
 // server-side; the browser gets names + descriptions + policy counts only.
-const buildToolsPayload = ({ config, connectionState, protocolVersion, serverInfo, tools, failures, policy }) => ({
+// discoveryStatus/discoveryAuthRequired distinguish transport-connected from
+// usable-ready (see McpServerConnection); additive, safe for old readers.
+const buildToolsPayload = ({ config, connectionState, protocolVersion, serverInfo, tools, failures, policy, discoveryStatus = null, discoveryAuthRequired = false }) => ({
   serverId: config ? String(config._id || config.id) : null,
   connectionState: connectionState || 'disconnected',
   protocolVersion: protocolVersion || null,
@@ -206,7 +248,9 @@ const buildToolsPayload = ({ config, connectionState, protocolVersion, serverInf
     allowed: t.allowed !== false
   })) : [],
   policy: policy || { allowedTools: [], deniedTools: [] },
-  failures: Array.isArray(failures) ? failures : []
+  failures: Array.isArray(failures) ? failures : [],
+  discoveryStatus: discoveryStatus || 'unknown',
+  discoveryAuthRequired: discoveryAuthRequired === true
 });
 
 module.exports = {

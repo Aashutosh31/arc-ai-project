@@ -6,7 +6,7 @@ This document describes the **current** tool system: the provider-independent re
 
 ## Tool Registry (22 tools)
 
-`server/tools/index.js` auto-discovers every `{ schema, execute }` module in the tools directory. The registry is **provider-independent** — tools are defined once and exposed to Groq, Gemini, and Mistral; per-provider translation happens only at the provider adapter boundary.
+`server/tools/index.js` auto-discovers every `{ schema, execute }` module in the tools directory. The registry is **provider-independent** — tools are defined once and exposed to Groq and Gemini; per-provider translation happens only at the provider adapter boundary.
 
 Current registered tools:
 

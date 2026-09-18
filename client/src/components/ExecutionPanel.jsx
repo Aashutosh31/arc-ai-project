@@ -1,287 +1,200 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { useExecution } from '../contexts/ExecutionContext';
 
-const pulse = keyframes`
-  0%, 100% { opacity: 0.55; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.02); }
+// Compact, non-blocking execution status.
+//
+// Presentation-only by contract: this panel NEVER drives execution. It
+// renders socket status into a small collapsible strip beside the chat —
+// it never overlays the composer/messages in a blocking way, never steals
+// focus, never prevents scrolling or typing, and hiding/collapsing/closing
+// it never cancels or interrupts the underlying request (the Stop control
+// lives in the chat input, not here).
+//
+// Normal state: a one-line strip ("Using tools…" / "Completed · N tools").
+// The detailed step trace is opt-in via click-to-expand.
+
+const dotPulse = keyframes`
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
 `;
 
-const Panel = styled.section`
-  background: linear-gradient(180deg, var(--surface), var(--background-subtle));
-  border: 1px solid rgba(var(--primary-rgb), 0.18);
-  border-radius: 16px;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+const Strip = styled.section`
+  background: var(--surface);
+  border: 1px solid rgba(var(--primary-rgb), 0.14);
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
   overflow: hidden;
   min-width: 0;
+  max-width: 100%;
 `;
 
-const Header = styled.button`
+const StripHeader = styled.button`
   appearance: none;
   width: 100%;
   border: 0;
-  padding: 14px 14px 12px;
-  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.08), rgba(138, 43, 226, 0.08));
+  padding: 8px 10px;
+  background: transparent;
   color: var(--foreground);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   cursor: pointer;
   text-align: left;
+  font-size: 12px;
+  line-height: 1.4;
+
+  &:focus-visible {
+    outline: 1px solid rgba(var(--primary-rgb), 0.5);
+    outline-offset: -1px;
+  }
 `;
 
-const TitleGroup = styled.div`
+const Dot = styled.span`
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: ${({ $state }) => ($state === 'FAILED' ? 'var(--destructive)' : $state === 'BLOCKED' ? 'var(--warning)' : $state === 'COMPLETED' ? 'var(--success)' : 'var(--primary-hex)')};
+  animation: ${({ $state }) => ($state === 'RUNNING' || $state === 'PLANNED' ? dotPulse : 'none')} 1.6s ease-in-out infinite;
+`;
+
+const StripText = styled.span`
   min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(215, 250, 255, 0.85);
+`;
+
+const StripToggle = styled.span`
+  color: rgba(215, 250, 255, 0.6);
+  font-size: 11px;
+  flex-shrink: 0;
+`;
+
+const DismissButton = styled.button`
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: rgba(215, 250, 255, 0.55);
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+
+  &:hover { color: var(--foreground); background: rgba(255,255,255,0.06); }
+`;
+
+const Details = styled.div`
+  padding: 0 10px 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
 `;
 
-const Eyebrow = styled.span`
-  font-size: 10px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: rgba(215, 250, 255, 0.65);
+const StepRow = styled.div`
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  font-size: 11px;
+  min-width: 0;
 `;
 
-const Title = styled.h3`
-  margin: 0;
-  font-size: 13px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent-soft);
+const StepName = styled.span`
+  font-weight: 600;
+  color: var(--foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 `;
 
-const Meta = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 10px;
+const StepStatus = styled.span`
+  margin-left: auto;
   flex-shrink: 0;
+  color: rgba(215, 250, 255, 0.65);
+  text-transform: lowercase;
 `;
-
-const StatusPill = styled.span`
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(var(--accent-soft-rgb), 0.24);
-  color: ${({ $status }) => ($status === 'FAILED' ? 'var(--destructive)' : $status === 'BLOCKED' ? 'var(--warning)' : $status === 'COMPLETED' ? 'var(--success)' : 'var(--foreground)')};
-  background: ${({ $status }) => ($status === 'FAILED' ? 'rgba(255, 80, 80, 0.1)' : $status === 'BLOCKED' ? 'rgba(255, 190, 64, 0.12)' : $status === 'COMPLETED' ? 'rgba(0, 255, 120, 0.08)' : 'rgba(255,255,255,0.04)')};
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-`;
-
-const ToggleArrow = styled.span`
-  color: rgba(215, 250, 255, 0.8);
-  font-size: 12px;
-`;
-
-const Body = styled.div`
-  padding: 0 14px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-`;
-
-const LiveLine = styled.div`
-  padding: 12px;
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(var(--primary-rgb), 0.12);
-  background: var(--surface);
-  color: var(--foreground);
-  font-size: 13px;
-  line-height: 1.5;
-  animation: ${pulse} 2.4s ease-in-out infinite;
-`;
-
-const ProgressBar = styled.div`
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.06);
-  overflow: hidden;
-
-  &::before {
-    content: '';
-    display: block;
-    height: 100%;
-    width: ${({ $progress }) => `${Math.max(6, Math.min(100, $progress || 0))}%`};
-    border-radius: inherit;
-    background: linear-gradient(90deg, var(--primary-hex), var(--accent), var(--secondary-hex));
-    transition: width 180ms ease;
-  }
-`;
-
-const StepList = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-`;
-
-const StepItem = styled.div`
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: start;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  background: rgba(255,255,255,0.03);
-  border: 1px solid ${({ $state }) => ($state === 'FAILED' ? 'rgba(255,112,112,0.32)' : $state === 'BLOCKED' ? 'rgba(255, 190, 64, 0.34)' : $state === 'COMPLETED' ? 'rgba(77,255,176,0.28)' : $state === 'RUNNING' ? 'rgba(var(--primary-rgb),0.3)' : 'rgba(255,255,255,0.08)')};
-`;
-
-const Dot = styled.span`
-  width: 10px;
-  height: 10px;
-  margin-top: 4px;
-  border-radius: 50%;
-  background: ${({ $state }) => ($state === 'FAILED' ? 'var(--destructive)' : $state === 'BLOCKED' ? 'var(--warning)' : $state === 'COMPLETED' ? 'var(--success)' : $state === 'RUNNING' ? 'var(--primary-hex)' : 'rgba(255,255,255,0.4)')};
-  box-shadow: ${({ $state }) => ($state === 'RUNNING' ? '0 0 12px rgba(var(--primary-rgb),0.5)' : 'none')};
-`;
-
-const StepMain = styled.div`
-  min-width: 0;
-`;
-
-const StepTitle = styled.div`
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--foreground);
-  text-transform: none;
-`;
-
-const StepMeta = styled.div`
-  margin-top: 4px;
-  font-size: 11px;
-  color: rgba(215, 250, 255, 0.68);
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-`;
-
-const ResultPreview = styled.pre`
-  margin: 0;
-  max-width: 100%;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 11px;
-  color: rgba(199, 244, 255, 0.84);
-  background: rgba(0,0,0,0.22);
-  border-radius: 10px;
-  padding: 8px 10px;
-  border: 1px solid rgba(255,255,255,0.06);
-`;
-
-const CancelButton = styled.button`
-  border: 1px solid rgba(255, 80, 80, 0.42);
-  background: rgba(255, 80, 80, 0.12);
-  color: var(--destructive-soft);
-  border-radius: 999px;
-  padding: 8px 12px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: transform 160ms ease, background 160ms ease;
-
-  &:hover { transform: translateY(-1px); background: rgba(255, 80, 80, 0.2); }
-`;
-
-const formatDuration = (startedAt, finishedAt) => {
-  if (!startedAt) return 'pending';
-  const end = finishedAt || Date.now();
-  const diff = Math.max(0, Math.round((new Date(end).getTime() - new Date(startedAt).getTime()) / 1000));
-  return diff < 60 ? `${diff}s` : `${Math.floor(diff / 60)}m ${diff % 60}s`;
-};
-
-const buildPreview = (result) => {
-  if (!result) return '';
-  if (typeof result === 'string') return result.slice(0, 140);
-  if (result.error) return String(result.error).slice(0, 140);
-  if (result.message) return String(result.message).slice(0, 140);
-  if (result.data) return String(result.data).slice(0, 140);
-  return JSON.stringify(result).slice(0, 140);
-};
 
 const ExecutionPanel = () => {
-  const { activeExecution, presence, cancelActiveExecution, executions } = useExecution();
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const { activeExecution, presence } = useExecution();
+  // Collapsed by default: details are opt-in. Dismissed hides the strip
+  // entirely until the NEXT execution arrives. Both are local UI state —
+  // neither touches execution, planner state, or the MCP runtime.
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [dismissedId, setDismissedId] = useState(null);
 
-  const progress = useMemo(() => {
-    const steps = activeExecution?.steps || [];
-    if (!steps.length) return 0;
-    const completed = steps.filter((step) => step.status === 'COMPLETED').length;
-    const failed = steps.filter((step) => step.status === 'FAILED').length;
-    return Math.round(((completed + failed * 0.5) / steps.length) * 100);
-  }, [activeExecution]);
+  const executionId = activeExecution?.executionId || null;
+  const steps = activeExecution?.steps || [];
+  const state = String(activeExecution?.status || 'PLANNED').toUpperCase();
+  const isRunning = state === 'RUNNING' || state === 'PLANNED';
 
-  const totalExecutions = executions?.length || 0;
-  const activeSteps = activeExecution?.steps || [];
-  const currentState = String(activeExecution?.status || 'PLANNED').toUpperCase();
-  const currentStatusLabel = currentState === 'BLOCKED' ? 'Blocked — insufficient credits' : presence;
+  // A new execution un-dismisses the strip (still collapsed — opt-in).
+  useEffect(() => {
+    if (executionId) setDismissedId((prev) => (prev === executionId ? prev : null));
+  }, [executionId]);
+
+  const summary = useMemo(() => {
+    if (!activeExecution) return 'No active execution';
+    if (isRunning) {
+      const tool = steps.find((s) => String(s.status || '').toUpperCase() === 'RUNNING')?.tool;
+      return tool ? `Using ${tool}…` : 'Using tools…';
+    }
+    const n = steps.length;
+    const label = state === 'FAILED' ? 'Failed' : state === 'BLOCKED' ? 'Blocked' : state === 'CANCELLED' ? 'Cancelled' : 'Completed';
+    return n ? `${label} · ${n} tool${n === 1 ? '' : 's'}` : label;
+  }, [activeExecution, isRunning, steps, state]);
+
+  if (!activeExecution || dismissedId === executionId) return null;
 
   return (
-    <Panel>
-      <Header type="button" onClick={() => setIsCollapsed((prev) => !prev)}>
-        <TitleGroup>
-          <Eyebrow>Realtime Execution</Eyebrow>
-          <Title>{activeExecution?.title || 'No active execution'}</Title>
-        </TitleGroup>
-        <Meta>
-          <StatusPill $status={currentState}>{currentStatusLabel}</StatusPill>
-          <ToggleArrow>{isCollapsed ? '▸' : '▾'}</ToggleArrow>
-        </Meta>
-      </Header>
+    <Strip aria-live="polite" aria-label="Tool execution status">
+      <StripHeader
+        type="button"
+        onClick={() => setIsExpanded((prev) => !prev)}
+        title={isExpanded ? 'Collapse execution details' : 'Expand execution details'}
+      >
+        <Dot $state={state} />
+        <StripText>{summary}</StripText>
+        <StripToggle>{isExpanded ? '▾' : '▸'}</StripToggle>
+        <DismissButton
+          type="button"
+          aria-label="Hide execution status"
+          title="Hide (does not stop execution)"
+          onClick={(e) => {
+            // Local hide only — presentation state, never execution state.
+            e.stopPropagation();
+            setDismissedId(executionId);
+            setIsExpanded(false);
+          }}
+        >
+          ×
+        </DismissButton>
+      </StripHeader>
 
-      {!isCollapsed && (
-        <Body>
-          <LiveLine>
-            {activeExecution ? (
-              <>
-                {currentStatusLabel} <span style={{ opacity: 0.8 }}>•</span> {activeSteps.length} step{activeSteps.length === 1 ? '' : 's'} in this run
-              </>
-            ) : (
-              'Awaiting a multi-step request.'
-            )}
-          </LiveLine>
-
-          <ProgressBar $progress={progress} />
-
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-            <div style={{ fontSize: 11, color: 'rgba(215,250,255,0.72)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              {totalExecutions} execution{totalExecutions === 1 ? '' : 's'} tracked
-            </div>
-            {activeExecution?.status === 'RUNNING' ? (
-              <CancelButton type="button" onClick={cancelActiveExecution}>
-                Cancel Execution
-              </CancelButton>
-            ) : null}
+      {isExpanded && (
+        <Details>
+          <div style={{ fontSize: 11, color: 'rgba(215,250,255,0.6)' }}>
+            {presence} • {steps.length} step{steps.length === 1 ? '' : 's'}
           </div>
-
-          <StepList>
-            {(activeSteps.length > 0 ? activeSteps : [{ id: 'empty', tool: 'Waiting for plan', status: 'PENDING' }]).map((step, index) => (
-              <StepItem key={step.id || index} $state={step.status || 'PENDING'}>
-                <Dot $state={step.status || 'PENDING'} />
-                <StepMain>
-                  <StepTitle>{step.tool || 'Step'}</StepTitle>
-                  <StepMeta>
-                    <span>{String(step.status || 'PENDING').toLowerCase()}</span>
-                    <span>{formatDuration(step.startedAt, step.finishedAt)}</span>
-                  </StepMeta>
-                  {buildPreview(step.result) ? <ResultPreview>{buildPreview(step.result)}</ResultPreview> : null}
-                </StepMain>
-                <StatusPill $status={String(step.status || 'PENDING').toUpperCase()}>{step.status || 'PENDING'}</StatusPill>
-              </StepItem>
-            ))}
-          </StepList>
-        </Body>
+          {(steps.length > 0 ? steps : [{ id: 'empty', tool: 'Waiting for plan', status: 'PENDING' }]).map((step, index) => (
+            <StepRow key={step.id || index}>
+              <StepName>{step.tool || 'Step'}</StepName>
+              <StepStatus>{String(step.status || 'PENDING').toLowerCase()}</StepStatus>
+            </StepRow>
+          ))}
+        </Details>
       )}
-    </Panel>
+    </Strip>
   );
 };
 

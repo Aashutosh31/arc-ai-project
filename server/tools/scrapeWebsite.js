@@ -1,7 +1,7 @@
 const cheerio = require('cheerio');
 
 module.exports = {
-    // 1. Mistral Function Calling Schema
+    // 1. Provider function-calling schema (Groq/Gemini compatible)
     schema: {
         type: "function",
         function: {
@@ -51,7 +51,7 @@ module.exports = {
                 return { success: false, message: "Could not extract readable text from this page. It might be a JavaScript-heavy web app." };
             }
 
-            // 🛑 SAFETY GUARD: Mistral has a memory limit. We'll truncate to ~40,000 characters.
+            // 🛑 SAFETY GUARD: providers have context limits. We'll truncate to ~40,000 characters.
             if (rawText.length > 40000) {
                 rawText = rawText.substring(0, 40000) + "\n...[Content truncated for length]";
             }

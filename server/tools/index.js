@@ -37,7 +37,7 @@ const loadTools = (dir) => {
 // Initialize the registry by scanning the current directory
 loadTools(__dirname);
 
-// Export the schemas specifically formatted for Mistral's API
+// Export the schemas formatted for the chat-completion providers (Groq/Gemini)
 const getSchemas = () => {
     return Object.values(tools).map(t => t.schema);
 };

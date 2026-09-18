@@ -194,7 +194,16 @@ class GroqProvider {
 
     if (hasTools) {
       params.tools = tools;
-      params.tool_choice = 'auto';
+      // Deterministic recovery forcing (MCP action enforcement): when the
+      // runtime has identified one unambiguous required tool, the model must
+      // call exactly it. Standard OpenAI tool_choice shape, never invented.
+      // Defensive: an unknown name falls back to 'auto' so forcing can never
+      // produce a new "not in request.tools" rejection.
+      const forced = typeof request.forcedTool === 'string' ? request.forcedTool : '';
+      const offered = new Set(tools.map((t) => t?.function?.name).filter(Boolean));
+      params.tool_choice = (forced && offered.has(forced))
+        ? { type: 'function', function: { name: forced } }
+        : 'auto';
     }
 
     if (typeof request.temperature === 'number') {

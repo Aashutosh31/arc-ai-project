@@ -133,6 +133,27 @@ function coerceArgValue(def, raw) {
   return { ok: true, value: typeof raw === 'string' ? raw : String(raw) };
 }
 
+// Fill missing keys from schema-declared defaults (generic JSON Schema
+// semantics, never vendor logic): when a server declares
+// `default: 50` for a required param, the server itself sanctions the
+// omission — sending the declared value explicitly is obedience, not
+// invention. Wrong-typed defaults are left for validateArgs to reject.
+// Returns a NEW object; never throws.
+function applyParamDefaults(schema, args) {
+  try {
+    const present = (args && typeof args === 'object') ? { ...args } : {};
+    for (const { name, def } of requiredParams(schema)) {
+      if (!isMissingValue(present[name])) continue;
+      const d = (def && typeof def === 'object') ? def : {};
+      if (d.default === undefined || d.default === null) continue;
+      present[name] = d.default;
+    }
+    return present;
+  } catch {
+    return (args && typeof args === 'object') ? { ...args } : {};
+  }
+}
+
 // Validate a full args object: required presence + per-value coercion.
 // Returns { ok, errors, coerced } — coerced holds canonical values
 // (enum canonical case, real booleans/numbers) for everything valid.
@@ -238,12 +259,14 @@ function buildClarification(toolName, missing, captured) {
   return text;
 }
 
-function createPending(toolName, args, schema, now = Date.now()) {
+function createPending(toolName, args, schema, now = Date.now(), opts = {}) {
   const safeArgs = (args && typeof args === 'object') ? { ...args } : {};
+  const updateMode = Boolean(opts && opts.updateMode);
   return {
     toolName,
     args: safeArgs,
-    missing: missingRequired(schema, safeArgs),
+    missing: missingEffective(schema, safeArgs, { updateMode }),
+    updateMode,
     rounds: 0,
     updatedAt: Number(now) || Date.now()
   };
@@ -266,13 +289,16 @@ function isCancelText(text) {
 //             persist `pending`.
 //   abandon — user cancelled, record expired, or rounds exhausted; caller
 //             must clear and continue the normal flow.
-function advancePending(pending, text, schema, now = Date.now()) {
+function advancePending(pending, text, schema, now = Date.now(), opts = {}) {
   if (!pending || typeof pending.toolName !== 'string') return { action: 'abandon', reason: 'no-pending' };
   if (isCancelText(text)) return { action: 'abandon', reason: 'cancelled' };
   if (isExpired(pending, now)) return { action: 'abandon', reason: 'expired' };
   if (Number(pending.rounds) >= MAX_CLARIFICATION_ROUNDS) return { action: 'abandon', reason: 'rounds-exhausted' };
 
-  const params = requiredParams(schema);
+  const updateMode = Boolean(
+    (pending && typeof pending.updateMode === 'boolean') ? pending.updateMode : (opts && opts.updateMode)
+  );
+  const params = effectiveRequiredParams(schema, { updateMode });
   const byName = new Map(params.map((p) => [p.name, p]));
   const stillMissing = (Array.isArray(pending.missing) ? pending.missing : []).filter((n) => byName.has(n));
   const extracted = extractArgValues(text, stillMissing.map((n) => byName.get(n)));
@@ -297,7 +323,7 @@ function advancePending(pending, text, schema, now = Date.now()) {
     else if (soleExtraction) merged[name] = extracted[name];
   }
 
-  const validation = validateArgs(schema, merged);
+  const validation = validateArgsEffective(schema, merged, { updateMode });
   const missing = validation.errors.map((e) => e.name);
   const at = Number(now) || Date.now();
 
@@ -321,6 +347,73 @@ function advancePending(pending, text, schema, now = Date.now()) {
   };
 }
 
+// Conditional creation requirements (generic upsert semantics, never
+// vendor/tool names): some mutation schemas declare NO schema-level
+// required params, yet their parameter descriptions state "required when
+// creating" — create-or-update tools where supplying the entity id selects
+// update mode and omitting it selects create mode. effectiveRequiredParams
+// returns schema.required PLUS those conditional params in create mode;
+// update mode returns schema.required only. Schemas without the signal are
+// untouched (identical to requiredParams), so native tools and existing
+// fixtures behave exactly as before.
+const CREATE_REQUIRED_RE = /required when creating/i;
+
+function isCreateRequiredParam(def) {
+  try {
+    const d = (def && typeof def === 'object') ? def : {};
+    for (const key of ['description', 'title']) {
+      const t = d[key];
+      if (typeof t === 'string' && CREATE_REQUIRED_RE.test(t)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function effectiveRequiredParams(schema, { updateMode = false } = {}) {
+  const base = requiredParams(schema);
+  if (updateMode) return base;
+  try {
+    const params = schema?.function?.parameters || schema?.parameters || {};
+    const props = (params.properties && typeof params.properties === 'object') ? params.properties : {};
+    const have = new Set(base.map((p) => p.name));
+    const extra = [];
+    for (const [name, def] of Object.entries(props)) {
+      if (typeof name !== 'string' || !name || have.has(name)) continue;
+      if (isCreateRequiredParam(def)) {
+        extra.push({ name, def: (def && typeof def === 'object') ? def : {} });
+      }
+    }
+    return extra.length ? [...base, ...extra] : base;
+  } catch {
+    return base;
+  }
+}
+
+function missingEffective(schema, args, opts = {}) {
+  const present = (args && typeof args === 'object') ? args : {};
+  return effectiveRequiredParams(schema, opts)
+    .filter(({ name }) => isMissingValue(present[name]))
+    .map(({ name }) => name);
+}
+
+// Mode-aware validation: base schema validation PLUS conditional
+// creation requirements. Identical to validateArgs for every schema
+// without the "required when creating" signal.
+function validateArgsEffective(schema, args, opts = {}) {
+  const base = validateArgs(schema, args);
+  try {
+    const missing = missingEffective(schema, (base && base.coerced) || args, opts);
+    const seen = new Set((base.errors || []).map((e) => e.name));
+    const extra = missing.filter((n) => !seen.has(n)).map((name) => ({ name, reason: 'required' }));
+    if (!extra.length) return base;
+    return { ok: false, errors: [...(base.errors || []), ...extra], coerced: base.coerced };
+  } catch {
+    return base;
+  }
+}
+
 module.exports = {
   MAX_CLARIFICATION_ROUNDS,
   PENDING_TTL_MS,
@@ -328,6 +421,10 @@ module.exports = {
   isIdentifierParam,
   extractIdentifierValue,
   requiredParams,
+  effectiveRequiredParams,
+  missingEffective,
+  validateArgsEffective,
+  applyParamDefaults,
   missingRequired,
   coerceArgValue,
   validateArgs,
