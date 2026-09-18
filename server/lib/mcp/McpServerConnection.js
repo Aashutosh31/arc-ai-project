@@ -49,6 +49,10 @@ class McpServerConnection {
     this._connectingPromise = null;
     this._onListChanged = typeof onListChanged === 'function' ? onListChanged : null;
     this._connectStartAt = 0;
+    // Discovery state (independent of transport state — see below).
+    this._discoveryStatus = 'pending'; // pending | ok | failed | idle
+    this._lastDiscoveryError = null;   // truncated safe message, never bodies
+    this._discoveryAuthRequired = false;
   }
 
   // --- public API ------------------------------------------------------------
@@ -94,6 +98,16 @@ class McpServerConnection {
   get capabilities() { return this._capabilities; }
   get tools() { return this._tools; }
   get toolEntries() { return this._toolEntries; }
+  // Discovery state: transport CONNECTED does not imply usable tools.
+  // 'pending' (never attempted) | 'ok' | 'failed' | 'idle' (torn down).
+  get discoveryStatus() { return this._discoveryStatus; }
+  // Truncated failure message for operator diagnostics (no bodies/tokens).
+  get lastDiscoveryError() { return this._lastDiscoveryError; }
+  // True when discovery itself failed with an auth-flavored error (401 /
+  // UnauthorizedError / OAuth). Only genuine authentication failures set
+  // this — transport quirks and upstream failures leave it false so retry
+  // never triggers a spurious authorize-again loop.
+  get discoveryAuthRequired() { return this._discoveryAuthRequired === true; }
   get wireTaken() { return this._wireTaken; }
   get canonicalTaken() { return this._canonicalTaken; }
 
@@ -189,10 +203,24 @@ class McpServerConnection {
       toolList.push(...tools);
     } catch (raw) {
       const err = toMcpToolError(raw, { serverId: this.config.id });
+      // Discovery failure is recorded as STATE, not swallowed silently:
+      // transport may be CONNECTED while no usable tools exist. Only genuine
+      // authentication failures flag discoveryAuthRequired (retry must not
+      // launch spurious authorize-again loops for transport/upstream quirks).
+      this._discoveryStatus = 'failed';
+      this._lastDiscoveryError = String(err?.message || raw?.message || raw || 'discovery failed').slice(0, 300);
+      try {
+        const { isOAuthAuthorizationRequired } = require('./oauthProvider');
+        this._discoveryAuthRequired =
+          (this.config.auth && this.config.auth.type === 'oauth') &&
+          (isOAuthAuthorizationRequired(raw) || isOAuthAuthorizationRequired(err));
+      } catch {
+        this._discoveryAuthRequired = false;
+      }
       logger.warn(logger.LOG_EVENTS.CONNECTION_FAILED, {
         configId: this.config.id,
         slug: this.config.slug,
-        reason: `Tool discovery failed: ${err.message}`
+        reason: `Tool discovery failed: ${this._lastDiscoveryError}`
       });
       return;
     }
@@ -224,6 +252,10 @@ class McpServerConnection {
         originalToolName: mcpTool.name,
         description: mcpTool.description || '',
         inputSchema: mcpTool.inputSchema || { type: 'object', properties: {}, required: [] },
+        // MCP behavior hints (readOnlyHint/destructiveHint/...) travel with
+        // the entry so capability planning can read them generically. The
+        // ARC schema sent to providers never carries them (see withMetadata).
+        annotations: adapter.sanitizeAnnotations(mcpTool.annotations),
         keywords: extractKeywords(mcpTool)
       });
 
@@ -243,6 +275,9 @@ class McpServerConnection {
     this._toolEntries = entries;
     this._wireTaken = wireTaken;
     this._canonicalTaken = canonicalTaken;
+    this._discoveryStatus = 'ok';
+    this._lastDiscoveryError = null;
+    this._discoveryAuthRequired = false;
 
     logger.log(logger.LOG_EVENTS.TOOLS_DISCOVERED, {
       configId: config.id,
@@ -250,6 +285,23 @@ class McpServerConnection {
       toolCount: tools.length,
       toolNames: tools.map((t) => t?.function?.name).filter(Boolean)
     });
+    // Truncation visibility: when the per-server cap bites, record exactly
+    // which tools were dropped — a silently decimated pool is otherwise
+    // indistinguishable from a server that never exposed the tool.
+    try {
+      const dropped = toolList
+        .filter((t) => t && typeof t.name === 'string' && t.name)
+        .slice(tools.length)
+        .map((t) => t.name);
+      if (dropped.length) {
+        logger.warn(logger.LOG_EVENTS.TOOLS_DISCOVERED, {
+          configId: config.id,
+          slug: config.slug,
+          truncated: dropped.length,
+          droppedToolNames: dropped
+        });
+      }
+    } catch { /* diagnostics only */ }
   }
 
   _registerListChangedHandler() {
@@ -279,6 +331,9 @@ class McpServerConnection {
     this._toolEntries.clear();
     this._wireTaken.clear();
     this._canonicalTaken.clear();
+    this._discoveryStatus = 'idle';
+    this._lastDiscoveryError = null;
+    this._discoveryAuthRequired = false;
   }
 }
 

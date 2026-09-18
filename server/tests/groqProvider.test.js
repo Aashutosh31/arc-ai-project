@@ -377,7 +377,7 @@ check('routing without GROQ falls back to existing providers', () => {
     tools: [],
     attachments: []
   });
-  assert.strictEqual(providerId, 'mistral');
+  assert.strictEqual(providerId, 'gemini');
   if (prev !== undefined) process.env.GROQ_API_KEY = prev;
 });
 

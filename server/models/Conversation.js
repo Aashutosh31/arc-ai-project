@@ -39,6 +39,22 @@ const ConversationSchema = new mongoose.Schema({
     type: Object,
     default: null
   },
+  // Bounded working/agent state: compact structured references for the live
+  // task ({ activeMedia, activeSearch, activeResource, activeTask,
+  // pendingTool }). Titles/ids/queries and bounded result refs only — never
+  // giant tool outputs verbatim. Rebuilt each turn from recent tool activity
+  // so follow-ups ("it", "that", "the second one") resolve naturally.
+  // Failure-silent: absence degrades to history-only context, never an error.
+  workingState: {
+    type: Object,
+    default: null
+  },
+  // Bounded rolling summary of older turns that fell outside the recent
+  // provider window. Background only — never a substitute for recent turns.
+  conversationSummary: {
+    type: String,
+    default: ''
+  },
   archived: {
     type: Boolean,
     default: false

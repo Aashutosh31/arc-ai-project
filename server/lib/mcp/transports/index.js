@@ -11,6 +11,7 @@
 const { StdioClientTransport, getDefaultEnvironment } = require('@modelcontextprotocol/client/stdio');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/client');
 const { toMcpToolError, CATEGORIES } = require('../errors');
+const { createEnvelopeTolerantFetch } = require('./discoveryEnvelope');
 
 const readEnv = (name) => process.env[name];
 
@@ -61,7 +62,15 @@ const createStreamableHTTPTransport = (config, { authProvider = null } = {}) => 
     });
   }
   const requestInit = { headers: buildAuthHeaders(config) };
-  const options = { requestInit };
+  // Generic discovery envelope tolerance: some providers answer tools/list
+  // with a non-2xx status while the body is a valid JSON-RPC success
+  // envelope. The wrapper presents exactly those as 200 so the SDK parser
+  // can proceed; everything else (401/auth, JSON-RPC errors, malformed
+  // bodies, executions) passes through untouched.
+  const options = {
+    requestInit,
+    fetch: createEnvelopeTolerantFetch({ configId: config.id, slug: config.slug })
+  };
   // OAuth (Phase 3): the SDK adapts an OAuthClientProvider automatically —
   // bearer injection, 401 refresh, and ONE controlled retry. Static header
   // auth above is untouched and keeps working.

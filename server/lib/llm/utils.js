@@ -6,7 +6,7 @@ const safeString = (value) => {
 };
 
 // Replace lone surrogates (unpaired \uD800-\uDFFF) with U+FFFD so the result
-// is well-formed Unicode. Providers (Mistral, Gemini) strictly validate JSON
+// is well-formed Unicode. Providers (Groq, Gemini) strictly validate JSON
 // bodies as UTF-8: a single lone surrogate — e.g. from slicing an emoji in
 // half when truncating snippets, or pasted/scraped text — makes the whole
 // request fail with HTTP 400 ("Invalid JSON payload"). Stored data is never
@@ -131,17 +131,6 @@ const normalizeGeminiToolCalls = (response) => {
   }));
 };
 
-const normalizeMistralToolCalls = (message) => {
-  const toolCalls = message?.toolCalls || message?.tool_calls || [];
-  return toolCalls.map((toolCall, index) => ({
-    id: toolCall?.id || `mistral-tool-call-${index}`,
-    function: {
-      name: toolCall?.function?.name,
-      arguments: toolCall?.function?.arguments || {}
-    }
-  }));
-};
-
 const normalizeGroqToolCalls = (message) => {
   const toolCalls = message?.toolCalls || message?.tool_calls || [];
   return toolCalls.map((toolCall, index) => {
@@ -167,7 +156,7 @@ const buildProviderContinuationMessages = ({
   messages = [],
   assistantMessage = null,
   toolResults = [],
-  provider = 'mistral'
+  provider = 'groq'
 } = {}) => {
   const sourceAssistantMessage = assistantMessage || [...messages].reverse().find(isAssistantToolCallMessage) || null;
   const sourceToolCalls = Array.isArray(sourceAssistantMessage?.toolCalls)
@@ -333,7 +322,7 @@ const classifyProviderFailure = (error) => {
 
   // Treat API key errors (400/401) as transient to trigger provider fallback.
   // OpenAI-compatible providers (Groq) report invalid keys as 401
-  // ("Invalid API Key", "Unauthorized"); Mistral uses 401 "Unauthorized".
+  // ("Invalid API Key", "Unauthorized").
   // Extending to 401 lets these providers fail over to a healthy backup
   // instead of hard-failing.
   const isApiKeyError =
@@ -344,7 +333,7 @@ const classifyProviderFailure = (error) => {
       message.includes('invalid api key') ||
       message.includes('authentication'));
 
-  // Provider-side model/config rejections (e.g. Mistral "invalid_model"):
+  // Provider-side model/config rejections (e.g. "invalid_model"):
   // the request itself may be fine, so a healthy backup provider deserves a
   // chance. Never treated as transient-retries against the SAME provider —
   // only as cross-provider failover. Matched narrowly to avoid masking
@@ -366,7 +355,8 @@ const classifyProviderFailure = (error) => {
 
 // Normalize provider SDK errors to a common shape WITHOUT touching secrets.
 // Different SDKs report HTTP status differently (@google/genai uses `.status`,
-// mistralai uses `.statusCode`). After this, `error.statusCode` is reliable
+// OpenAI-compatible SDKs use `.status`). After this, `error.statusCode` is
+// reliable
 // for classification, and `error.providerCode` carries the short machine tag
 // (e.g. API_KEY_INVALID, invalid_model) when one is detectable.
 const normalizeProviderError = (error, providerId = null) => {
@@ -423,7 +413,6 @@ module.exports = {
   extractTextFromContent,
   inferTaskProfile,
   normalizeGeminiToolCalls,
-  normalizeMistralToolCalls,
   normalizeGroqToolCalls,
   normalizeMessages,
   buildProviderContinuationMessages,

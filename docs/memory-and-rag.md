@@ -11,9 +11,9 @@ ARC-AI combines two persistence layers:
 | Layer | Backend | Purpose |
 | --- | --- | --- |
 | **Structured memory** | MongoDB (`AIMemory`, `UserFact`) | Long-term, queryable records; user facts; pinned/editable entries |
-| **Semantic memory** | Pinecone vectors + Mistral `mistral-embed` | Similarity retrieval over conversation snippets |
+| **Semantic memory** | Pinecone vectors + Gemini `gemini-embedding-001` | Similarity retrieval over conversation snippets |
 
-- **Embeddings** — `embeddingService` (Mistral `mistral-embed`) with an SHA1-based LRU cache (max ~200 entries), text truncated/normalized before embedding.
+- **Embeddings** — `embeddingService` (Gemini `gemini-embedding-001`) with an SHA1-based LRU cache (max ~200 entries), text truncated/normalized before embedding.
 - **Vector writes** — `workspaceIndexService.upsertTextVector()` is called *in the background* after exchanges; never blocks streaming.
 
 ---

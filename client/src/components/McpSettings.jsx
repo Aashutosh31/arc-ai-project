@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { Button, Input, Textarea, Card, Badge, Dialog } from './ui';
 import mcpApi from '../lib/mcpApi';
+import { getOAuthUiState, getOAuthStatusLine, getConnectionUiState } from '../lib/mcpOAuthUi';
 
 const STATUS_META = {
   connected: { tone: 'success', dot: 'bg-success', label: 'Connected' },
@@ -106,7 +107,12 @@ const Field = ({ label, hint, children }) => (
 
 // Safe OAuth metadata line. Tokens, codes, and secrets are never rendered —
 // the API only exposes issuers, scopes, and expiry flags.
-const OAuthStatusLine = ({ status, onReload }) => {
+//
+// Transport/discovery/authorization are independent: a server may be
+// CONNECTED with tools discovered while still unauthorized (open discovery,
+// gated tool calls), so the copy distinguishes "Connected — authorization
+// required" from the never-connected case. Generic — no vendor checks.
+const OAuthStatusLine = ({ status, onReload, connected = false, authType = 'oauth' }) => {
   if (status === undefined) {
     return (
       <p className="text-[11px] text-muted-foreground mt-1">
@@ -119,9 +125,10 @@ const OAuthStatusLine = ({ status, onReload }) => {
     return <p className="text-[11px] text-muted-foreground mt-1">OAuth authorization is private to the owning account.</p>;
   }
   if (!status.authorized) {
+    const line = getOAuthStatusLine({ authType, connectionState: connected ? 'connected' : 'disconnected', oauthStatus: status });
     return (
       <p className="text-[11px] text-warning mt-1">
-        Authorization required — connect, then authorize in your browser.
+        {line.text || 'Authorization required — connect, then authorize in your browser.'}
       </p>
     );
   }
@@ -170,11 +177,16 @@ const McpSettings = ({ isGuest }) => {
           ok: result === 'success',
           server: params.get('server'),
           detail: params.get('reason') || (result === 'success' ? `${params.get('tools') || '0'} tools discovered` : 'authorization failed'),
+          // Authorization and discovery are independent: success + failed
+          // discovery means the credential is stored but tools could not be
+          // loaded — Retry reuses it, never relaunches browser OAuth.
+          discoveryFailed: result === 'success' && params.get('discovery') === 'failed',
         });
         params.delete('mcp_oauth');
         params.delete('server');
         params.delete('tools');
         params.delete('reason');
+        params.delete('discovery');
         const rest = params.toString();
         window.history.replaceState({}, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
       }
@@ -336,9 +348,22 @@ const McpSettings = ({ isGuest }) => {
         await mcpApi.forgetMcpOAuth(id);
         setOauthStatus((s) => ({ ...s, [id]: null }));
       } else if (action === 'refresh') {
-        const payload = await mcpApi.refreshMcpServer(id);
-        setToolsCache((c) => ({ ...c, [id]: payload }));
-        setToolsOpen((o) => ({ ...o, [id]: true }));
+        try {
+          const payload = await mcpApi.refreshMcpServer(id);
+          setToolsCache((c) => ({ ...c, [id]: payload }));
+          setToolsOpen((o) => ({ ...o, [id]: true }));
+        } catch (refreshErr) {
+          // Refresh of an OAuth server with dead/stale tokens answers
+          // 401 + authRequired (same shape as Connect) — surface the
+          // [Authorize] path rather than a dead-end toast.
+          if (refreshErr && (refreshErr.status === 401 || refreshErr.authRequired || refreshErr.category === 'mcp.auth_required') && server?.auth?.type === 'oauth') {
+            await loadOAuthStatus(id);
+            setError('Authorization required — click Authorize to connect this server.');
+            await refresh();
+            return;
+          }
+          throw refreshErr;
+        }
       } else if (action === 'toggle') {
         await mcpApi.updateMcpServer(id, { enabled: !(server.enabled !== false) });
       }
@@ -410,7 +435,9 @@ const McpSettings = ({ isGuest }) => {
           role="status"
         >
           {oauthNotice.ok ? 'OAuth authorization succeeded' : 'OAuth authorization failed'}
-          {oauthNotice.detail ? ` — ${oauthNotice.detail}` : ''}
+          {oauthNotice.discoveryFailed
+            ? ' — the service tools could not be loaded. Use Refresh on the server card to retry (no need to authorize again).'
+            : (oauthNotice.detail ? ` — ${oauthNotice.detail}` : '')}
           <button type="button" className="ml-2 underline" onClick={() => setOauthNotice(null)}>Dismiss</button>
         </div>
       ) : null}
@@ -467,19 +494,54 @@ const McpSettings = ({ isGuest }) => {
                       <OAuthStatusLine
                         status={oauthStatus[id]}
                         onReload={() => loadOAuthStatus(id)}
+                        connected={meta.label === 'Connected'}
+                        authType={server?.auth?.type}
                       />
                     ) : null}
+                    {(() => {
+                      // User-first readiness: transport CONNECTED with failed
+                      // discovery is not a ready integration. Retry reuses the
+                      // stored credential — never browser OAuth, never
+                      // re-authorize unless the credential itself is invalid.
+                      const readiness = getConnectionUiState({
+                        connectionState: server?.status?.connectionState || 'disconnected',
+                        toolCount,
+                        discoveryStatus: server?.status?.discoveryStatus || 'unknown',
+                        oauthStatus: oauthStatus[id],
+                        authType: server?.auth?.type,
+                      });
+                      return readiness === 'DISCOVERY_FAILED' ? (
+                        <p className="text-[11px] text-warning mt-1">
+                          Connected — the service tools could not be loaded.{' '}
+                          <button type="button" className="underline" onClick={() => runAction(server, 'refresh')}>
+                            Retry
+                          </button>
+                        </p>
+                      ) : null;
+                    })()}
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <Button size="sm" variant="ghost" onClick={() => toggleTools(server)} disabled={busy('tools')}>
                       {toolsOpen[id] ? 'Hide tools' : 'Tools'}
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => openEdit(server)}>Configure</Button>
-                    {server?.auth?.type === 'oauth' && !(meta.label === 'Connected' || toolCount > 0) ? (
-                      <Button size="sm" variant="primary" onClick={() => runAction(server, 'authorize')} disabled={!enabled || busy('authorize')}>
-                        {busy('authorize') ? '…' : (oauthStatus[id]?.authorized || oauthStatus[id]?.expired ? 'Reauthorize' : 'Authorize')}
-                      </Button>
-                    ) : null}
+                    {(() => {
+                      // Authorize visibility is driven by the AUTHORIZATION signal,
+                      // never by transport/discovery: an already-connected but
+                      // unauthorized OAuth server must still offer Authorize
+                      // (no disconnect first). Generic — no vendor checks.
+                      const oauthUi = getOAuthUiState({
+                        authType: server?.auth?.type,
+                        connectionState: server?.status?.connectionState || 'disconnected',
+                        toolCount,
+                        oauthStatus: oauthStatus[id],
+                      });
+                      return oauthUi.showAuthorize ? (
+                        <Button size="sm" variant="primary" onClick={() => runAction(server, 'authorize')} disabled={!enabled || busy('authorize')}>
+                          {busy('authorize') ? '…' : oauthUi.authorizeLabel}
+                        </Button>
+                      ) : null;
+                    })()}
                     {server?.auth?.type === 'oauth' && (oauthStatus[id]?.authorized || oauthStatus[id]?.expired) ? (
                       <Button size="sm" variant="ghost" onClick={() => runAction(server, 'forget')} disabled={busy('forget')}>
                         {busy('forget') ? '…' : 'Forget authorization'}

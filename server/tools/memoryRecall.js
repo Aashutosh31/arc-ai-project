@@ -1,5 +1,6 @@
 const { Pinecone } = require('@pinecone-database/pinecone');
 const { getNamespace } = require('../services/workspaceIndexService');
+const { getEmbedding } = require('../services/embeddingService');
 
 module.exports = {
     schema: {
@@ -28,21 +29,11 @@ module.exports = {
         uid = String(uid);
 
         try {
-            // 1. Convert the Search Query into a Vector using Mistral
-            const embedRes = await fetch('https://api.mistral.ai/v1/embeddings', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${process.env.MISTRAL_API_KEY}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    model: 'mistral-embed',
-                    input: [args.searchQuery]
-                })
-            });
-
-            const embedData = await embedRes.json();
-            const queryVector = embedData.data[0].embedding;
+            // 1. Convert the Search Query into a Vector (shared embedding provider)
+            const queryVector = await getEmbedding(args.searchQuery);
+            if (!queryVector) {
+                return { success: true, data: "No relevant memories found in the database." };
+            }
 
             // 2. Search Pinecone for the 3 most semantically similar memories
             const pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
@@ -60,7 +51,7 @@ module.exports = {
                 return { success: true, data: "No relevant memories found in the database." };
             }
 
-            // 3. Compile the memories into a readable format for Mistral to interpret
+            // 3. Compile the memories into a readable format for the provider to interpret
             let compiledMemories = queryResponse.matches.map((match, i) => {
                 return `Memory ${i + 1} (Match Score: ${(match.score * 100).toFixed(1)}%):\nText: ${match.metadata.text}\nTags: ${match.metadata.tags}`;
             }).join('\n\n');

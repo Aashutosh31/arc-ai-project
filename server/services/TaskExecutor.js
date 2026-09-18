@@ -40,7 +40,12 @@ class TaskExecutor {
                     tool = await McpToolSource.resolveTool(toolName, {
                         workspaceId: executionOptions?.workspaceId || null,
                         isGuest: isGuestActorId(userId),
-                        signal: executionOptions?.signal || null
+                        signal: executionOptions?.signal || null,
+                        // Execution fallback reconnects carry the silent
+                        // OAuth provider (same as schema supply): stored
+                        // credentials survive restarts, live connections do
+                        // not. Never interactive; failures stay classified.
+                        userId
                     });
                 } catch (err) {
                     return {

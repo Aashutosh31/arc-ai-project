@@ -38,7 +38,7 @@ const FeatureLink = styled(Link)`
 const FEATURES = [
   {
     title: 'Memory (RAG)',
-    text: 'Long-term facts are embedded with Mistral and indexed in Pinecone, isolated per workspace, so the assistant recalls preferences and context with semantic search instead of forgetting after every reply.',
+    text: 'Long-term facts are embedded with Gemini and indexed in Pinecone, isolated per workspace, so the assistant recalls preferences and context with semantic search instead of forgetting after every reply.',
     to: '/features/rag-memory',
     label: 'Learn about memory',
   },
@@ -83,7 +83,7 @@ const Features = () => (
     heroLead="ARC-AI combines long-term memory, live research, automation, multimodal perception, and action-taking tools behind a single Socket.IO pipeline. Each capability is built to be genuinely useful, not just a demo."
     stats={[
       { value: 'RAG + Pinecone', label: 'Personalized context that persists across conversations and workspaces.' },
-      { value: 'Gemini + Mistral', label: 'Intelligent provider routing picks reasoning power or speed per task.' },
+      { value: 'Groq + Gemini', label: 'Intelligent provider routing picks reasoning power or speed per task.' },
       { value: 'Socket.IO pipeline', label: 'Hybrid REST + WebSocket runtime keeps every interaction responsive.' },
     ]}
     ctaTitle="See ARC-AI in action"
@@ -127,7 +127,7 @@ const Features = () => (
         <TechChip>MongoDB Atlas</TechChip>
         <TechChip>Pinecone</TechChip>
         <TechChip>Gemini</TechChip>
-        <TechChip>Mistral AI</TechChip>
+        <TechChip>Groq</TechChip>
         <TechChip>Pixtral</TechChip>
       </TechRow>
     </Section>

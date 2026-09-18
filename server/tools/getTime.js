@@ -1,5 +1,5 @@
 module.exports = {
-    // 1. Mistral Function Calling Schema
+    // 1. Provider function-calling schema (Groq/Gemini compatible)
     schema: {
         type: "function",
         function: {
@@ -16,7 +16,7 @@ module.exports = {
     // 2. Execution Logic
     execute: async (args, context) => {
         const now = new Date();
-        // Return structured data back to Mistral
+        // Return structured data back to the provider
         return {
             success: true,
             time: now.toLocaleTimeString(),

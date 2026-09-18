@@ -80,9 +80,25 @@ class McpManager {
 
   // ---- tool resolution (TaskExecutor fallback entry point) ----
 
+  // Automatic reconnect helper: explicit provider wins, else derive the
+  // silent OAuth provider for OAuth configs (null otherwise). Lazy require
+  // keeps token storage out of the module graph until actually needed.
+  _autoAuthProvider(config, authProvider, userId) {
+    if (authProvider) return authProvider;
+    try {
+      return require('./oauthProvider').silentProviderForConfig(config, userId);
+    } catch {
+      return null;
+    }
+  }
+
   // Resolves a wire tool name used by the model back to an executable
   // ({ schema, execute }) OR null when it is a native tool or unknown.
-  async resolveTool(wireName, { workspaceId = null, isGuest = false, signal = null, authProvider = null } = {}) {
+  // Automatic reconnects carry the silent OAuth provider (same behavior as
+  // /connect, /refresh and schema supply): a caller-supplied authProvider
+  // wins, otherwise one is derived from userId for OAuth configs, else null
+  // (static/header/stdio untouched). Never interactive.
+  async resolveTool(wireName, { workspaceId = null, isGuest = false, signal = null, authProvider = null, userId = null } = {}) {
     let entry = this._registry.toolByWireName(wireName);
     if (!entry) {
       // Fallback: the registry may lag a live connection (late connect or
@@ -102,7 +118,10 @@ class McpManager {
         try {
           const cfg = this._registry.configForSlug(decoded.slug);
           if (cfg && cfg.enabled !== false && this._configVisibleTo(cfg, { workspaceId, isGuest })) {
-            await this.ensureConnected(cfg, { signal });
+            await this.ensureConnected(cfg, {
+              signal,
+              authProvider: this._autoAuthProvider(cfg, authProvider, userId)
+            });
           }
         } catch {
           // Discovery failed — leave entry null; the caller degrades gracefully.
@@ -190,7 +209,10 @@ return { schema: null, execute: async () => ({ success: false, error: err.messag
       }
     }
 
-    const conn = await this.ensureConnected(config, { signal, authProvider });
+    const conn = await this.ensureConnected(config, {
+      signal,
+      authProvider: this._autoAuthProvider(config, authProvider, userId)
+    });
     const toolEntry = conn.getToolEntry(entry.originalToolName);
     if (!toolEntry) return null;
 

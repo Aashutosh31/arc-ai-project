@@ -70,11 +70,28 @@ class GeminiProvider {
     const toolDeclarations = toGeminiTools(request.tools || []);
     if (toolDeclarations.length > 0) {
       config.tools = toolDeclarations;
-      config.toolConfig = {
-        functionCallingConfig: {
-          mode: FunctionCallingConfigMode.AUTO
+      // Deterministic recovery forcing (MCP action enforcement): one
+      // unambiguous required tool → constrain the model to it. Standard
+      // Gemini function-calling config; unknown names stay AUTO so forcing
+      // can never produce a new tool-mismatch rejection.
+      let forced = '';
+      try {
+        forced = typeof request.forcedTool === 'string' ? request.forcedTool : '';
+        const offered = new Set((request.tools || []).map((t) => t?.function?.name).filter(Boolean));
+        if (!offered.has(forced)) forced = '';
+      } catch { forced = ''; }
+      config.toolConfig = forced
+        ? {
+          functionCallingConfig: {
+            mode: FunctionCallingConfigMode.ANY,
+            allowedFunctionNames: [forced]
+          }
         }
-      };
+        : {
+          functionCallingConfig: {
+            mode: FunctionCallingConfigMode.AUTO
+          }
+        };
     }
 
     return config;

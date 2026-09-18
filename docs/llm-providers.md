@@ -22,11 +22,9 @@ A provider exposes: `generate(request)`, `canHandleRequest(request)`, `isAvailab
 | --- | --- | --- | --- | --- | --- | --- |
 | **Gemini** | `gemini` | 100 | ✅ | ✅ | ✅ | ✅ |
 | **Groq** | `groq` | 90 | ✅ | ✅ | ✅ | ❌ |
-| **Mistral** | `mistral` | 80 | ✅ | ✅ | ✅ | ❌ |
 
-- **Groq** uses the OpenAI SDK against `https://api.groq.com/openai/v1`. Its default model `openai/gpt-oss-120b` is **text-only**; image attachments are rejected explicitly. It supports streaming tool-call delta assembly.
-- **Gemini** is fully multimodal, uses `@google/genai`, and also performs server-side voice transcription (`transcribeAudio`) and optional server TTS.
-- **Mistral** passes tools through with `toolChoice: 'auto'`; its adapter declares `multimodal: false` even though a `MISTRAL_VISION_MODEL` (Pixtral) is configured — **images route to Gemini**, never Mistral.
+- **Groq** (active provider) uses the OpenAI SDK against `https://api.groq.com/openai/v1`. Its default model `openai/gpt-oss-120b` is **text-only**; image attachments are rejected explicitly. It supports streaming tool-call delta assembly and forced single-tool selection (`tool_choice`) for MCP action enforcement.
+- **Gemini** is fully multimodal, uses `@google/genai`, and also performs server-side voice transcription (`transcribeAudio`), optional server TTS, and workspace embedding generation (`gemini-embedding-001`).
 
 > Capabilities are declared in code and enforced by `canHandleRequest()` + router-level filtering. Not every provider is guaranteed identical tool behavior; the router only guarantees that unsupported capabilities never reach a provider.
 
@@ -40,10 +38,10 @@ A provider exposes: `generate(request)`, `canHandleRequest(request)`, `isAvailab
 2. **Chooses the primary** (`choosePrimaryProvider`):
    - `reasoning` / `tool_orchestration` / `long_context` → **Groq** (else Gemini)
    - `multimodal` → **Gemini**
-   - `lightweight` / `memory_compression` → **Groq** (else Mistral)
-   - default → **Groq** (else Mistral)
+   - `lightweight` / `memory_compression` → **Groq** (else Gemini)
+   - default → **Groq** (else Gemini)
    - If `LLM_PRIMARY_PROVIDER` is set to a concrete provider, that provider is used directly; `LLM_FORCE_PROVIDER` hard-forces one provider.
-3. **Builds the provider order** (`buildProviderOrder`) — forced → request `preferredProvider` → primary → every other available provider, **skipping any provider that cannot handle the request** (e.g. Groq/Mistral on image requests).
+3. **Builds the provider order** (`buildProviderOrder`) — forced → request `preferredProvider` → primary → every other available provider, **skipping any provider that cannot handle the request** (e.g. Groq on image requests).
 4. **Generates with failover**:
    - **Non-streaming:** iterates the order; only retryable failures (rate limit, invalid key, 5xx, timeout, model error) trigger fallback. Diagnostics stamp `providerId`, `providerCode`, `model`, `keyConfigured`.
    - **Streaming:** `createFallbackStream` yields from the primary; if the stream fails *before emitting any chunk*, and the failure is retryable, it switches to the next capable provider. Once chunks have reached the client, mid-stream fallback is not attempted (the stream is terminated with an error).
@@ -66,12 +64,6 @@ A provider exposes: `generate(request)`, `canHandleRequest(request)`, `isAvailab
 - Resolves: multimodal → vision model; reasoning/long-context/tool → reasoning model; else default.
 - Text, streaming, tool calling (function declarations, `AUTO` mode), images (embedded base64 parts), plus voice transcription and optional server TTS.
 
-### Mistral
-
-- Env: `MISTRAL_API_KEY`, `MISTRAL_MODEL` (default `mistral-small-latest`), `MISTRAL_LIGHT_MODEL`, `MISTRAL_VISION_MODEL` (unused, since the adapter is not multimodal).
-- Resolves: lightweight/memory-compression tasks → lightweight model; else default.
-- Text, streaming, tool calling. No image support in the current adapter.
-
 ---
 
 ## 5. Environment Configuration
@@ -85,13 +77,8 @@ GEMINI_API_KEY=
 # GEMINI_REASONING_MODEL=gemini-2.5-flash
 # GEMINI_VISION_MODEL=gemini-2.5-flash
 
-MISTRAL_API_KEY=
-# MISTRAL_MODEL=mistral-small-latest
-# MISTRAL_LIGHT_MODEL=
-# MISTRAL_VISION_MODEL=pixtral-12b-2409
-
 # Router (optional; 'auto' is the default)
-# LLM_PRIMARY_PROVIDER=auto    # auto | groq | gemini | mistral
+# LLM_PRIMARY_PROVIDER=auto    # auto | groq | gemini
 # LLM_FALLBACK_PROVIDER=
 # LLM_FORCE_PROVIDER=
 # LLM_STREAM_CHUNK_DELAY_MS=0
@@ -105,7 +92,7 @@ MISTRAL_API_KEY=
 
 - **Configuration-driven:** the provider order is derived from environment/config, not hard-coded (modulo the `auto` heuristics above).
 - **Capability-aware:** providers that cannot satisfy a request are filtered out of the order, up-front and mid-stream, and multimodal requests are never sent to text-only providers.
-- **Fail-safe:** if no provider remains, a descriptive error is thrown (`No LLM providers are available. Configure GROQ_API_KEY, GEMINI_API_KEY or MISTRAL_API_KEY.` or a multimodal-specific message).
+- **Fail-safe:** if no provider remains, a descriptive error is thrown (`No LLM providers are available. Configure GROQ_API_KEY or GEMINI_API_KEY.` or a multimodal-specific message).
 
 ---
 

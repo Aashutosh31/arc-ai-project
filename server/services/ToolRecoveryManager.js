@@ -30,6 +30,19 @@ const failureText = (result, error) => {
 
 const matchesAny = (text, patterns) => patterns.some((pattern) => pattern.test(text));
 
+// Deterministic MCP/server-side argument-validation signal: the failure
+// carries MCP error taxonomy (boundary 'mcp.invalid_arguments' or a live
+// server 'MCP_TOOL_ERROR'/mcp.* category) AND validation wording about the
+// arguments themselves. Transport/parse/provider failures never match:
+// they lack the taxonomy, so their retry behavior is preserved byte-for-byte.
+const MCP_VALIDATION_WORDING = /invalid\s+(input|argument|parameter|value)|argument validation|validation (failed|error)/i;
+
+const isMcpValidationFailure = (result, lowerText) => {
+  const errorType = result && typeof result.errorType === 'string' ? result.errorType : '';
+  if (!/^mcp\./i.test(errorType) && errorType !== 'MCP_TOOL_ERROR') return false;
+  return MCP_VALIDATION_WORDING.test(String(lowerText || ''));
+};
+
 const slugFromUrl = (url) => {
   try {
     const parsed = new URL(url);
@@ -98,6 +111,18 @@ class ToolRecoveryManager {
 
     if (matchesAny(text, PARSE_PATTERNS)) {
       return { type: 'parse', shouldRetry: true, shouldFallback: true, shouldReplan: false, strategy: 'retry-or-fallback', reason: text };
+    }
+
+    // Deterministic server-side argument-validation failures (generic,
+    // taxonomy-gated): the MCP boundary or the live server rejected the
+    // ARGUMENTS (not the transport). Retrying byte-identical args against a
+    // deterministic validation verdict only burns executions — replan
+    // immediately so synthesis can correct and resubmit. Gated on MCP
+    // error taxonomy (errorType mcp.*) PLUS validation wording, so bare
+    // "invalid" prose from native tools/providers keeps its existing path
+    // and transient/network behavior is untouched.
+    if (isMcpValidationFailure(result, lower)) {
+      return { type: 'validation', shouldRetry: false, shouldFallback: false, shouldReplan: true, strategy: 'replan', reason: text };
     }
 
     if (matchesAny(text, TRANSIENT_PATTERNS)) {

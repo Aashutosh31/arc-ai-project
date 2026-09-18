@@ -6,7 +6,7 @@
 
 <p><strong>A MERN-stack, provider-agnostic AI workspace with conversational voice, live vision, autonomous tool execution, memory, and realtime streaming.</strong></p>
 
-<img src="https://img.shields.io/badge/LLM--ROUTER-Groq%20%7C%20Gemini%20%7C%20Mistral-00fff5?style=for-the-badge&labelColor=0d0221&color=00fff5" />
+<img src="https://img.shields.io/badge/LLM--ROUTER-Groq%20%7C%20Gemini-00fff5?style=for-the-badge&labelColor=0d0221&color=00fff5" />
 <img src="https://img.shields.io/badge/VOICE-Half--Duplex%20Advanced%20Voice-b026ff?style=for-the-badge&labelColor=0d0221&color=b026ff" />
 <img src="https://img.shields.io/badge/TOOLS-22--Tool%20Registry-ff2ee6?style=for-the-badge&labelColor=0d0221&color=ff2ee6" />
 <img src="https://img.shields.io/badge/STREAMING-Socket.IO%20Real--time-39ff14?style=for-the-badge&labelColor=0d0221&color=39ff14" />
@@ -34,7 +34,7 @@
 **ARC-AI (Autonomous Real-time Conversational AI)** is a full-stack, multi-provider AI assistant that behaves like a persistent, conversational workspace. It combines:
 
 - **Advanced Voice Mode** — a conversational, half-duplex voice interaction model with interruption (barge-in) and live vision.
-- **Capability-aware LLM routing** across **Groq**, **Gemini**, and **Mistral** with automatic fallback.
+- **Capability-aware LLM routing** across **Groq** and **Gemini** with automatic fallback.
 - **22 autonomous tools** (web research, memory, calendar/email/reminders, media, UI actuation, code sandboxing, and more) executed through a provider-independent tool registry.
 - **Realtime streaming** over Socket.IO with zero artificial delay by default and non-blocking persistence.
 - **Workspace-scoped memory** — semantic (Pinecone) plus structured (MongoDB) retrieval.
@@ -64,7 +64,7 @@ AIService (orchestration)
 LLMRouter
  ├── Groq (primary, text/tools/streaming)
  ├── Gemini (multimodal, voice STT, vision)
- └── Mistral (lightweight fallback)
+ └── Gemini (multimodal + fallback)
  ↓
 Tool Registry / Memory (Pinecone + MongoDB) / Workspace / Task Execution
  ↓
@@ -107,15 +107,14 @@ ARC-AI is powered by a capability-aware **`LLMRouter`** (`server/lib/llm/LLMRout
 | --- | --- | --- | --- | --- |
 | **Groq** (primary) | ✅ | ✅ | ✅ | ❌ `openai/gpt-oss-120b` is text-only via the OpenAI-compatible endpoint |
 | **Gemini** | ✅ | ✅ | ✅ | ✅ |
-| **Mistral** | ✅ | ✅ | ✅ | ❌ adapter rejects image attachments |
 
 - **Current primary provider:** `groq`
 - **Current primary model:** `openai/gpt-oss-120b`
 - **Default routing (`LLM_PRIMARY_PROVIDER=auto`):**
   - reasoning / tool orchestration / long context → **Groq** (else Gemini)
   - **multimodal / any image attachment → Gemini** (Gemini stays important because Groq GPT-OSS 120B is text-only)
-  - lightweight / memory compression → **Groq** (else Mistral)
-  - default → **Groq** (else Mistral)
+  - lightweight / memory compression → **Groq** (else Gemini)
+  - default → **Groq** (else Gemini)
 - **Fallback** is capability-aware: providers that cannot handle a request (e.g. Groq on an image request) are excluded from the cascade, both up-front and mid-stream.
 - Provider selection is **configuration-driven**: set `LLM_PRIMARY_PROVIDER` to pin the primary, or `LLM_FORCE_PROVIDER` to force a single provider.
 
@@ -125,7 +124,7 @@ ARC-AI is powered by a capability-aware **`LLMRouter`** (`server/lib/llm/LLMRout
 GROQ_API_KEY=your_groq_api_key
 GROQ_MODEL=openai/gpt-oss-120b
 
-LLM_PRIMARY_PROVIDER=auto      # auto | groq | gemini | mistral
+LLM_PRIMARY_PROVIDER=auto      # auto | groq | gemini
 LLM_FALLBACK_PROVIDER=         # read by the router; fallback currently derives from availability + capability filtering
 LLM_FORCE_PROVIDER=            # optional hard override
 LLM_STREAM_CHUNK_DELAY_MS=0    # 0 = no artificial streaming delay
@@ -135,13 +134,7 @@ GEMINI_MODEL=gemini-2.5-flash
 GEMINI_REASONING_MODEL=gemini-2.5-flash
 GEMINI_VISION_MODEL=gemini-2.5-flash
 
-MISTRAL_API_KEY=your_mistral_api_key
-MISTRAL_MODEL=mistral-small-latest
-MISTRAL_LIGHT_MODEL=
-MISTRAL_VISION_MODEL=pixtral-12b-2409
 ```
-
-> **Note:** `MISTRAL_VISION_MODEL` is configured, but the Mistral adapter declares `multimodal: false` and rejects image attachments; images route to Gemini.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
@@ -164,7 +157,7 @@ ARC-AI maintains a **provider-independent, convention-based tool registry** (`se
 4. Tool results are normalized per provider (tool-call continuation chain rebuilt by `buildProviderContinuationMessages`) and **fed back to the model** for a follow-up synthesis pass.
 5. `clientAction` results are emitted back to the frontend so the UI can act (theme change, open URL, clipboard, media).
 
-Failures route through `ToolRecoveryManager` (retry for transient/parse errors, scrape-fallback on 404s, replan suggestions). Tools are defined once and work across Groq, Gemini, and Mistral — not every provider is guaranteed identical tool behavior, but the registry itself is provider-neutral.
+Failures route through `ToolRecoveryManager` (retry for transient/parse errors, scrape-fallback on 404s, replan suggestions). Tools are defined once and work across Groq and Gemini — not every provider is guaranteed identical tool behavior, but the registry itself is provider-neutral.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
@@ -233,7 +226,7 @@ ARC-AI has its own **application-level credit system** (`server/services/creditS
 | Concept | What it is |
 | --- | --- |
 | **ARC-AI Credits** | Internal per-user balance. 1 credit per AI request, tool-specific costs, 1 credit per server voice transcription. Refilled/upgraded by signing in. Guests start lower than signed-in users. |
-| **Provider billing** | Your Gemini / Groq / Mistral API account billing and quotas. |
+| **Provider billing** | Your Gemini / Groq API account billing and quotas. |
 
 No secrets or implementation details are exposed here — the system simply decouples product usage accounting from provider API costs.
 
@@ -261,8 +254,8 @@ No secrets or implementation details are exposed here — the system simply deco
 | --- | --- |
 | **Frontend** | React, Vite, styled-components, Web Speech API (SpeechRecognition + speechSynthesis), Socket.IO client |
 | **Backend** | Node.js, Express.js, Socket.IO, node-cron, BullMQ |
-| **Database** | MongoDB (Mongoose), Pinecone (Vector RAG), Mistral embeddings |
-| **AI / ML Runtime** | Groq (GPT-OSS 120B via OpenAI-compatible API), Gemini, Mistral AI |
+| **Database** | MongoDB (Mongoose), Pinecone (Vector RAG), Gemini embeddings |
+| **AI / ML Runtime** | Groq (GPT-OSS 120B via OpenAI-compatible API), Gemini |
 | **Sandboxing** | quickjs-emscripten (WebAssembly code execution) |
 | **Infrastructure** | Google Apps Script (email webhook), Google OAuth, Docker, Vercel (frontend) |
 
@@ -284,11 +277,9 @@ GROQ_API_KEY=your_groq_api_key
 GROQ_MODEL=openai/gpt-oss-120b
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-2.5-flash
-MISTRAL_API_KEY=your_mistral_api_key
-MISTRAL_MODEL=mistral-small-latest
 
 # Optional LLM Router & streaming
-# LLM_PRIMARY_PROVIDER=auto   # auto | groq | gemini | mistral
+# LLM_PRIMARY_PROVIDER=auto   # auto | groq | gemini
 # LLM_FALLBACK_PROVIDER=
 # LLM_FORCE_PROVIDER=
 # LLM_STREAM_CHUNK_DELAY_MS=0
@@ -333,7 +324,7 @@ VITE_APP_URL=http://localhost:5173
 
 - Node.js (LTS)
 - MongoDB Atlas Cluster (`MONGO_URI`)
-- A Groq, Gemini, and/or Mistral API key (at least one is required)
+- A Groq and/or Gemini API key (at least one is required)
 - Pinecone API key (for RAG memory)
 - Google OAuth credentials + `GOOGLE_TOKEN_ENCRYPTION_KEY` (required)
 
@@ -416,7 +407,7 @@ CI (`.github/workflows/ci.yml`) runs client lint + build and a server syntax che
 
 ## 🆘 Troubleshooting
 
-- **Provider key not configured** — set at least `GROQ_API_KEY`, `GEMINI_API_KEY`, or `MISTRAL_API_KEY`. The router error names the missing variable pattern (`GROQ_API_KEY, GEMINI_API_KEY or MISTRAL_API_KEY`).
+- **Provider key not configured** — set at least `GROQ_API_KEY` or `GEMINI_API_KEY`. The router error names the missing variable pattern (`GROQ_API_KEY or GEMINI_API_KEY`).
 - **Provider quota / rate limit** — the router classifies 429/quota errors as transient and retries the fallback provider automatically. Raised quotas on the provider account resolve it.
 - **Unsupported multimodal provider** — image requests must land on Gemini; text-only providers are excluded from the fallback cascade and a clear "no multimodal-capable provider" error is returned.
 - **Browser microphone permission** — ARC-AI requests `getUserMedia` with echo cancellation/noise suppression; a `NotAllowedError` means permission was denied in the browser/OS. Re-enable from site settings.
@@ -438,7 +429,7 @@ Recent work refocused the runtime around identity correctness, conversational vo
 - **Stale guest-session recovery** — the client validates and auto-renews expired guest sessions.
 - **Conversation message-loading race protection** — safer pagination/sync during workspace switches.
 - **Truthful AI provider error classification** — provider failures are normalized and reported with model/key diagnostics, never masked or misleading.
-- **Malformed Unicode sanitization** — lone surrogates are normalized before hitting Gemini/Mistral request bodies.
+- **Malformed Unicode sanitization** — lone surrogates are normalized before hitting provider request bodies.
 - **Generation terminal-state fixes** — streams and abort paths always settle (idempotent `isFinal`/cleanup), so the UI can't get stuck.
 - **Groq provider integration** — added Groq as the primary text/tools provider with streaming, tool calling, and tool-call delta assembly.
 - **Response streaming latency optimization** — removed the default per-chunk artificial delay (`LLM_STREAM_CHUNK_DELAY_MS=0`).

@@ -73,6 +73,13 @@ const docToConfig = (doc) => ({
   envVarNames: doc.envVarNames || [],
   auth: doc.auth || { type: 'none' },
   oauthScope: doc.oauthScope || null,
+  // OAuth client-registration (server-side ONLY — never serialized to the
+  // browser; the in-memory registry drops these by construction and API
+  // sanitization exposes presence flags at most). The provider reads them
+  // for pre-registered / auto-fallback clientInformation().
+  registrationStrategy: doc.registrationStrategy || null,
+  oauthClientId: doc.oauthClientId || null,
+  oauthClientSecretEncrypted: doc.oauthClientSecretEncrypted || null,
   enabled: doc.enabled !== false,
   disabled: doc.enabled === false,
   guestAllowed: doc.guestAllowed === true,

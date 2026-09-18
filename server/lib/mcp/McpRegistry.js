@@ -12,6 +12,17 @@
 // configs directly via the `register` / `registerMany` API.
 
 const { sanitizeSlug } = require('./names');
+const { sanitizeAnnotations } = require('./McpToolAdapter');
+
+// Registry-side annotation passthrough (same sanitizer as live discovery).
+// Kept as a named wrapper so the pure-helper section stays dependency-light.
+const sanitizeToolAnnotations = (annotations) => {
+  try {
+    return sanitizeAnnotations(annotations);
+  } catch {
+    return null;
+  }
+};
 
 class McpRegistry {
   constructor() {
@@ -284,6 +295,9 @@ const buildToolEntry = (config, tool, takenCanonical, takenWire) => {
     originalToolName: tool.name || tool.originalToolName,
     description: tool.description || '',
     inputSchema: tool.inputSchema || { type: 'object', properties: {}, required: [] },
+    // Same annotation passthrough as live discovery (McpServerConnection):
+    // sanitized behavior hints only, never credentials or free-form objects.
+    annotations: sanitizeToolAnnotations(tool.annotations),
     keywords: Array.isArray(tool.keywords) ? tool.keywords : []
   });
 };
@@ -331,6 +345,16 @@ const normalizeConfig = (raw, slugCounts, existing) => {
       ? raw.deniedTools.map((t) => String(t))
       : (existing && Array.isArray(existing.deniedTools) ? [...existing.deniedTools] : []),
     auth: normalizeAuth(raw.auth),
+    // OAuth scope hint (metadata string, never a secret): the silent
+    // provider reads it when deriving tokens for automatic reconnects.
+    // Dropped here, scope would silently fall back on every registry
+    // round-trip (seed, discovery re-sync).
+    oauthScope: typeof raw.oauthScope === 'string' ? raw.oauthScope : null,
+    // INVARIANT: pre-registered OAuth material (registrationStrategy,
+    // oauthClientId, oauthClientSecretEncrypted) is DROPPED here by
+    // construction — the registry never holds client identities or secrets.
+    // Interactive OAuth legs always use a fresh server-side config; automatic
+    // (silent) paths use stored per-user credentials only.
     createdAt: raw.createdAt || new Date(),
     updatedAt: raw.updatedAt || new Date(),
     tools: Array.isArray(raw.tools) ? raw.tools : []
@@ -347,10 +371,19 @@ const resolveUniqueSlug = (raw, id, slugCounts) => {
 
 const normalizeAuth = (auth) => {
   if (!auth || typeof auth !== 'object') return { type: 'none' };
-  return {
-    type: auth.type === 'header' ? 'header' : 'none',
-    envVar: auth.envVar || auth.envVarName || null
-  };
+  // Auth metadata must survive registry round-trips (seed, discovery
+  // re-sync): dropping oauth here makes every registry-sourced config look
+  // unauthenticated, so automatic reconnects skip the silent OAuth provider
+  // and 401. Type strings only — no secret values are ever stored.
+  if (auth.type === 'oauth') return { type: 'oauth' };
+  if (auth.type === 'header') {
+    return {
+      type: 'header',
+      headerName: auth.headerName || 'Authorization',
+      envVar: auth.envVar || auth.envVarName || null
+    };
+  }
+  return { type: 'none' };
 };
 
 module.exports = McpRegistry;

@@ -100,18 +100,21 @@ const liveStatus = (configId) => {
   try {
     const manager = McpToolSource?.manager;
     if (!manager || typeof manager.getConnection !== 'function') {
-      return { connectionState: 'disconnected', protocolVersion: null, toolCount: 0 };
+      return { connectionState: 'disconnected', protocolVersion: null, toolCount: 0, discoveryStatus: 'idle' };
     }
     const conn = manager.getConnection(String(configId));
-    if (!conn) return { connectionState: 'disconnected', protocolVersion: null, toolCount: 0 };
+    if (!conn) return { connectionState: 'disconnected', protocolVersion: null, toolCount: 0, discoveryStatus: 'idle' };
     const state = conn.connectionState || (conn.connected ? 'connected' : 'disconnected');
     return {
       connectionState: state,
       protocolVersion: conn.protocolVersion || null,
-      toolCount: conn.connected && Array.isArray(conn.tools) ? conn.tools.length : 0
+      toolCount: conn.connected && Array.isArray(conn.tools) ? conn.tools.length : 0,
+      // Discovery is independent of transport: CONNECTED with failed
+      // discovery is not a ready integration (see McpServerConnection).
+      discoveryStatus: conn.discoveryStatus || 'unknown'
     };
   } catch {
-    return { connectionState: 'disconnected', protocolVersion: null, toolCount: 0 };
+    return { connectionState: 'disconnected', protocolVersion: null, toolCount: 0, discoveryStatus: 'unknown' };
   }
 };
 
@@ -306,13 +309,26 @@ router.post('/servers/:id/connect', async (req, res) => {
         detail: connectErr?.message || 'connect failed'
       });
     }
+    // Genuine authentication failure during discovery (e.g. tools/list 401):
+    // surface the Authorize path, not a silent CONNECTED + 0 tools. Transport
+    // quirks and upstream failures keep discoveryAuthRequired false and fall
+    // through to the normal payload with discoveryStatus failed.
+    if (conn && conn.discoveryAuthRequired) {
+      return res.status(401).json({
+        error: 'Authorization required — reconnect',
+        authRequired: true,
+        category: 'mcp.auth_required',
+        detail: null
+      });
+    }
     res.json({
       connected: conn.connected === true,
       connectionState: conn.connectionState || 'connected',
       protocolVersion: conn.protocolVersion || null,
       serverInfo: conn.serverInfo || null,
       toolCount: Array.isArray(conn.tools) ? conn.tools.length : 0,
-      toolNames: Array.isArray(conn.tools) ? conn.tools.map((t) => t?.function?.name).filter(Boolean) : []
+      toolNames: Array.isArray(conn.tools) ? conn.tools.map((t) => t?.function?.name).filter(Boolean) : [],
+      discoveryStatus: conn.discoveryStatus || 'unknown'
     });
   } catch (err) {
     console.error('[MCP] connect failed:', err);
@@ -365,8 +381,19 @@ const refreshTools = async (doc, req, res) => {
   let conn;
   const failures = [];
   try {
-    conn = await McpToolSource.manager.ensureConnected(docToConfig(doc));
+    conn = await connectForRefresh(doc, req);
   } catch (connectErr) {
+    // Mirror /connect: dead/stale OAuth tokens are an AUTHORIZE signal
+    // (401 + authRequired), not a generic 502 — otherwise the UI shows a
+    // dead-end toast with no recovery path.
+    if (connectErr && connectErr.authRequired) {
+      return res.status(401).json({
+        error: 'Authorization required — reconnect',
+        authRequired: true,
+        category: 'mcp.auth_required',
+        detail: null
+      });
+    }
     failures.push({ reason: connectErr?.message || 'connect failed', category: connectErr?.category || null });
     return res.status(502).json({
       error: 'Failed to refresh tools from MCP server.',
@@ -381,6 +408,16 @@ const refreshTools = async (doc, req, res) => {
       })
     });
   }
+  // Genuine discovery-time authentication failure (tools/list 401 on an
+  // OAuth server): Authorize path, not a silent CONNECTED + 0 tools.
+  if (conn && conn.discoveryAuthRequired) {
+    return res.status(401).json({
+      error: 'Authorization required — reconnect',
+      authRequired: true,
+      category: 'mcp.auth_required',
+      detail: null
+    });
+  }
   return res.json({
     refreshed: true,
     ...buildToolsPayload({
@@ -390,10 +427,23 @@ const refreshTools = async (doc, req, res) => {
       serverInfo: conn.serverInfo || null,
       tools: toolsForClient(conn, doc),
       failures,
-      policy: { allowedTools: doc.allowedTools || [], deniedTools: doc.deniedTools || [] }
+      policy: { allowedTools: doc.allowedTools || [], deniedTools: doc.deniedTools || [] },
+      discoveryStatus: conn.discoveryStatus || 'unknown',
+      discoveryAuthRequired: conn.discoveryAuthRequired === true
     })
   });
 };
+
+// Refresh-path connect (single place: router + tests). MUST carry the
+// silent OAuth provider like /connect and the OAuth callback do —
+// ensureConnected without one sends no bearer material at all, so every
+// refresh of an OAuth streamable-http server deterministically 401s right
+// after refresh's own disconnect() drops the working connection. Returns
+// null provider for non-OAuth configs (static path untouched).
+const connectForRefresh = (doc, req) =>
+  McpToolSource.manager.ensureConnected(docToConfig(doc), {
+    authProvider: silentOAuthProvider(doc, req)
+  });
 
 // ---- GET /api/mcp/servers/:id/tools ----------------------------------------------
 // Read-only discovery snapshot. Guests may call this for guestAllowed configs
@@ -427,7 +477,8 @@ router.get('/servers/:id/tools', async (req, res) => {
       serverInfo,
       tools,
       failures: [],
-      policy: { allowedTools: doc.allowedTools || [], deniedTools: doc.deniedTools || [] }
+      policy: { allowedTools: doc.allowedTools || [], deniedTools: doc.deniedTools || [] },
+      discoveryStatus: status.discoveryStatus || 'unknown'
     }));
   } catch (err) {
     console.error('[MCP] tools snapshot failed:', err);
@@ -590,6 +641,41 @@ router.post('/servers/:id/oauth/start', async (req, res) => {
     } catch (flowErr) {
       oauthTx.deleteTransaction(tx.txId);
       mcpLogger.log(mcpLogger.LOG_EVENTS.OAUTH_FAILED, { configId: String(doc._id), reason: 'start_failed' });
+      // Pre-registered material problems fail clearly (messages are safe by
+      // construction — they never embed identifiers or secrets).
+      if (flowErr && flowErr.name === 'OAuthRegistrationError') {
+        return res.status(502).json({
+          error: flowErr.message || 'OAuth client registration is not available for this server.',
+          category: 'mcp.registration_unavailable',
+          detail: null
+        });
+      }
+      // Generic registration-availability failure: the SDK throws its
+      // incompatible-auth-server error when neither CIMD nor DCR is usable.
+      // Re-resolve against the AS metadata captured in the transaction so the
+      // user gets a configuration error instead of a mystery 502. Generic —
+      // no vendor names or URL checks.
+      try {
+        const asMetadata = tx.discoveryState?.authorizationServerMetadata || null;
+        if (asMetadata && /dynamic client registration|incompatible auth server/i.test(flowErr?.message || '')) {
+          const mode = oauthProvider.resolveRegistrationMode({
+            strategy: config.registrationStrategy || null,
+            asMetadata,
+            clientMetadataUrl: provider.clientMetadataUrl,
+            hasPreRegistered: oauthProvider.hasPreRegisteredCredentials(config)
+          });
+          if (!mode) {
+            return res.status(502).json({
+              error: oauthProvider.registrationUnavailableReason({
+                strategy: config.registrationStrategy || null,
+                hasPreRegistered: oauthProvider.hasPreRegisteredCredentials(config)
+              }),
+              category: 'mcp.registration_unavailable',
+              detail: null
+            });
+          }
+        }
+      } catch { /* fall through to the generic failure below */ }
       return res.status(502).json({
         error: 'Failed to start OAuth authorization.',
         category: flowErr?.category || flowErr?.code || null,
@@ -752,13 +838,19 @@ async function handleOAuthCallback(req, res) {
     }
 
     // Reconnect with the silent provider (stored tokens) + discover tools.
+    // Authorization and discovery are independent outcomes: the credential
+    // may be valid while discovery fails (transport quirk, upstream
+    // failure). The dashboard banner distinguishes the two — retry (Refresh)
+    // reuses the stored credential and never relaunches browser OAuth.
     let toolCount = 0;
+    let discoveryFailed = false;
     try {
       try { await McpToolSource.manager.disconnect(String(doc._id)); } catch { /* best effort */ }
       const conn = await McpToolSource.manager.ensureConnected(config, {
         authProvider: oauthProvider.createSilentProvider({ userId: tx.userId, config })
       });
       toolCount = Array.isArray(conn.tools) ? conn.tools.length : 0;
+      discoveryFailed = (conn.discoveryStatus || 'ok') === 'failed';
     } catch (connectErr) {
       mcpLogger.log(mcpLogger.LOG_EVENTS.OAUTH_FAILED, { configId: tx.configId, reason: 'reconnect_failed' });
       return failRedirect(tx.configId, 'reconnect_failed');
@@ -770,6 +862,7 @@ async function handleOAuthCallback(req, res) {
       server: String(doc._id),
       tools: String(toolCount)
     });
+    if (discoveryFailed) params.set('discovery', 'failed');
     return res.redirect(302, `${frontendBase}/dashboard?${params.toString()}`);
   } catch (err) {
     console.error('[MCP] oauth callback failed:', err);
@@ -783,3 +876,6 @@ async function handleOAuthCallback(req, res) {
 }
 
 module.exports = router;
+// Exported for the refresh regression test (route needs Mongo; the helper
+// does not). Not part of the HTTP surface.
+module.exports.connectForRefresh = connectForRefresh;

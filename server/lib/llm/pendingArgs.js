@@ -27,6 +27,56 @@ const CANCEL_RE = /^(cancel|stop|never\s?mind|forget\s(it|about\sit)|no\s?thanks
 const TRUE_TOKENS = new Set(['true', 'yes', 'y', '1', 'on']);
 const FALSE_TOKENS = new Set(['false', 'no', 'n', '0', 'off']);
 
+// Generic identifier-shaped parameter names (page_id, user_id, id,
+// source_url, discussion_id, ...). Vendor-neutral: matches the universal
+// target-reference shape, never a specific tool or server. The (^|_)
+// anchor matters: 'valid'/'invalid' must NOT match.
+const IDENTIFIER_PARAM_RE = /(^|_)(id|url|uri|urn|uuid|guid|handle|slug)$/i;
+// camelCase twin (pageId, sourceUrl): suffix after a lowercase letter.
+// 'valid'/'invalid' end in lowercase "lid" — never matched by either arm.
+const IDENTIFIER_CAMEL_RE = /[a-z](Id|Url|Uri|Urn|Uuid|Guid|Handle|Slug)$/;
+const URL_PARAM_RE = /(url|uri|link)$/i;
+
+function isIdentifierParam(name) {
+  if (typeof name !== 'string' || !name.trim()) return false;
+  return IDENTIFIER_PARAM_RE.test(name.trim()) || IDENTIFIER_CAMEL_RE.test(name.trim());
+}
+
+// Universal identifier shapes in free text. UUIDs and bare 32-hex IDs
+// (Notion-style page IDs with or without dashes) plus plain URLs —
+// resolvable target references the user can paste instead of typing an ID.
+const URL_RE = /https?:\/\/[^\s"'<>`]+/i;
+const UUID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+const HEX32_RE = /\b[0-9a-f]{32}\b/i;
+
+const IDENTIFIER_FILL_MAX_CHARS = 500;
+
+// Pull a confident identifier value for one identifier-shaped param from
+// free text. URL-ish params take URLs only; ID-ish params prefer UUID /
+// 32-hex, falling back to a URL (several servers accept URLs as IDs — a
+// rejection surfaces truthfully at execution). Returns undefined on no
+// pattern hit — never guesses prose. Pure, never throws.
+function extractIdentifierValue(text, paramName) {
+  try {
+    const raw = String(text || '');
+    if (!raw.trim()) return undefined;
+    if (URL_PARAM_RE.test(String(paramName || ''))) {
+      const m = raw.match(URL_RE);
+      const v = (m && m[0]) ? m[0].trim() : '';
+      return v && v.length <= IDENTIFIER_FILL_MAX_CHARS ? v : undefined;
+    }
+    const uuid = raw.match(UUID_RE);
+    if (uuid && uuid[0]) return uuid[0];
+    const hex = raw.match(HEX32_RE);
+    if (hex && hex[0]) return hex[0];
+    const url = raw.match(URL_RE);
+    const v = (url && url[0]) ? url[0].trim() : '';
+    return v && v.length <= IDENTIFIER_FILL_MAX_CHARS ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const wordsOf = (text) => String(text || '').toLowerCase().match(/[a-z0-9]+/g) || [];
 
 // Required params in schema order: [{ name, def }].
@@ -83,6 +133,27 @@ function coerceArgValue(def, raw) {
   return { ok: true, value: typeof raw === 'string' ? raw : String(raw) };
 }
 
+// Fill missing keys from schema-declared defaults (generic JSON Schema
+// semantics, never vendor logic): when a server declares
+// `default: 50` for a required param, the server itself sanctions the
+// omission — sending the declared value explicitly is obedience, not
+// invention. Wrong-typed defaults are left for validateArgs to reject.
+// Returns a NEW object; never throws.
+function applyParamDefaults(schema, args) {
+  try {
+    const present = (args && typeof args === 'object') ? { ...args } : {};
+    for (const { name, def } of requiredParams(schema)) {
+      if (!isMissingValue(present[name])) continue;
+      const d = (def && typeof def === 'object') ? def : {};
+      if (d.default === undefined || d.default === null) continue;
+      present[name] = d.default;
+    }
+    return present;
+  } catch {
+    return (args && typeof args === 'object') ? { ...args } : {};
+  }
+}
+
 // Validate a full args object: required presence + per-value coercion.
 // Returns { ok, errors, coerced } — coerced holds canonical values
 // (enum canonical case, real booleans/numbers) for everything valid.
@@ -114,14 +185,25 @@ function extractArgValues(text, params) {
   const tokens = wordsOf(text);
   if (!tokens.length) return out;
 
-  const missingStrings = list.filter(({ def }) => {
+  const missingStrings = list.filter(({ name, def }) => {
     const d = (def && typeof def === 'object') ? def : {};
+    // Identifier slots never take the prose fallback below: a title is not
+    // an ID — pattern extraction above is their only confident source.
+    if (isIdentifierParam(name)) return false;
     return !(Array.isArray(d.enum) && d.enum.length)
       && !['boolean', 'bool', 'integer', 'number'].includes(String(d.type || 'string').toLowerCase());
   });
 
   for (const { name, def } of list) {
     const d = (def && typeof def === 'object') ? def : {};
+    // Identifier-shaped params fill from universal reference patterns
+    // (pasted page URLs, UUIDs, 32-hex IDs) — pattern-confident, so this
+    // applies per-param even when several slots are missing. Prose titles
+    // ("ARC-AI MCP Live Test") never match and still need resolution.
+    if (isIdentifierParam(name)) {
+      const v = extractIdentifierValue(text, name);
+      if (v !== undefined) { out[name] = v; continue; }
+    }
     if (Array.isArray(d.enum) && d.enum.length) {
       const hit = d.enum.find((e) => {
         const v = String(e).toLowerCase();
@@ -177,12 +259,14 @@ function buildClarification(toolName, missing, captured) {
   return text;
 }
 
-function createPending(toolName, args, schema, now = Date.now()) {
+function createPending(toolName, args, schema, now = Date.now(), opts = {}) {
   const safeArgs = (args && typeof args === 'object') ? { ...args } : {};
+  const updateMode = Boolean(opts && opts.updateMode);
   return {
     toolName,
     args: safeArgs,
-    missing: missingRequired(schema, safeArgs),
+    missing: missingEffective(schema, safeArgs, { updateMode }),
+    updateMode,
     rounds: 0,
     updatedAt: Number(now) || Date.now()
   };
@@ -205,13 +289,16 @@ function isCancelText(text) {
 //             persist `pending`.
 //   abandon — user cancelled, record expired, or rounds exhausted; caller
 //             must clear and continue the normal flow.
-function advancePending(pending, text, schema, now = Date.now()) {
+function advancePending(pending, text, schema, now = Date.now(), opts = {}) {
   if (!pending || typeof pending.toolName !== 'string') return { action: 'abandon', reason: 'no-pending' };
   if (isCancelText(text)) return { action: 'abandon', reason: 'cancelled' };
   if (isExpired(pending, now)) return { action: 'abandon', reason: 'expired' };
   if (Number(pending.rounds) >= MAX_CLARIFICATION_ROUNDS) return { action: 'abandon', reason: 'rounds-exhausted' };
 
-  const params = requiredParams(schema);
+  const updateMode = Boolean(
+    (pending && typeof pending.updateMode === 'boolean') ? pending.updateMode : (opts && opts.updateMode)
+  );
+  const params = effectiveRequiredParams(schema, { updateMode });
   const byName = new Map(params.map((p) => [p.name, p]));
   const stillMissing = (Array.isArray(pending.missing) ? pending.missing : []).filter((n) => byName.has(n));
   const extracted = extractArgValues(text, stillMissing.map((n) => byName.get(n)));
@@ -236,7 +323,7 @@ function advancePending(pending, text, schema, now = Date.now()) {
     else if (soleExtraction) merged[name] = extracted[name];
   }
 
-  const validation = validateArgs(schema, merged);
+  const validation = validateArgsEffective(schema, merged, { updateMode });
   const missing = validation.errors.map((e) => e.name);
   const at = Number(now) || Date.now();
 
@@ -260,11 +347,84 @@ function advancePending(pending, text, schema, now = Date.now()) {
   };
 }
 
+// Conditional creation requirements (generic upsert semantics, never
+// vendor/tool names): some mutation schemas declare NO schema-level
+// required params, yet their parameter descriptions state "required when
+// creating" — create-or-update tools where supplying the entity id selects
+// update mode and omitting it selects create mode. effectiveRequiredParams
+// returns schema.required PLUS those conditional params in create mode;
+// update mode returns schema.required only. Schemas without the signal are
+// untouched (identical to requiredParams), so native tools and existing
+// fixtures behave exactly as before.
+const CREATE_REQUIRED_RE = /required when creating/i;
+
+function isCreateRequiredParam(def) {
+  try {
+    const d = (def && typeof def === 'object') ? def : {};
+    for (const key of ['description', 'title']) {
+      const t = d[key];
+      if (typeof t === 'string' && CREATE_REQUIRED_RE.test(t)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function effectiveRequiredParams(schema, { updateMode = false } = {}) {
+  const base = requiredParams(schema);
+  if (updateMode) return base;
+  try {
+    const params = schema?.function?.parameters || schema?.parameters || {};
+    const props = (params.properties && typeof params.properties === 'object') ? params.properties : {};
+    const have = new Set(base.map((p) => p.name));
+    const extra = [];
+    for (const [name, def] of Object.entries(props)) {
+      if (typeof name !== 'string' || !name || have.has(name)) continue;
+      if (isCreateRequiredParam(def)) {
+        extra.push({ name, def: (def && typeof def === 'object') ? def : {} });
+      }
+    }
+    return extra.length ? [...base, ...extra] : base;
+  } catch {
+    return base;
+  }
+}
+
+function missingEffective(schema, args, opts = {}) {
+  const present = (args && typeof args === 'object') ? args : {};
+  return effectiveRequiredParams(schema, opts)
+    .filter(({ name }) => isMissingValue(present[name]))
+    .map(({ name }) => name);
+}
+
+// Mode-aware validation: base schema validation PLUS conditional
+// creation requirements. Identical to validateArgs for every schema
+// without the "required when creating" signal.
+function validateArgsEffective(schema, args, opts = {}) {
+  const base = validateArgs(schema, args);
+  try {
+    const missing = missingEffective(schema, (base && base.coerced) || args, opts);
+    const seen = new Set((base.errors || []).map((e) => e.name));
+    const extra = missing.filter((n) => !seen.has(n)).map((name) => ({ name, reason: 'required' }));
+    if (!extra.length) return base;
+    return { ok: false, errors: [...(base.errors || []), ...extra], coerced: base.coerced };
+  } catch {
+    return base;
+  }
+}
+
 module.exports = {
   MAX_CLARIFICATION_ROUNDS,
   PENDING_TTL_MS,
   CANCEL_RE,
+  isIdentifierParam,
+  extractIdentifierValue,
   requiredParams,
+  effectiveRequiredParams,
+  missingEffective,
+  validateArgsEffective,
+  applyParamDefaults,
   missingRequired,
   coerceArgValue,
   validateArgs,

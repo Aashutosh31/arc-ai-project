@@ -10,7 +10,7 @@
 //
 // MCP metadata rides each schema as a NON-ENUMERABLE property so that
 // JSON.stringify-based token estimation (contextBudget) and provider payloads
-// (JSON deep clones by Mistral, object slices by Groq) never serialize it and
+// (JSON deep clones by Gemini, object slices by Groq) never serialize it and
 // never leak server identity into the model's token stream.
 
 const { McpManager } = require('./McpManager');
@@ -19,6 +19,17 @@ const { isMcpWireName, isMcpCanonicalName } = require('./names');
 const limits = require('./limits');
 
 const METADATA_KEY = 'mcpMetadata';
+
+// Shared silent-provider plumbing for automatic reconnects (lazy require:
+// oauthProvider pulls in models + token storage, kept out of the module
+// graph until an OAuth-mode config actually needs it).
+const silentProviderFor = (config, userId) => {
+  try {
+    return require('./oauthProvider').silentProviderForConfig(config, userId);
+  } catch {
+    return null;
+  }
+};
 
 // ---- production wiring (lazy, Mongo-backed when connected) ----
 
@@ -92,7 +103,12 @@ const McpToolSource = {
 
   // ---- schema supply for intent selection ----
 
-  async schemasForRequest({ workspaceId = null, isGuest = false } = {}) {
+  // All automatic connects on this path carry the silent OAuth provider
+  // (null for non-OAuth configs): after a backend restart the live
+  // connection is gone while stored credentials survive, and connecting
+  // without the provider 401s before any tool can be used. Same behavior
+  // as /connect and /refresh. Never interactive.
+  async schemasForRequest({ workspaceId = null, isGuest = false, userId = null } = {}) {
     const core = this._core();
     await core.refreshConfigs();
 
@@ -114,10 +130,19 @@ const McpToolSource = {
     const blocked = [];
 
     for (const config of configs) {
-      if (schemas.length >= limits.MAX_TOOLS_PER_SERVER) break;
+      // Per-server contribution cap (MAX_TOOLS_PER_SERVER is PER SERVER by
+      // contract): counted per config, never cumulatively. A cumulative cap
+      // silently decimates later servers — e.g. 9 + 44 tools from two
+      // servers left only 11 of 66 Linear tools exposed, cutting out the
+      // issue mutation while same-worded readers survived, which no
+      // downstream capability layer can recover from. Request-level safety
+      // stays downstream (6-tool selection cap + context budgeting).
+      let serverCount = 0;
       let conn;
       try {
-        conn = await core.manager.ensureConnected(config);
+        conn = await core.manager.ensureConnected(config, {
+          authProvider: silentProviderFor(config, userId)
+        });
       } catch (err) {
         // Degradation: an unreachable MCP server never blocks the request.
         failures.push({ configId: config.id, reason: err && err.message ? err.message : 'connect failed' });
@@ -145,7 +170,7 @@ const McpToolSource = {
       const permittedNameSet = new Set(permittedEntries.map(e => e.originalToolName));
 
       for (const toolEntry of conn.toolEntries.values()) {
-        if (schemas.length >= limits.MAX_TOOLS_PER_SERVER) break;
+        if (serverCount >= limits.MAX_TOOLS_PER_SERVER) break;
         const entry = toolEntry.entry;
         // Skip tools filtered out by the allow/deny policy (kept server-side
         // for no-substitution detection; never exposed to the model).
@@ -157,8 +182,12 @@ const McpToolSource = {
           serverId: entry.configId,
           wireName: entry.wireName,
           canonicalName: entry.canonicalName,
-          originalToolName: entry.originalToolName
+          originalToolName: entry.originalToolName,
+          // Sanitized MCP behavior hints for capability planning (generic:
+          // no tool names). Non-enumerable: never serialized to providers.
+          annotations: entry.annotations || null
         }));
+        serverCount += 1;
         metadata.set(entry.wireName, {
           serverId: entry.configId,
           configName: config.name,
@@ -182,7 +211,7 @@ const McpToolSource = {
     if (!Array.isArray(activeWireNames) || !activeWireNames.length) return [];
     const core = this._core();
     await core.refreshConfigs();
-    const { workspaceId = null, isGuest = false } = opts || {};
+    const { workspaceId = null, isGuest = false, userId = null } = opts || {};
     const out = [];
     for (const wireName of activeWireNames) {
       const entry = core.registry.toolByWireName(wireName);
@@ -197,7 +226,9 @@ const McpToolSource = {
       }
       let conn;
       try {
-        conn = await core.manager.ensureConnected(config);
+        conn = await core.manager.ensureConnected(config, {
+          authProvider: silentProviderFor(config, userId)
+        });
       } catch {
         continue;
       }
@@ -207,7 +238,8 @@ const McpToolSource = {
         serverId: entry.configId,
         wireName: entry.wireName,
         canonicalName: entry.canonicalName,
-        originalToolName: entry.originalToolName
+        originalToolName: entry.originalToolName,
+        annotations: entry.annotations || null
       }));
     }
     return out;

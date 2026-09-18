@@ -182,15 +182,18 @@ async function run() {
     });
   };
 
-  await check('A. heavy-memory request fits budget, one user message, explicit output', () => {
+  await check('A. heavy-memory request fits budget, current turn last, explicit output', () => {
     const r = heavyAssembly();
     assert.strictEqual(r.ok, true);
     assert.ok(r.report.estimatedInputTokens <= r.report.inputBudget,
       `input ${r.report.estimatedInputTokens} <= ${r.report.inputBudget}`);
     assert.ok(r.report.estimatedTotal <= SAFE_TOTAL_BUDGET_TOKENS,
       `total ${r.report.estimatedTotal} <= ${SAFE_TOTAL_BUDGET_TOKENS}`);
-    assert.strictEqual(r.messages.length, 1, 'provider context is the current turn only');
-    assert.strictEqual(r.messages[0].role, 'user');
+    // No prior turns supplied → messages is the current turn only; with
+    // history supplied the current turn is always LAST (see
+    // conversationContinuity.test.js for the window contract).
+    assert.strictEqual(r.messages.length, 1, 'no history supplied: current turn only');
+    assert.strictEqual(r.messages[r.messages.length - 1].role, 'user');
     assert.ok(r.tools.length <= MAX_TOOLS_PER_REQUEST, `tools ${r.tools.length}`);
     assert.strictEqual(r.maxTokens, OUTPUT_BUDGET_EXTENDED);
     for (const key of ['estimatedInputTokens', 'outputBudget', 'estimatedTotal', 'safeBudget', 'toolsCount', 'toolChars', 'memoryCount', 'memoryChars', 'factsCount', 'factsChars', 'ragCount', 'ragChars', 'historyCount', 'historyChars', 'systemChars', 'userChars', 'compactionApplied', 'compactionPasses']) {

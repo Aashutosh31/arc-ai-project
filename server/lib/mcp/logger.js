@@ -27,7 +27,11 @@ const LOG_EVENTS = Object.freeze({
   OAUTH_FAILED: 'mcp.oauth.failed',
   OAUTH_TOKENS_SAVED: 'mcp.oauth.tokens_saved',
   OAUTH_TOKENS_FORGOTTEN: 'mcp.oauth.tokens_forgotten',
-  OAUTH_REFRESHED: 'mcp.oauth.refreshed'
+  OAUTH_REFRESHED: 'mcp.oauth.refreshed',
+  // Discovery envelope tolerance — a non-2xx discovery response carried a
+  // valid JSON-RPC success envelope and was accepted as discovery. Upstream
+  // status only; bodies/tokens never logged.
+  DISCOVERY_ENVELOPE_TOLERATED: 'mcp.discovery.envelope_tolerated'
 });
 
 const enqueueMicrotask = (fn) => {

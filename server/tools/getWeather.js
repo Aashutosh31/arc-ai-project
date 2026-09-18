@@ -1,5 +1,5 @@
 module.exports = {
-    // 1. Mistral Function Calling Schema
+    // 1. Provider function-calling schema (Groq/Gemini compatible)
     schema: {
         type: "function",
         function: {
@@ -64,7 +64,7 @@ module.exports = {
             };
             const condition = wmoCodes[weatherData.current.weather_code] || 'Unknown conditions';
 
-            // Step 4: Return the structured data to Mistral so it can speak it!
+            // Step 4: Return the structured data to the provider so it can speak it!
             return {
                 success: true,
                 location: city,

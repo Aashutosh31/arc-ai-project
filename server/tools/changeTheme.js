@@ -14,7 +14,7 @@ const themeIds = catalog.themes.map((t) => t.id);
 const themeNames = catalog.themes.map((t) => t.name).join(', ');
 
 module.exports = {
-    // 1. Mistral Function Calling Schema
+    // 1. Provider function-calling schema (Groq/Gemini compatible)
     schema: {
         type: "function",
         function: {

@@ -46,7 +46,7 @@ Related documents:
                          ├────────────────────────────┤
                          │   Groq (primary)           │
                          │   Gemini (multimodal/S-TTS)│
-                         │   Mistral (fallback)       │
+                         │   Gemini (fallback)        │
                          └─────────────┬──────────────┘
                                        ▼
        ┌─────────────────────────────────────────────────┐
@@ -116,7 +116,7 @@ Related documents:
 
 `server/lib/llm/StreamingRuntime.js` owns delivery:
 
-- **Provider streaming** — Groq/Gemini/Mistral `stream` generators are consumed chunk-by-chunk; each chunk is emitted over Socket.IO immediately.
+- **Provider streaming** — Groq/Gemini `stream` generators are consumed chunk-by-chunk; each chunk is emitted over Socket.IO immediately.
 - **Zero artificial delay by default** — `LLM_STREAM_CHUNK_DELAY_MS` defaults to `0` (`??` nullish chain, so an explicit `0` stays `0`).
 - **Non-blocking persistence** — background callbacks (persistence, vector writes) are chained off-band (`trackCallback`) and **never** gate or break socket delivery.
 - **Finalization** — every path terminates with an `isFinal: true` chunk; interruption aborts the stream but still settles terminal state. `consume()` respects `socket.isInterrupted`.
@@ -136,7 +136,7 @@ Related documents:
 
 - **MongoDB (Mongoose)** — conversations, messages, memories, user facts, executions, guest sessions, workspaces, users.
 - **Pinecone** — semantic vectors, upserted in the background after exchanges (`workspaceIndexService`), namespaced per workspace.
-- **Embeddings** — `embeddingService` uses Mistral `mistral-embed` with an SHA1-based LRU cache.
+- **Embeddings** — `embeddingService` uses Gemini `gemini-embedding-001` with an SHA1-based LRU cache.
 
 ---
 

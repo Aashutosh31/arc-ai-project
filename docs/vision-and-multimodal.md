@@ -30,7 +30,7 @@ ARC-AI extends static image understanding to realtime camera-assisted interactio
 
 - Image attachments force `taskMode: 'multimodal'` in the AI pipeline.
 - `LLMRouter`/`inferTaskProfile` classify image-bearing requests and select **Gemini** as the primary provider.
-- **Text-only providers (Groq gpt-oss-120b, Mistral) are excluded** from the fallback order for image requests by `canHandleRequest()` and router-level filtering.
+- **Text-only provider Groq (gpt-oss-120b) is excluded** from the fallback order for image requests by `canHandleRequest()` and router-level filtering.
 - If no multimodal-capable provider is available, a clean error is returned.
 
 ---
