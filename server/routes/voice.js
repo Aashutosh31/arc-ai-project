@@ -51,4 +51,37 @@ router.post('/transcribe', async (req, res) => {
   }
 });
 
+// GET /api/voice/tts-config — Voice Runtime 3.0 capability advertisement.
+// Returns the streaming voice configuration WITHOUT provider credentials.
+// The client uses this to select: streaming server TTS → alternate provider
+// → browser SpeechSynthesis fallback, and server STT (never SpeechRecognition),
+// and to surface truthful state.
+router.get('/tts-config', async (req, res) => {
+  try {
+    const ttsService = require('../services/ttsService');
+    const sttService = require('../services/sttService');
+    const streaming = ttsService.isServerTtsActive();
+    const stt = sttService.getConfig();
+    return res.json({
+      streamingAvailable: streaming,
+      provider: streaming ? 'server' : 'browser-fallback',
+      // Explicit wire format — the browser NEVER infers these values.
+      format: ttsService.VOICE_STREAM_FORMAT || {
+        encoding: 'pcm16',
+        codec: 'pcm_s16le',
+        sampleRate: ttsService.VOICE_PCM_SAMPLE_RATE || 24000,
+        channels: ttsService.VOICE_PCM_CHANNELS || 1,
+        bitDepth: 16,
+        endianness: 'le',
+      },
+      events: ['voice:tts:start', 'voice:tts:audio', 'voice:tts:end', 'voice:tts:error', 'voice:tts:cancel'],
+      fallback: 'speechSynthesis',
+      // Server STT — browser SpeechRecognition is never used for input.
+      stt,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Voice configuration unavailable.' });
+  }
+});
+
 module.exports = router;

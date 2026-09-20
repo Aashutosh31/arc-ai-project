@@ -175,24 +175,26 @@ idle → listening → processing → speaking → listening → …
 
 **Voice input (STT)** is feature-detected, not assumed:
 
-- **Native path** — browsers exposing `SpeechRecognition`/`webkitSpeechRecognition` (continuous, interim results).
-- **Server-STT fallback** — browsers without native recognition (e.g. Firefox typically) use `MediaRecorder` + `POST /api/voice/transcribe`, which transcribes via Gemini and charges 1 ARC-AI credit.
-- **VAD / silence detection** — RMS-based voice activity detection (threshold `0.03`) on the raw audio spectrum; a trailing silence (~1.5 s) submits the utterance; a 60 s cap per utterance.
-- **Turn/session guards and stale-callback protection** — each listening cycle gets a unique turn id; late browser callbacks carrying a stale turn are discarded.
+- **Streaming server STT (primary)** — the mic feeds an input `AudioWorklet` that resamples to PCM16-LE mono 24 kHz and emits 100 ms frames; frames stream over the authenticated Socket.IO connection and the server transcribes via **Sarvam realtime** (`saaras:v3-realtime`, default) with Gemini unary as fallback. Interims arrive while you speak; a trailing-silence `commit()` yields one deterministic final.
+- **Native path (legacy)** — browsers exposing `SpeechRecognition`/`webkitSpeechRecognition` (continuous, interim results).
+- **Server-STT blob fallback (legacy)** — browsers without native recognition use `MediaRecorder` + `POST /api/voice/transcribe` (Gemini, charges 1 ARC-AI credit).
+- **VAD / silence detection** — server-endpointed (Sarvam) plus client RMS-based voice activity detection on the raw audio spectrum; a trailing silence (~1.5 s) submits the utterance; a 60 s cap per utterance.
+- **Turn/session guards and stale-callback protection** — each listening cycle gets a unique turn id; late callbacks carrying a stale turn are discarded.
 - **Live vision integration** — with the camera enabled, the current frame is captured at utterance finalization and attached to the voice command.
+- **Detected-language feedback** — Sarvam reports the utterance language + confidence per final; it is echoed to the client and used to pick the reply voice language (mapped deterministically, unsupported codes fall back to `en-IN`).
 
 **Crucially: voice input ≠ voice output.** Input and output use separate engines (see below). Not all browsers use the same STT implementation; capability detection decides.
 
 ## 🔊 Text-to-Speech (TTS)
 
-- **Default path — browser speech synthesis** (`speechSynthesis`): sentence-based queued playback via `useTextToSpeech` (clean text, split on sentence/clause boundaries, natural-voice preference, Firefox resume guard).
-- **Optional path — server TTS** (`TTS_PROVIDER=gemini`): ARC-AI streams the LLM output to a `TtsStreamBuffer`, splits it at sentence boundaries, synthesizes each segment via Gemini, and emits base64 WAV audio over Socket.IO. The client queues and plays it with a plain `HTMLAudioElement`.
-- Server TTS config: `TTS_PROVIDER=browser|gemini`, `TTS_MODEL=gemini-2.5-flash-preview-tts`, `TTS_VOICE=Kore` (reuses `GEMINI_API_KEY`).
+- **Streaming server TTS (primary)** — one continuous synthesis session per assistant reply. LLM deltas are chunked into semantic sentences (~480 chars, compassionate to prosody) and streamed as binary PCM16-LE mono 24 kHz over the authenticated Socket.IO connection (`voice:tts:start/audio/end/error/cancel`) with an `AudioWorklet` ring-buffer playback engine (`VoiceAudioEngine`). Default provider **Sarvam `bulbul:v3`** (`SARVAM_API_KEY`), with server Gemini speech (`TTS_PROVIDER=gemini`) as fallback.
+- **Fallback path — browser speech synthesis** (`speechSynthesis`): sentence-based queued playback via `useTextToSpeech` (clean text, split on sentence/clause boundaries, natural-voice preference, Firefox resume guard). Used only when no server provider key is configured.
+- Server TTS config: `TTS_PROVIDER=sarvam|browser|gemini`, `SARVAM_TTS_MODEL=bulbul:v3`, `SARVAM_TTS_SPEAKER=shubh`, `SARVAM_TTS_LANGUAGE=en-IN` (or `TTS_MODEL`/`TTS_VOICE` for Gemini).
 - A per-response `ai:tts:mode` event tells the client which path to use, so browser and server voice never double-play.
-- **Interruption/flush:** stopping generation flushes the audio queue; a final `ai:tts:audio:stop` event clears pending server audio.
-- **Browser limitations:** autoplay policies require a user gesture before audio starts, and voice output depends on browser/OS-installed voices (voice *quality/identity* varies).
+- **Interruption/flush (barge-in):** stopping generation flushes the audio queue and cancels the server session; a final `ai:tts:audio:stop` event clears pending audio.
+- **Browser limitations:** autoplay policies require a user gesture before audio starts.
 
-> **Validation status:** the server-side (Gemini) TTS pipeline is implemented and covered by headless unit tests (`server/tests/ttsService.test.js`), but has **not** been validated across a wide matrix of browsers. Treat cross-browser server TTS as *implemented, not fully production-validated*; browser-authored voice differences remain.
+> **Validation status:** the streaming voice runtime (Sarvam + Gemini + mock providers) is covered by headless unit suites (`server/tests/voiceRuntime.test.js`, `voiceStt.test.js`, `ttsService.test.js`, `sttServiceSarvam.test.js`, `sarvamLanguage/audio/stt/tts.test.js`). A local browser-acceptance harness (`.tmp-voice-e2e/`, not committed) supports real headless Firefox/Chromium runs (`run-acceptance.js [browser] [mock|gemini]` and `run-acceptance-real.js [browser] [mock|gemini|sarvam]`). Legacy base64-WAV server TTS remains for old clients; new builds always use the streaming path when a provider key is present.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:00fff5,50:b026ff,100:ff2ee6&height=3" width="100%"/>
 
@@ -284,10 +286,21 @@ GEMINI_MODEL=gemini-2.5-flash
 # LLM_FORCE_PROVIDER=
 # LLM_STREAM_CHUNK_DELAY_MS=0
 
-# Optional server TTS (Gemini)
-# TTS_PROVIDER=browser        # browser (default) | gemini
-# TTS_MODEL=gemini-2.5-flash-preview-tts
+# Optional server TTS (Sarvam primary, Gemini fallback)
+# TTS_PROVIDER=sarvam        # sarvam (default with key) | browser | gemini
+SARVAM_API_KEY=your_sarvam_api_key
+# SARVAM_TTS_MODEL=bulbul:v3
+# SARVAM_TTS_SPEAKER=shubh
+# SARVAM_TTS_LANGUAGE=en-IN
+# GEMINI_TTS_MODEL=gemini-2.5-flash-preview-tts
 # TTS_VOICE=Kore
+
+# Optional server STT (Sarvam primary, Gemini fallback, mock for tests/harness)
+# STT_PROVIDER=sarvam        # sarvam (default with key) | gemini | mock
+# SARVAM_STT_MODEL=saaras:v3-realtime
+# SARVAM_STT_LANGUAGE=auto
+# SARVAM_STT_SILENCE_MS=700
+# SARVAM_STT_MIN_SPEECH_MS=250
 
 # Memory / integrations
 PINECONE_API_KEY=your_pinecone_api_key
@@ -411,8 +424,9 @@ CI (`.github/workflows/ci.yml`) runs client lint + build and a server syntax che
 - **Provider quota / rate limit** — the router classifies 429/quota errors as transient and retries the fallback provider automatically. Raised quotas on the provider account resolve it.
 - **Unsupported multimodal provider** — image requests must land on Gemini; text-only providers are excluded from the fallback cascade and a clear "no multimodal-capable provider" error is returned.
 - **Browser microphone permission** — ARC-AI requests `getUserMedia` with echo cancellation/noise suppression; a `NotAllowedError` means permission was denied in the browser/OS. Re-enable from site settings.
-- **Browser SpeechRecognition unavailable** — the client falls back to `MediaRecorder` + server transcription (`POST /api/voice/transcribe`). If that endpoint returns `VOICE_STT_UNAVAILABLE`, `GEMINI_API_KEY` is missing/expired.
-- **Server STT unavailable** — transcription requires Gemini; if unconfigured, typing still works and browsers with native recognition are unaffected.
+- **Browser SpeechRecognition unavailable** — the client falls back to `MediaRecorder` + server transcription (`POST /api/voice/transcribe`).
+- **Server STT unavailable** — transcription requires `SARVAM_API_KEY` (primary) or `GEMINI_API_KEY` (fallback); if unconfigured, typing still works and browsers with native recognition are unaffected.
+- **Server TTS unavailable** — streaming TTS requires `SARVAM_API_KEY` (or `GEMINI_API_KEY` for the Gemini path); the client falls back to browser `speechSynthesis` while it remains unconfigured.
 - **TTS autoplay restrictions** — browsers block audio without a prior user gesture; interact with the app once (click/tap) before relying on voice replies.
 - **Stale guest-session recovery** — the frontend validates cached guest tokens on load; on rejection it clears the stale session and mints a fresh one automatically.
 - **Conversation/workspace mismatch** — conversations are actor- and workspace-scoped. Cross-actor access 404s; if a conversation seems to "disappear," confirm the correct workspace is active.
