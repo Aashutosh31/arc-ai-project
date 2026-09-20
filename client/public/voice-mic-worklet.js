@@ -23,7 +23,6 @@
 //   bitDepth  16
 //   endianness 'le'
 //   seq       monotonic per-processor lifetime
-/* global registerProcessor, sampleRate, AudioWorkletProcessor */
 
 const TARGET_RATE = 24000;
 const EMIT_EVERY_SAMPLES = 2400; // 100 ms at 24 kHz = 4800 bytes pcm16

@@ -82,7 +82,7 @@ export const ConversationProvider = ({ children }) => {
     }
   }, [activeWorkspaceId]);
 
-  const ensureConversationReady = useCallback(async (title = 'New Conversation') => {
+  const ensureConversationReady = useCallback(async () => {
     if (activeConversationId) {
       return activeConversationId;
     }

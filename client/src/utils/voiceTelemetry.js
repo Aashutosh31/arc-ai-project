@@ -99,7 +99,6 @@ export class VoiceTelemetry {
   log(prefix = '[VoiceTelemetry]') {
     try {
       const snapshot = this.snapshot();
-      // eslint-disable-next-line no-console
       console.debug(prefix, snapshot);
       return snapshot;
     } catch {
