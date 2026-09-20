@@ -38,3 +38,8 @@ TIMEZONE_BUG_ANALYSIS.md
 TIMEZONE_BUG_VISUAL_GUIDE.md
 TIMEZONE_FIX_QUICK_REFERENCE.md
 repomix-output.xml
+
+# Dev/test artifacts (never public)
+.tmp-voice-e2e/
+server/test-*.wav
+client/voice-diagnostic.html

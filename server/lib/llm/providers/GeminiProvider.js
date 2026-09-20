@@ -159,7 +159,10 @@ class GeminiProvider {
   // Transcribe a short voice clip for browsers without native SpeechRecognition.
   // Reuses the configured Gemini API key; throws when unconfigured or when the
   // provider rejects the request. Never logs audio content or API keys.
-  async transcribeAudio({ audioBase64, mimeType } = {}) {
+  // `vocabulary` (optional, bounded) biases the recognizer toward the
+  // application's domain terms; the deterministic normalizer still runs
+  // server-side on the result.
+  async transcribeAudio({ audioBase64, mimeType, vocabulary = null, responseModalities = ['TEXT'], inputAudioTranscription = { languageCodes: [] } } = {}) {
     if (!audioBase64 || typeof audioBase64 !== 'string') {
       const error = new Error('Audio data is required for transcription.');
       error.statusCode = 400;
@@ -168,17 +171,37 @@ class GeminiProvider {
 
     const client = this.getClient();
     const startedAt = Date.now();
+    const terms = Array.isArray(vocabulary)
+      ? vocabulary
+        .map((t) => String(t || '').trim())
+        .filter((t) => t.length >= 2 && t.length <= 40 && !/[\n\r]/.test(t))
+        .slice(0, 60)
+      : [];
+    const vocabularyHint = terms.length
+      ? `Transcribe the speech in this audio clip verbatim. Return only the transcription text with no commentary. If there is no speech, return an empty string. The speaker may use these domain terms, spelled exactly as shown when they occur: ${terms.join(', ')}.`
+      : 'Transcribe the speech in this audio clip verbatim. Return only the transcription text with no commentary. If there is no speech, return an empty string.';
+    const transcriptionConfig = {};
+    if (inputAudioTranscription && inputAudioTranscription.languageCodes) {
+      transcriptionConfig.inputAudioTranscription = { languageCodes: inputAudioTranscription.languageCodes };
+    }
+    const prompt = terms.length
+      ? `Transcribe the speech in this audio clip verbatim. Return only the transcription text with no commentary. If there is no speech, return an empty string. The speaker may use these domain terms, spelled exactly as shown when they occur: ${terms.join(', ')}.`
+      : 'Transcribe the speech in this audio clip verbatim. Return only the transcription text with no commentary. If there is no speech, return an empty string.';
     const response = await client.models.generateContent({
       model: this.defaultModel,
       contents: [
         {
           role: 'user',
           parts: [
-            { text: 'Transcribe the speech in this audio clip verbatim. Return only the transcription text with no commentary. If there is no speech, return an empty string.' },
+            { text: prompt },
             { inlineData: { mimeType: mimeType || 'audio/webm', data: audioBase64 } }
           ]
         }
-      ]
+      ],
+      config: {
+        responseModalities: Array.isArray(responseModalities) ? responseModalities : ['TEXT'],
+        ...transcriptionConfig
+      }
     });
 
     return {

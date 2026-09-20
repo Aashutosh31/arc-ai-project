@@ -7,6 +7,7 @@ import { listThemes } from '../theme/themes';
 import { Button as UiButton } from './ui';
 import { Badge } from './ui';
 import McpSettings from './McpSettings';
+import { getVoiceSettings, saveVoiceSettings } from '../utils/voiceSettings';
 
 const SECTIONS = [
   { id: 'account', label: 'Account', icon: '👤' },
@@ -210,6 +211,11 @@ const SettingsModal = ({
   const { providerInfo: providerInfoCtx } = useChat();
   const providerInfo = providerInfoProp ?? providerInfoCtx;
   const [theme, setTheme] = useState(() => getStoredTheme());
+  // Voice Runtime 2.0 settings (persisted locally, no credentials exposed).
+  const [voiceSettings, setVoiceSettings] = useState(() => getVoiceSettings());
+  const updateVoiceSettings = (patch) => {
+    setVoiceSettings(saveVoiceSettings(patch));
+  };
 
   useEffect(() => {
     if (isOpen) setSection(initialSection);
@@ -301,13 +307,51 @@ const SettingsModal = ({
             {section === 'voice' && (
               <>
                 <SectionTitle>Voice</SectionTitle>
-                <SectionDesc>Hands-free conversation with automatic silence detection and instant interruption.</SectionDesc>
+                <SectionDesc>Hands-free conversation with automatic silence detection and instant interruption. Streaming server voice plays through any modern browser — no OS speech services required.</SectionDesc>
                 <Row>
                   <div><RowLabel>Voice mode</RowLabel>
                   <RowHint>Listening, thinking, speaking states with tap-to-interrupt.</RowHint></div>
                   <UiButton variant="outline" onClick={() => { onClose(); onOpenVoice?.(); }}>Open voice mode</UiButton>
                 </Row>
-                <Note>Voice input and spoken responses use your existing ARC voice pipeline (browser speech + server transcription where available). No additional configuration is required.</Note>
+                <Row>
+                  <div><RowLabel>Streaming voice</RowLabel>
+                  <RowHint>Server-generated speech streamed sentence-by-sentence (primary path).</RowHint></div>
+                  <Toggle $on={voiceSettings.streamingEnabled} onClick={() => updateVoiceSettings({ streamingEnabled: !voiceSettings.streamingEnabled })} aria-label="Toggle streaming voice" />
+                </Row>
+                <Row>
+                  <div><RowLabel>Browser speech fallback</RowLabel>
+                  <RowHint>Fall back to device speech when streaming is unavailable.</RowHint></div>
+                  <Toggle $on={voiceSettings.fallbackEnabled} onClick={() => updateVoiceSettings({ fallbackEnabled: !voiceSettings.fallbackEnabled })} aria-label="Toggle browser speech fallback" />
+                </Row>
+                <Row>
+                  <div><RowLabel>Voice</RowLabel>
+                  <RowHint>Server voice used for streaming playback.</RowHint></div>
+                  <select
+                    value={voiceSettings.voice}
+                    onChange={(e) => updateVoiceSettings({ voice: e.target.value })}
+                    aria-label="Server voice"
+                    style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--foreground)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', fontSize: 12.5 }}
+                  >
+                    {['Kore', 'Charon', 'Fenrir', 'Puck', 'Aoede'].map((v) => (
+                      <option key={v} value={v}>{v}</option>
+                    ))}
+                  </select>
+                </Row>
+                <Row>
+                  <div><RowLabel>Speaking speed</RowLabel>
+                  <RowHint>Applies to the browser speech fallback path.</RowHint></div>
+                  <select
+                    value={String(voiceSettings.rate)}
+                    onChange={(e) => updateVoiceSettings({ rate: Number(e.target.value) })}
+                    aria-label="Speaking speed"
+                    style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--foreground)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', fontSize: 12.5 }}
+                  >
+                    {['0.75', '0.9', '1', '1.1', '1.25'].map((r) => (
+                      <option key={r} value={r}>{r}×</option>
+                    ))}
+                  </select>
+                </Row>
+                <Note>Voice input and spoken responses use your existing ARC voice pipeline (streaming server voice primary, browser speech fallback, server transcription where available). No additional configuration is required.</Note>
               </>
             )}
 
