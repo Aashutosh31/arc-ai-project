@@ -41,6 +41,7 @@ const {
 const WorkspaceRuntimeManager = require('./WorkspaceRuntimeManager');
 const WorkspaceLogger = require('../lib/WorkspaceLogger');
 const ttsService = require('./ttsService');
+const { decisionEngine, decisionPolicy } = require('./decision');
 
 // Truthful refusal when a request cannot fit the provider context budget
 // even after deterministic compaction. Used both for pre-provider refusal
@@ -2803,46 +2804,12 @@ class AIService {
             // MCP tools ride the same budget pipeline: their schemas are
             // keyword-scored below and then held to the SAME 6-tool cap and
             // the 7K context budget (unknown-group rank → dropped first).
-            let mcpSchemas = [];
-            let mcpBlocked = [];
-            let mcpMetadata = null;
-            let mcpFailures = [];
-            try {
-                const mcpPick = await McpToolSource.schemasForRequest({
-                    workspaceId: workspaceContext?.workspaceId || null,
-                    isGuest,
-                    // Automatic reconnects need the silent OAuth provider:
-                    // after a restart the live connection is gone while
-                    // stored credentials survive. Same behavior as /connect
-                    // and /refresh; never interactive.
-                    userId
-                });
-                mcpSchemas = mcpPick?.schemas || [];
-                // Server-side only: policy-removed tools, used solely for
-                // no-substitution detection below (never sent to any provider).
-                mcpBlocked = mcpPick?.blocked || [];
-                mcpMetadata = mcpPick?.metadata || null;
-                mcpFailures = mcpPick?.failures || [];
-            } catch {
-                mcpSchemas = [];
-                mcpBlocked = [];
-                mcpMetadata = null;
-                mcpFailures = [];
-            }
-            // Shared MCP executor for deterministic in-turn resolution
-            // (creation context, pending candidate matching). Same
-            // TaskExecutor path as normal tool calls — real charges,
-            // real policy gates, bounded by each caller.
-            const mcpExec = (wireName, args) => TaskExecutor.executeTool(
-                wireName, args, userId, socket,
-                { signal: controller.signal, conversationId, workspaceId: workspaceContext.workspaceId }
-            );
             // ---- Recent conversation window + working state (core continuity) ----
-            // Loaded BEFORE tool selection so follow-ups without an explicit
-            // capability verb still surface the prior turn's tools. Bounded
-            // (10 turns x ~1500 chars) and failure-silent: [] / null degrades
-            // to the old single-turn shape, never an error. Guests have no
-            // conversation record, so both stay empty for them.
+            // Loaded BEFORE any MCP work so the decision gate can see
+            // follow-up context, active working state, and pending tool state.
+            // Bounded (10 turns x ~1500 chars) and failure-silent: [] / null
+            // degrades to the old single-turn shape, never an error. Guests
+            // have no conversation record, so both stay empty for them.
             let recentTurns = [];
             let persistedWorkingState = null;
             let persistedSummary = '';
@@ -2860,6 +2827,107 @@ class AIService {
             // again" resurface the prior turn's capability. Generic — no
             // pronoun or entity special-casing.
             const toolSelectionQuery = this.buildToolSelectionQuery(baseMessageContent, recentTurns);
+            // Pending tool-call state (single load, shared by the decision
+            // gate, the working-state assembly, and the pending resume block).
+            let pendingForGate = null;
+            try { pendingForGate = await this.loadPendingToolCall(conversationId, userId); } catch { pendingForGate = null; }
+            // Working state for this turn: persisted refs (previous tool
+            // activity) merged with pending-tool state. Fresh tool results
+            // below refresh the stored copy via refreshWorkingStateFromResults.
+            let turnWorkingState = persistedWorkingState;
+            try {
+                if (pendingForGate || persistedWorkingState) {
+                    turnWorkingState = {
+                        ...(persistedWorkingState && typeof persistedWorkingState === 'object' ? persistedWorkingState : {}),
+                        ...(pendingForGate && typeof pendingForGate.toolName === 'string'
+                            ? { pendingTool: { tool: pendingForGate.toolName, missing: pendingForGate.missing || [] } }
+                            : {})
+                    };
+                    if (!Object.keys(turnWorkingState).length) turnWorkingState = null;
+                }
+            } catch { turnWorkingState = persistedWorkingState; }
+
+            // ---- Jev System One decision gate ----------------------------------
+            // The ONLY behavioral change introduced by the decision layer:
+            // when DecisionEngine confidently classifies the request as needing
+            // no external capability/tool, the entire MCP machinery below
+            // (inventory, discovery, candidate selection, feasibility,
+            // execution) is skipped and the request proceeds straight to the
+            // normal Groq path. High-confidence tool requests and
+            // low-confidence (legacy) results enter the existing pipeline
+            // UNCHANGED. Jev never executes a tool — deterministic ARC code
+            // remains authoritative for authorization, selection, arguments,
+            // policy, and execution. Jev failures degrade to legacy routing.
+            let decisionGate = null;
+            let skipMcpGate = false;
+            try {
+                decisionGate = await this.decisionEngine.decide({
+                    request: baseMessageContent,
+                    query: toolSelectionQuery,
+                    recentContext: recentTurns,
+                    workingState: turnWorkingState,
+                    pendingTool: pendingForGate,
+                    hasAttachment: Boolean(imageBase64 || document),
+                    signal: controller.signal
+                });
+                skipMcpGate = decisionPolicy.shouldSkipMcp(decisionGate, {
+                    policy: this.decisionEngine.policy,
+                    hasAttachments: Boolean(imageBase64 || document),
+                    hasPendingTool: Boolean(pendingForGate && pendingForGate.toolName),
+                    workingState: turnWorkingState
+                });
+            } catch {
+                decisionGate = null;
+                skipMcpGate = false;
+            }
+            if (skipMcpGate) {
+                console.log('[AIService] decisionGate.skipMcp', {
+                    provider: decisionGate?.provider || null,
+                    command: String(baseMessageContent || '').slice(0, 120)
+                });
+            }
+
+            // ---- MCP schemas (policy-exposed only) -----------------------------
+            // Skipped entirely when the decision gate confidently classified
+            // the request as conversational: no inventory, no discovery, no
+            // connection/connect work, no candidate generation. Everything
+            // else still passes through this unchanged authoritative source.
+            let mcpSchemas = [];
+            let mcpBlocked = [];
+            let mcpMetadata = null;
+            let mcpFailures = [];
+            if (!skipMcpGate) {
+                try {
+                    const mcpPick = await McpToolSource.schemasForRequest({
+                        workspaceId: workspaceContext?.workspaceId || null,
+                        isGuest,
+                        // Automatic reconnects need the silent OAuth provider:
+                        // after a restart the live connection is gone while
+                        // stored credentials survive. Same behavior as /connect
+                        // and /refresh; never interactive.
+                        userId
+                    });
+                    mcpSchemas = mcpPick?.schemas || [];
+                    // Server-side only: policy-removed tools, used solely for
+                    // no-substitution detection below (never sent to any provider).
+                    mcpBlocked = mcpPick?.blocked || [];
+                    mcpMetadata = mcpPick?.metadata || null;
+                    mcpFailures = mcpPick?.failures || [];
+                } catch {
+                    mcpSchemas = [];
+                    mcpBlocked = [];
+                    mcpMetadata = null;
+                    mcpFailures = [];
+                }
+            }
+            // Shared MCP executor for deterministic in-turn resolution
+            // (creation context, pending candidate matching). Same
+            // TaskExecutor path as normal tool calls — real charges,
+            // real policy gates, bounded by each caller.
+            const mcpExec = (wireName, args) => TaskExecutor.executeTool(
+                wireName, args, userId, socket,
+                { signal: controller.signal, conversationId, workspaceId: workspaceContext.workspaceId }
+            );
             // Explicit server scope (user named the integration): every
             // SELECTION input below uses the scoped pool, so no
             // foreign-server tool can satisfy, substitute, or crowd out this
@@ -2892,116 +2960,141 @@ class AIService {
                 scopedMcpSchemas = mcpSchemas;
                 scopedMcpBlocked = mcpBlocked;
             }
-            const toolPick = selectToolSchemas(toolSelectionQuery, () => toolRegistry.getSchemas(), { mcpSchemas: scopedMcpSchemas, mcpBlocked: scopedMcpBlocked, serverScope: mcpServerScope });
-            // Availability coverage (§6): if the request maps to a capability
-            // declared by an exposed (policy-permitted) tool that selection
-            // missed, force it in deterministically (once, within the cap).
-            // Never fabricates, never touches denied names (absent from
-            // `mcpSchemas` by construction), never bypasses required args.
-            try {
-                const forced = reselectMcpCapabilities(toolSelectionQuery, scopedMcpSchemas, toolPick.tools, 6);
-                for (const schema of forced) {
-                    if (toolPick.tools.length >= 6) break;
-                    if (!toolPick.tools.includes(schema)) {
-                        toolPick.tools.push(schema);
-                        const fname = schema?.function?.name;
-                        if (fname && Array.isArray(toolPick.mcpCapability) && !toolPick.mcpCapability.includes(fname)) {
-                            toolPick.mcpCapability.push(fname);
-                        }
-                    }
-                }
-                if (forced.length) console.log('[AIService] mcpCoverage.forced', { tools: forced.map((s) => s?.function?.name).filter(Boolean) });
-            } catch { /* coverage must never break selection */ }
-            // Supporting creation-context resolvers (§7 multi-step create):
-            // a CREATE capability pick with required CONTEXT params
-            // (team_id, …) unresolvable from the user text pulls its
-            // entity-matched LIST/READ tool into the request (cap-bounded)
-            // so the model — or recovery — can resolve scope first and then
-            // call the mutation in the same turn. Supporting only: never a
-            // capability pick, never forced, deny-wins via exposed set.
+            // Tool selection is skipped entirely for confident conversational
+            // requests (decision gate): no native selection, no MCP candidate
+            // generation, no inventory — the request goes straight to the Groq
+            // path. High-confidence tool requests and legacy fallbacks run the
+            // full selection below unchanged.
+            let toolPick = {
+                tools: [],
+                groups: [],
+                matchedGroups: [],
+                defaulted: true,
+                totalAvailable: 0,
+                mcpAvailable: 0,
+                mcpMatched: 0,
+                mcpSuppressed: false,
+                mcpBlockedNames: [],
+                mcpExplicit: [],
+                mcpCapability: []
+            };
             let supportingMcp = [];
-            try {
-                let createCaps = null;
-                try { createCaps = classifyIntentCapabilities(toolSelectionQuery); } catch { createCaps = null; }
-                if (createCaps && createCaps.has('CREATE')) {
-                    const seen = new Set(toolPick.tools.map((s) => s?.function?.name).filter(Boolean));
-                    for (const cname of (toolPick.mcpCapability || [])) {
-                        if (toolPick.tools.length >= 6) break;
-                        const schema = (mcpSchemas || []).find((s) => s?.function?.name === cname);
-                        if (!schema) continue;
-                        const entity = toolEntityStem(schema);
-                        for (const { name: pname } of effectiveRequiredParams(schema)) {
-                            if (toolPick.tools.length >= 6) break;
-                            const cls = this.classifyMissingParam(pname, entity);
-                            if (cls.kind !== 'context' || !cls.stem) continue;
-                            let pasted;
-                            try { pasted = extractIdentifierValue(toolSelectionQuery, pname); } catch { pasted = undefined; }
-                            if (pasted !== undefined) continue;
-                            const resolver = this.findContextResolvers(cls.stem, scopedMcpSchemas, cname)[0];
-                            const rname = resolver?.function?.name;
-                            if (typeof rname !== 'string' || !rname || seen.has(rname)) continue;
-                            toolPick.tools.push(resolver);
-                            seen.add(rname);
-                            supportingMcp.push(rname);
-                        }
-                    }
-                    if (supportingMcp.length) console.log('[AIService] mcpCoverage.supporting', { tools: supportingMcp });
-                }
-            } catch { /* supporting resolvers must never break selection */ }
-            // Capability-miss evidence (read-only): a mutation intent with
-            // zero picks means the next failure investigation starts blind
-            // ("no create tool" with no record of why). Log the
-            // entity-matching exposed candidates now, while the pool is
-            // still in hand.
-            try {
-                let missCaps = null;
-                try { missCaps = classifyIntentCapabilities(toolSelectionQuery); } catch { missCaps = null; }
-                this.logMcpCapabilityMiss({
-                    intentCaps: missCaps,
-                    capabilityNames: [...(toolPick.mcpCapability || []), ...supportingMcp],
-                    mcpSchemas,
-                    scopedSchemas: scopedMcpSchemas,
-                    serverScope: mcpServerScope,
-                    queryText: toolSelectionQuery
-                });
-            } catch { /* diagnostics must never break selection */ }
-            // Preliminary MCP inventory (§9 step order): bounded metadata
-            // from the SELECTED tools only. The FINAL inventory is rebuilt
-            // after budget assembly from the exact provider-visible set, so
-            // the model never sees a tool it cannot call. A denied or
-            // undiscovered tool is absent here exactly as in selection.
             let mcpInventoryText = '';
-            try {
-                mcpInventoryText = this.mcpInventoryBlockForTools(toolPick.tools, { metadata: mcpMetadata, failures: [] });
-            } catch { mcpInventoryText = ''; }
-            // No-substitution truthfulness: the request targets an MCP
-            // capability removed by workspace policy. No MCP tool was
-            // offered, so guide the model to say so instead of substituting
-            // an unrelated tool or fabricating a result. Generic: names the
-            // blocked wires the user already knows (Settings shows them).
             let mcpPolicyNote = '';
-            if (toolPick?.mcpSuppressed && Array.isArray(toolPick?.mcpBlockedNames) && toolPick.mcpBlockedNames.length) {
-                const named = toolPick.mcpBlockedNames.slice(0, 3).join(', ');
-                mcpPolicyNote = `\n\nPOLICY NOTICE: the MCP capability requested here (${named}) is currently unavailable in this workspace due to the workspace's MCP tool policy. Do not substitute another tool for it, do not execute an unrelated tool in its place, and do not fabricate its result. Briefly tell the user it is unavailable or blocked by policy.`;
-            }
-            // Degraded-set truthfulness (NOT a policy denial): the request
-            // maps to MCP capabilities but the current exposed set declares
-            // none of them — partial discovery, reconnect race, or scope
-            // change. Without this notice the model confabulates specifics
-            // ("only comments") plus manual API/token/UI walkthroughs.
-            // Generic: capability evidence only, no tool or vendor names.
             let mcpDegradedNote = '';
             let toolIntentCaps = null;
-            try {
-                toolIntentCaps = classifyIntentCapabilities(toolSelectionQuery);
-            } catch { toolIntentCaps = null; }
-            try {
-                mcpDegradedNote = this.mcpDegradedNotice({
-                    intentCaps: toolIntentCaps,
-                    capabilityNames: toolPick.mcpCapability,
-                    mcpSchemas, mcpBlocked, suppressed: Boolean(toolPick?.mcpSuppressed)
-                });
-            } catch { mcpDegradedNote = ''; }
+            if (!skipMcpGate) {
+                toolPick = selectToolSchemas(toolSelectionQuery, () => toolRegistry.getSchemas(), { mcpSchemas: scopedMcpSchemas, mcpBlocked: scopedMcpBlocked, serverScope: mcpServerScope });
+                // Availability coverage (§6): if the request maps to a capability
+                // declared by an exposed (policy-permitted) tool that selection
+                // missed, force it in deterministically (once, within the cap).
+                // Never fabricates, never touches denied names (absent from
+                // `mcpSchemas` by construction), never bypasses required args.
+                try {
+                    const forced = reselectMcpCapabilities(toolSelectionQuery, scopedMcpSchemas, toolPick.tools, 6);
+                    for (const schema of forced) {
+                        if (toolPick.tools.length >= 6) break;
+                        if (!toolPick.tools.includes(schema)) {
+                            toolPick.tools.push(schema);
+                            const fname = schema?.function?.name;
+                            if (fname && Array.isArray(toolPick.mcpCapability) && !toolPick.mcpCapability.includes(fname)) {
+                                toolPick.mcpCapability.push(fname);
+                            }
+                        }
+                    }
+                    if (forced.length) console.log('[AIService] mcpCoverage.forced', { tools: forced.map((s) => s?.function?.name).filter(Boolean) });
+                } catch { /* coverage must never break selection */ }
+                // Supporting creation-context resolvers (§7 multi-step create):
+                // a CREATE capability pick with required CONTEXT params
+                // (team_id, …) unresolvable from the user text pulls its
+                // entity-matched LIST/READ tool into the request (cap-bounded)
+                // so the model — or recovery — can resolve scope first and then
+                // call the mutation in the same turn. Supporting only: never a
+                // capability pick, never forced, deny-wins via exposed set.
+                supportingMcp = [];
+                try {
+                    let createCaps = null;
+                    try { createCaps = classifyIntentCapabilities(toolSelectionQuery); } catch { createCaps = null; }
+                    if (createCaps && createCaps.has('CREATE')) {
+                        const seen = new Set(toolPick.tools.map((s) => s?.function?.name).filter(Boolean));
+                        for (const cname of (toolPick.mcpCapability || [])) {
+                            if (toolPick.tools.length >= 6) break;
+                            const schema = (mcpSchemas || []).find((s) => s?.function?.name === cname);
+                            if (!schema) continue;
+                            const entity = toolEntityStem(schema);
+                            for (const { name: pname } of effectiveRequiredParams(schema)) {
+                                if (toolPick.tools.length >= 6) break;
+                                const cls = this.classifyMissingParam(pname, entity);
+                                if (cls.kind !== 'context' || !cls.stem) continue;
+                                let pasted;
+                                try { pasted = extractIdentifierValue(toolSelectionQuery, pname); } catch { pasted = undefined; }
+                                if (pasted !== undefined) continue;
+                                const resolver = this.findContextResolvers(cls.stem, scopedMcpSchemas, cname)[0];
+                                const rname = resolver?.function?.name;
+                                if (typeof rname !== 'string' || !rname || seen.has(rname)) continue;
+                                toolPick.tools.push(resolver);
+                                seen.add(rname);
+                                supportingMcp.push(rname);
+                            }
+                        }
+                        if (supportingMcp.length) console.log('[AIService] mcpCoverage.supporting', { tools: supportingMcp });
+                    }
+                } catch { /* supporting resolvers must never break selection */ }
+                // Capability-miss evidence (read-only): a mutation intent with
+                // zero picks means the next failure investigation starts blind
+                // ("no create tool" with no record of why). Log the
+                // entity-matching exposed candidates now, while the pool is
+                // still in hand.
+                try {
+                    let missCaps = null;
+                    try { missCaps = classifyIntentCapabilities(toolSelectionQuery); } catch { missCaps = null; }
+                    this.logMcpCapabilityMiss({
+                        intentCaps: missCaps,
+                        capabilityNames: [...(toolPick.mcpCapability || []), ...supportingMcp],
+                        mcpSchemas,
+                        scopedSchemas: scopedMcpSchemas,
+                        serverScope: mcpServerScope,
+                        queryText: toolSelectionQuery
+                    });
+                } catch { /* diagnostics must never break selection */ }
+                // Preliminary MCP inventory (§9 step order): bounded metadata
+                // from the SELECTED tools only. The FINAL inventory is rebuilt
+                // after budget assembly from the exact provider-visible set, so
+                // the model never sees a tool it cannot call. A denied or
+                // undiscovered tool is absent here exactly as in selection.
+                mcpInventoryText = '';
+                try {
+                    mcpInventoryText = this.mcpInventoryBlockForTools(toolPick.tools, { metadata: mcpMetadata, failures: [] });
+                } catch { mcpInventoryText = ''; }
+                // No-substitution truthfulness: the request targets an MCP
+                // capability removed by workspace policy. No MCP tool was
+                // offered, so guide the model to say so instead of substituting
+                // an unrelated tool or fabricating a result. Generic: names the
+                // blocked wires the user already knows (Settings shows them).
+                mcpPolicyNote = '';
+                if (toolPick?.mcpSuppressed && Array.isArray(toolPick?.mcpBlockedNames) && toolPick.mcpBlockedNames.length) {
+                    const named = toolPick.mcpBlockedNames.slice(0, 3).join(', ');
+                    mcpPolicyNote = `\n\nPOLICY NOTICE: the MCP capability requested here (${named}) is currently unavailable in this workspace due to the workspace's MCP tool policy. Do not substitute another tool for it, do not execute an unrelated tool in its place, and do not fabricate its result. Briefly tell the user it is unavailable or blocked by policy.`;
+                }
+                // Degraded-set truthfulness (NOT a policy denial): the request
+                // maps to MCP capabilities but the current exposed set declares
+                // none of them — partial discovery, reconnect race, or scope
+                // change. Without this notice the model confabulates specifics
+                // ("only comments") plus manual API/token/UI walkthroughs.
+                // Generic: capability evidence only, no tool or vendor names.
+                mcpDegradedNote = '';
+                toolIntentCaps = null;
+                try {
+                    toolIntentCaps = classifyIntentCapabilities(toolSelectionQuery);
+                } catch { toolIntentCaps = null; }
+                try {
+                    mcpDegradedNote = this.mcpDegradedNotice({
+                        intentCaps: toolIntentCaps,
+                        capabilityNames: toolPick.mcpCapability,
+                        mcpSchemas, mcpBlocked, suppressed: Boolean(toolPick?.mcpSuppressed)
+                    });
+                } catch { mcpDegradedNote = ''; }
+            }
             const outputIntent = detectOutputIntent(baseMessageContent);
             const outputBudget = outputIntent === 'extended' ? OUTPUT_BUDGET_EXTENDED : OUTPUT_BUDGET_DEFAULT;
 
@@ -3164,10 +3257,11 @@ class AIService {
                     "I am ARC-AI, an autonomous multimodal AI platform created by Aashutosh Bairagi — an AI systems engineer focused on realtime architectures, autonomous agents, and next-generation intelligent software systems."
                     ${mcpPolicyNote}${mcpDegradedNote}`;
 
-            // Working state for this turn: persisted refs (previous tool
-            // activity) merged with pending-tool state. Fresh tool results
-            // below refresh the stored copy via refreshWorkingStateFromResults.
-            let turnWorkingState = persistedWorkingState;
+            // Working state for this turn: recomputed AFTER the pending
+            // tool-call machinery above so a pending record it resolved or
+            // cleared is reflected in the prompt. The decision gate above ran
+            // on the same merged shape (single pre-gate load).
+            turnWorkingState = persistedWorkingState;
             try {
                 const pendingForState = await this.loadPendingToolCall(conversationId, userId);
                 if (pendingForState || persistedWorkingState) {

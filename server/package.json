@@ -16,6 +16,7 @@
     "@google/genai": "^2.0.1",
     "@modelcontextprotocol/client": "^2.0.0",
     "@pinecone-database/pinecone": "^7.1.0",
+    "ai": "^7.0.107",
     "axios": "^1.16.0",
     "bcryptjs": "^3.0.2",
     "bullmq": "^5.76.6",
