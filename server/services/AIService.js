@@ -266,6 +266,11 @@ const buildEmptyToolResponse = ({ calendarIntent, toolCalls = [], fallbackToolRe
 class AIService {
     constructor() {
         this.llmRouter = new LLMRouter();
+        // Decision layer singleton. THE gate depends on this instance field:
+        // without it every decide() call throws and silently falls back to
+        // skipMcpGate=false (full MCP pipeline) — the exact "still too late"
+        // symptom. Wired once here, used by processQuery's decision gate.
+        this.decisionEngine = decisionEngine;
         this.streamingRuntime = new StreamingRuntime();
         this.activeRequests = new Map();
         this.workspaceRuntime = new WorkspaceRuntimeManager({ logger: console });
@@ -2712,6 +2717,48 @@ class AIService {
                 return scheduleResponse;
             }
 
+            // ---- Base user command ----------------------------------------------
+            const baseMessageContent = text || (document ? `Please analyze the attached document: ${document.name}` : 'Hello');
+
+            // ---- Jev System One decision gate (authoritative, UPSTREAM) ----
+            // Runs FIRST — before memory/RAG/document retrieval and long before
+            // ANY MCP-touching code — so the flat [Decision] telemetry precedes
+            // every possible request-scoped MCP log. Inputs are the raw user
+            // command + minimal metadata ONLY. Never MCP schemas, inventory,
+            // server connections, or discovery: Jev is not initialized merely
+            // to decide whether MCP is needed (no circular dependency).
+            // High-confidence no-tool results disable MCP for this turn;
+            // tool results and low-confidence (legacy) results continue
+            // through the full pipeline unchanged.
+            let decisionGate = null;
+            let skipMcpGate = false;
+            try {
+                decisionGate = await this.decisionEngine.decide({
+                    request: baseMessageContent,
+                    query: String(text || '').trim(),
+                    recentContext: [],
+                    workingState: null,
+                    pendingTool: null,
+                    hasAttachment: Boolean(imageBase64 || document),
+                    signal: controller.signal
+                });
+                skipMcpGate = decisionPolicy.shouldSkipMcp(decisionGate, {
+                    policy: this.decisionEngine.policy,
+                    hasAttachments: Boolean(imageBase64 || document),
+                    hasPendingTool: false,
+                    workingState: null
+                });
+            } catch {
+                decisionGate = null;
+                skipMcpGate = false;
+            }
+            if (skipMcpGate) {
+                console.log('[AIService] decisionGate.skipMcp', {
+                    provider: decisionGate?.provider || null,
+                    command: String(baseMessageContent || '').slice(0, 120)
+                });
+            }
+
             if (socket) {
                 socket.emit('ai:agent:status', {
                     status: 'searching history',
@@ -2724,8 +2771,6 @@ class AIService {
             // choose by value instead of recency alone. The pipeline caps
             // what is actually sent; memories are never injected verbatim.
             const memoryDocs = isGuest ? [] : await AIMemory.find({ userId, workspaceId: workspaceContext.workspaceId || null }).sort({ pinned: -1, timestamp: -1 }).limit(20).lean();
-
-            const baseMessageContent = text || (document ? `Please analyze the attached document: ${document.name}` : 'Hello');
 
                         const factDocs = isGuest ? [] : await UserFact.find({ userId, workspaceId: workspaceContext.workspaceId || null }).sort({ pinned: -1, createdAt: -1 }).limit(20).lean();
 
@@ -2847,29 +2892,25 @@ class AIService {
                 }
             } catch { turnWorkingState = persistedWorkingState; }
 
-            // ---- Jev System One decision gate ----------------------------------
-            // The ONLY behavioral change introduced by the decision layer:
-            // when DecisionEngine confidently classifies the request as needing
-            // no external capability/tool, the entire MCP machinery below
-            // (inventory, discovery, candidate selection, feasibility,
-            // execution) is skipped and the request proceeds straight to the
-            // normal Groq path. High-confidence tool requests and
-            // low-confidence (legacy) results enter the existing pipeline
-            // UNCHANGED. Jev never executes a tool — deterministic ARC code
-            // remains authoritative for authorization, selection, arguments,
-            // policy, and execution. Jev failures degrade to legacy routing.
-            let decisionGate = null;
-            let skipMcpGate = false;
+            // ---- Decision gate re-evaluation (context-complete) ---------------
+            // The AUTHORITATIVE classification already ran upstream (before any
+            // MCP work) with the raw command + minimal metadata. This block only
+            // re-derives the skip boolean against the fully assembled
+            // working/pending state, so an active tool surface (e.g. a pending
+            // Linear creation) still keeps MCP available. No second Jev call —
+            // exactly one authoritative [Decision] log per request.
             try {
-                decisionGate = await this.decisionEngine.decide({
-                    request: baseMessageContent,
-                    query: toolSelectionQuery,
-                    recentContext: recentTurns,
-                    workingState: turnWorkingState,
-                    pendingTool: pendingForGate,
-                    hasAttachment: Boolean(imageBase64 || document),
-                    signal: controller.signal
-                });
+                if (!decisionGate) {
+                    decisionGate = await this.decisionEngine.decide({
+                        request: baseMessageContent,
+                        query: toolSelectionQuery,
+                        recentContext: recentTurns,
+                        workingState: turnWorkingState,
+                        pendingTool: pendingForGate,
+                        hasAttachment: Boolean(imageBase64 || document),
+                        signal: controller.signal
+                    });
+                }
                 skipMcpGate = decisionPolicy.shouldSkipMcp(decisionGate, {
                     policy: this.decisionEngine.policy,
                     hasAttachments: Boolean(imageBase64 || document),
@@ -3344,6 +3385,7 @@ class AIService {
             // selection, inventory, planner, recovery, and provider tools;
             // this bundle logs exactly what the turn will execute with.
             // Names/counts/flags only — never secrets, values, or content.
+            if (!skipMcpGate) {
             let mcpPlan = null;
             try {
                 const requiredNames = [
@@ -3412,7 +3454,7 @@ class AIService {
                     } catch { /* diagnostics only */ }
                 }
             } catch { /* plan diagnostics must never break the path */ }
-
+            }
             if (socket) {
                 socket.emit('ai:agent:status', {
                     status: retrievalItems.length > 0 ? 'retrieving memory' : 'thinking',

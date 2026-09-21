@@ -47,6 +47,26 @@ const GREETING_PHRASES = new Set([
 
 const hasGreeting = (text) => GREETING_PHRASES.has(normalizeText(text));
 
+// Obvious knowledge/explanation questions ("what is React?", "explain
+// JavaScript closures"). Bounded, conservative: a fixed question opener plus
+// content, and ownership/workspace/doc/time terms EXCLUDE the fast path so a
+// personal lookup ("what is my deadline?", "what is in the document?") never
+// skips the tool pipeline by accident. Tool signals are still checked first
+// and always win (e.g. "what is the weather in London" → tool path).
+const KNOWLEDGE_OPENERS = [
+  'what is ', 'what is a ', 'what are ', 'what does ', 'what do ', 'whats ',
+  'who is ', 'who are ', 'where is ', 'where are ', 'when is ', 'when are ',
+  'why is ', 'why are ', 'how does ', 'how do ', 'how is ', 'how are ',
+  'explain ', 'define ', 'describe ', 'tell me about '
+];
+const KNOWLEDGE_EXCLUDERS = /(^|\s)(my|project|projects|document|documents|file|files|page|pages|issue|issues|ticket|tickets|task|tasks|deadline|account|billing|workspace|settings|profile|status|error|report|reports|data|time|meeting|meetings|event|events)\b/;
+
+const hasKnowledgeQuestion = (text) => {
+  const lower = String(text || '').toLowerCase();
+  if (KNOWLEDGE_EXCLUDERS.test(lower)) return false;
+  return KNOWLEDGE_OPENERS.some((o) => lower.startsWith(o));
+};
+
 // Curated capability verbs/surfaces. These are unambiguously external-action
 // phrasings tied to ARC's capability surfaces; matching any of them forces
 // the normal tool/MCP path deterministically (Jev is not needed).
@@ -155,6 +175,22 @@ const classify = ({
       };
     }
 
+    if (hasKnowledgeQuestion(current)) {
+      return {
+        certain: true,
+        decision: buildDecisionResult({
+          needsExternalCapability: { value: false, probability: 1 },
+          operation: { value: 'chat', probability: 1 },
+          risk: { value: 0, probability: 1 },
+          needsConfirmation: { value: false, probability: 1 },
+          provider: 'deterministic',
+          latencyMs: 0,
+          confidence: 1,
+          reason: 'deterministic-knowledge'
+        })
+      };
+    }
+
     return { certain: false, reason: 'uncertain' };
   } catch {
     // The classifier must never throw into the request path.
@@ -166,6 +202,7 @@ module.exports = {
   normalizeText,
   hasGreeting,
   hasToolSignal,
+  hasKnowledgeQuestion,
   hasActiveWorkingState,
   guessOperation,
   classify

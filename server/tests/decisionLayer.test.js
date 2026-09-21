@@ -76,9 +76,11 @@ const jevPolicy = () => ({ ...basePolicy(), jevEnabled: true, gatewayKeyConfigur
     assert.equal(det.decision.needsExternalCapability.value, true);
   });
 
-  await check('plain question defers (not certain)', async () => {
+  await check('knowledge question -> certain no-tool', async () => {
     const det = deterministic.classify({ request: 'explain closures in javascript' });
-    assert.equal(det.certain, false);
+    assert.equal(det.certain, true);
+    assert.equal(det.decision.needsExternalCapability.value, false);
+    assert.equal(det.decision.reason, 'deterministic-knowledge');
   });
 
   await check('continuous question defers (uncertain)', async () => {
@@ -169,7 +171,7 @@ const jevPolicy = () => ({ ...basePolicy(), jevEnabled: true, gatewayKeyConfigur
       }),
       policy: { ...jevPolicy(), decisionTimeoutMs: 30 }
     });
-    const r = await engine.decide({ request: 'what is a closure' });
+    const r = await engine.decide({ request: 'summarize our deployment risks' });
     assert.equal(r.provider, 'legacy');
     assert.equal(r.reason, 'timeout');
   });
@@ -194,7 +196,7 @@ const jevPolicy = () => ({ ...basePolicy(), jevEnabled: true, gatewayKeyConfigur
 
   await check('no gateway key / disabled -> legacy jev-unavailable', async () => {
     const engine = new DecisionEngine({ deterministic, policy: { ...basePolicy(), jevEnabled: true, gatewayKeyConfigured: false } });
-    const r = await engine.decide({ request: 'what is a closure' });
+    const r = await engine.decide({ request: 'summarize our deployment risks' });
     assert.equal(r.provider, 'legacy');
     assert.equal(r.reason, 'jev-unavailable');
   });
@@ -205,7 +207,7 @@ const jevPolicy = () => ({ ...basePolicy(), jevEnabled: true, gatewayKeyConfigur
       jev: new JevDecisionEngine({ policy: jevPolicy(), evaluateFn: fakeEvaluate(jevAnswers(0.03)) }),
       policy: jevPolicy()
     });
-    const r = await engine.decide({ request: 'what is ARC' });
+    const r = await engine.decide({ request: 'help me reason through the trade-off' });
     assert.equal(r.provider, 'jev');
     const skip = decisionPolicy.shouldSkipMcp(r, { policy: engine.policy });
     assert.equal(skip, true);
@@ -361,6 +363,32 @@ const jevPolicy = () => ({ ...basePolicy(), jevEnabled: true, gatewayKeyConfigur
     const s = buildDecisionState({ request: 'x'.repeat(100000) });
     assert.ok(s.request.length <= 600);
     assert.ok(clamp01(2) === 1 && clamp01(-1) === 0);
+  });
+
+  await check('knowledge questions classify deterministic no-tool', async () => {
+    for (const text of ['what is React?', 'explain JavaScript closures', 'how does a linked list work?']) {
+      const r = deterministic.classify({ request: text, query: text });
+      assert.equal(r.certain, true, text);
+      assert.equal(r.decision.needsExternalCapability.value, false, text);
+      assert.equal(r.decision.confidence, 1, text);
+      assert.equal(r.decision.reason, 'deterministic-knowledge', text);
+      assert.equal(
+        decisionPolicy.shouldSkipMcp(r.decision, { policy: basePolicy(), hasAttachments: false, hasPendingTool: false, workingState: null }),
+        true,
+        text
+      );
+    }
+  });
+
+  await check('knowledge rule never skips personal/workspace lookups', async () => {
+    for (const text of ['what is my project deadline?', 'what is in the document?', 'what time is it?']) {
+      const r = deterministic.classify({ request: text, query: text });
+      assert.equal(r.certain, false, text);
+    }
+    // Tool signal always wins over a knowledge opener.
+    const live = deterministic.classify({ request: 'what is the weather in London?', query: 'what is the weather in London?' });
+    assert.equal(live.certain, true);
+    assert.equal(live.decision.needsExternalCapability.value, true);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
