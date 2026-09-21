@@ -27,9 +27,15 @@ const decisionPolicy = require('./decisionPolicy');
 const { classify } = require('./deterministicDecisionEngine');
 const { JevDecisionEngine } = require('./jevDecisionEngine');
 
+const toFlat = (fields) =>
+  Object.entries(fields || {})
+    .filter(([, v]) => v !== null && v !== undefined)
+    .map(([k, v]) => `${k}=${String(v).replace(/\s+/g, '_')}`)
+    .join(' ');
+
 const telemetry = (level, fields) => {
   try {
-    console[level]('[Decision]', fields);
+    console[level](`[Decision] ${toFlat(fields)}`);
   } catch {
     // telemetry must never break the request path
   }
@@ -81,6 +87,8 @@ class DecisionEngine {
       const decision = det.decision;
       telemetry('log', {
         provider: decision.provider,
+        needsExternalCapability: decision.needsExternalCapability.value,
+        confidence: Number(decision.confidence.toFixed(4)),
         operation: decision.operation.value,
         reason: decision.reason || null,
         latencyMs: Date.now() - startedAt

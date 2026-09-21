@@ -3454,7 +3454,7 @@ class AIService {
             // untouched (model acts → creation-context → one-shot recovery).
             let preflightResult = null;
             const preflightExecutedById = new Map();
-            if (!syntheticResponse) {
+            if (!syntheticResponse && !skipMcpGate) {
                 try {
                     preflightResult = await this.runMcpPreflight({
                         requiredSchemas: this.requiredMcpSchemas(toolPick, supportingMcp, tools),
@@ -3507,10 +3507,70 @@ class AIService {
             // the free provider round AND its guards entirely, falling
             // through to normal execution/synthesis below. No model veto.
             let toolCalls = [];
+            // A high-confidence no-tool request takes the conversational fast
+            // path (below): TRUE streaming with an EMPTY tool set — no MCP, no
+            // tool-orchestration profile — so the first delta reaches the UI
+            // immediately. This flag makes downstream synthesis/emission guards
+            // treat streamed text as already delivered.
+            let conversationalStreamed = false;
             if (preflightExecutedById.size > 0 && preflightResult && Array.isArray(preflightResult.toolCalls)) {
                 toolCalls = preflightResult.toolCalls;
                 finalOutputText = '';
             } else {
+            // ---- Conversational fast path (decision gate: NO tools, stream) ----
+            if (skipMcpGate && !syntheticResponse && Boolean(socket)) {
+                try {
+                    deliveryTiming.providerStartAt = Date.now();
+                    const convServerTts = Boolean(socket) && ttsService.isServerTtsActive();
+                    if (!ttsBuffer && convServerTts) {
+                        ttsBuffer = new ttsService.TtsStreamBuffer({ socket, signal: controller.signal });
+                    }
+                    if (socket) {
+                        socket.emit('ai:tts:mode', { mode: convServerTts ? 'server' : 'browser' });
+                    }
+                    const convOnChunk = async (chunkText) => {
+                        assistantDraftContent += chunkText;
+                        await persistAssistantDraft(assistantDraftContent, { interrupted: false, state: 'streaming' });
+                        if (ttsBuffer) ttsBuffer.push(chunkText);
+                    };
+                    const convGen = await this.llmRouter.generate({
+                        messages,
+                        systemPrompt,
+                        tools: [],
+                        stream: true,
+                        maxTokens,
+                        temperature: imageBase64 ? 0.2 : 0.3,
+                        userContext: {
+                            userId,
+                            isGuest,
+                            calendarIntent,
+                            requestKey: key,
+                            taskMode: imageBase64 ? 'multimodal' : 'text'
+                        },
+                        attachments,
+                        signal: controller.signal
+                    });
+                    const convStream = convGen && convGen.stream;
+                    if (convStream && typeof convStream[Symbol.asyncIterator] === 'function') {
+                        const tapped = (async function* () {
+                            for await (const chunk of convStream) {
+                                yield chunk;
+                            }
+                        })();
+                        finalOutputText = await this.streamingRuntime.consume(tapped, socket, controller.signal, convOnChunk || null, deliveryHooks);
+                    } else {
+                        finalOutputText = convGen?.text || '';
+                        await this.streamingRuntime.emitText(socket, finalOutputText, controller.signal, convOnChunk, deliveryHooks);
+                    }
+                    response = convGen;
+                    conversationalStreamed = true;
+                } catch (convErr) {
+                    // Streaming transport failed for the conversational turn:
+                    // fall through to the standard non-streaming flow below.
+                    console.log('[AIService] conversational.streamFallback', { error: String(convErr?.message || 'streaming failed').slice(0, 120) });
+                    conversationalStreamed = false;
+                }
+            }
             if (!response) {
                 try {
                     response = await generateInitial(tools, systemPrompt);
@@ -3557,14 +3617,18 @@ class AIService {
             // response and plays `ai:tts:audio` segments instead. Text delivery
             // below is unaffected either way.
             const serverTtsActive = Boolean(socket) && ttsService.isServerTtsActive();
-            ttsBuffer = serverTtsActive
-                ? new ttsService.TtsStreamBuffer({ socket, signal: controller.signal })
-                : null;
+            if (!conversationalStreamed) {
+                ttsBuffer = serverTtsActive
+                    ? new ttsService.TtsStreamBuffer({ socket, signal: controller.signal })
+                    : null;
+            }
             if (socket) {
                 socket.emit('ai:tts:mode', { mode: serverTtsActive ? 'server' : 'browser' });
             }
 
-            finalOutputText = response?.text || "";
+            if (!conversationalStreamed) {
+                finalOutputText = response?.text || "";
+            }
             // Mutable: a target-resolution retry below may REPLACE this
             // turn's tool transaction with the resolved retry.
             // (Preflight-adopted turns already set toolCalls above.)
@@ -4388,7 +4452,7 @@ class AIService {
                         finalOutputText = await runFollowUpContinuation(quickFollowUp, quickStreamOnChunk);
                     }
                 }
-            } else {
+            } else if (!conversationalStreamed) {
                 finalOutputText = response?.text || '';
                 if (socket) {
                     await this.streamingRuntime.emitText(socket, finalOutputText, controller.signal, async (chunkText) => {
