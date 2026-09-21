@@ -104,21 +104,37 @@ const LiveVisionCamera = ({ onCaptureReady, initialEnabled = false, onStatusChan
   const [selectedDeviceId, setSelectedDeviceId] = useState(null);
   const [preferredFacing, setPreferredFacing] = useState(null); // 'user' | 'environment' | null
 
+  // Default to the back/rear camera when the device exposes one — a vision
+  // assistant pointing at the user's scene should not always open on the
+  // selfie camera. The user can switch with Front/Back at any time.
+  const pickDefaultVideoDevice = (inputs) => {
+    if (!inputs || inputs.length === 0) return null;
+    const keyOf = (d) => String(d.label || d.deviceId || '').toLowerCase();
+    const back = inputs.find((d) => /back|rear|environment/i.test(keyOf(d)));
+    if (back) return back.deviceId;
+    return inputs[0].deviceId;
+  };
+
   const buildConstraintCandidates = useCallback(() => {
     const candidates = [];
 
-    if (selectedDeviceId) {
+    if (preferredFacing) {
+      // 1) Strong facing preference — honoured instantly on devices that
+      //    expose an exact facingMode descriptor (e.g. labelled front/back
+      //    cameras on mobile).
       candidates.push({
         video: {
-          deviceId: { exact: selectedDeviceId },
+          facingMode: { exact: preferredFacing },
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
         audio: false,
       });
-    }
-
-    if (preferredFacing) {
+      // 2) Tolerant facing preference — many mobile browsers reject `exact`
+      //    with OverconstrainedError (single combined device, missing facing
+      //    descriptor) but honour `ideal` by picking the closest camera, so
+      //    "Back" actually switches instead of silently falling back to the
+      //    default (which is usually the front camera).
       candidates.push({
         video: {
           facingMode: { ideal: preferredFacing },
@@ -127,10 +143,12 @@ const LiveVisionCamera = ({ onCaptureReady, initialEnabled = false, onStatusChan
         },
         audio: false,
       });
+    }
 
+    if (selectedDeviceId && !preferredFacing) {
       candidates.push({
         video: {
-          facingMode: preferredFacing,
+          deviceId: { exact: selectedDeviceId },
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
@@ -222,7 +240,7 @@ const LiveVisionCamera = ({ onCaptureReady, initialEnabled = false, onStatusChan
         setDevices(videoInputs);
         // only auto-pick a device when the user has not explicitly chosen a front/back preference
         if (!selectedDeviceId && !preferredFacing && videoInputs.length) {
-          setSelectedDeviceId((prev) => prev || videoInputs[0].deviceId);
+          setSelectedDeviceId((prev) => prev || pickDefaultVideoDevice(videoInputs));
         }
       } catch {
         // ignore enumerate errors
@@ -283,6 +301,9 @@ const LiveVisionCamera = ({ onCaptureReady, initialEnabled = false, onStatusChan
     }
     setIsReady(false);
     setErrorText('');
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
 
     // start new stream with new constraints
     const startNow = async () => {

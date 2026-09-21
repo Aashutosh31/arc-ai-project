@@ -1,7 +1,8 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import styled, { css, keyframes } from 'styled-components';
 import { useSocket } from '../hooks/useSocket';
 import { useAdvancedVoice } from '../hooks/useAdvancedVoice';
+import { useVoiceTtsChannel } from '../hooks/useVoiceTtsChannel';
 import { useChat } from '../contexts/ChatContext';
 import { useConversation } from '../contexts/ConversationContext';
 
@@ -165,12 +166,7 @@ const OrbButton = styled.button`
   &:hover { filter: brightness(1.12); }
 `;
 
-const StopSquare = styled.span`
-  width: 16px;
-  height: 16px;
-  background: var(--foreground);
-  border-radius: 3px;
-`;
+
 
 const Transcript = styled.p`
   margin: 0;
@@ -215,31 +211,42 @@ const MicIcon = () => (
 );
 
 const VoiceDock = ({ onClose, activateSignal }) => {
-  const { sendCommand, interruptStream } = useSocket();
+  const { sendCommand, interruptStream, socket } = useSocket();
   const { isProcessing, isSpeaking, agentStatus, getLiveVisionFrame } = useChat();
   const { activeConversationId, ensureConversationReady } = useConversation();
+  // Voice Runtime 2.0 channel binder: gesture activation, barge-in, and the
+  // "Enable voice" signal when autoplay policy blocks the AudioContext.
+  const { audioBlocked, telemetry, ensureAudioFromGesture, interruptVoice } = useVoiceTtsChannel(socket);
+  const [showVoiceDetail, setShowVoiceDetail] = useState(false);
 
-  const handleFinalCommand = (transcript) => {
+  const handleFinalCommand = (transcript, meta = {}) => {
     if (transcript.trim()) {
       const frame = getLiveVisionFrame() || null;
+      // Per-turn voice language (Sarvam auto-detect) → server TTS voices this
+      // reply in the utterance's language. Always safest to pass through.
+      const voiceLanguage = (meta && typeof meta.language === 'string' && meta.language) ? meta.language : null;
       (async () => {
         try {
           const cid = await ensureConversationReady?.('New Conversation');
-          sendCommand(transcript, frame, null, cid || activeConversationId);
+          sendCommand(transcript, frame, null, cid || activeConversationId, voiceLanguage);
         } catch {
-          sendCommand(transcript, frame);
+          sendCommand(transcript, frame, null, null, voiceLanguage);
         }
       })();
     }
   };
 
   const handleInterrupt = () => {
+    // Barge-in stops TTS generation (server abort) and playback (worklet
+    // flush) immediately, then the machine returns to listening.
+    interruptVoice();
     if (isSpeaking || isProcessing) interruptStream();
   };
 
   const {
     isVoiceModeActive, liveTranscript, voiceMode, voiceError,
     voiceInteractionState, toggleAdvancedVoice, micMuted, toggleMicMuted,
+    clarification, confirmClarification, cancelClarification,
   } = useAdvancedVoice(handleFinalCommand, handleInterrupt);
 
   // External "start listening" requests (e.g. mic tap inside the vision card).
@@ -262,10 +269,10 @@ const VoiceDock = ({ onClose, activateSignal }) => {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const state = !isVoiceModeActive
-    ? 'idle'
-    : voiceError
-      ? 'error'
+  const state = voiceError
+    ? 'error'
+    : !isVoiceModeActive
+      ? 'idle'
       : voiceInteractionState === 'speaking'
         ? 'speaking'
         : voiceInteractionState === 'processing'
@@ -280,17 +287,55 @@ const VoiceDock = ({ onClose, activateSignal }) => {
         <ExpandedCard>
           <OrbShell>
             <OrbGlow />
-            <OrbButton onClick={toggleAdvancedVoice} aria-label="Stop voice mode">
-              <StopSquare />
+            <OrbButton onClick={toggleAdvancedVoice} aria-label="Stop listening and send" title="Stop listening and send">
+              <span style={{ fontSize: 20 }}>🎙</span>
             </OrbButton>
           </OrbShell>
-          <Transcript>{liveTranscript || (voiceMode === 'server' ? 'Listening… speak now' : 'Listening…')}</Transcript>
-          <ExpandedRow>
-            <MuteButton type="button" $muted={false} onClick={toggleMicMuted} aria-label="Mute microphone">
-              🎙 Mute
-            </MuteButton>
-            <CloseButton onClick={onClose} aria-label="Close voice">×</CloseButton>
-          </ExpandedRow>
+          <Transcript style={{ marginTop: -4, fontSize: 11, color: 'var(--foreground-subtle)' }}>
+            Tap to stop & send
+          </Transcript>
+          {clarification ? (
+            <>
+              <Transcript>
+                {clarification.destructive
+                  ? `⚠ ${clarification.destructive.verb} — confirm?`
+                  : 'Confirm — I heard'}
+              </Transcript>
+              <Transcript style={{ fontWeight: 700, fontStyle: 'normal' }}>
+                {clarification.text}
+              </Transcript>
+              {clarification.corrections && clarification.corrections.length > 0 && (
+                <Transcript style={{ color: 'var(--foreground-subtle)' }}>
+                  heard: {clarification.rawText}
+                </Transcript>
+              )}
+              <ExpandedRow>
+                <MuteButton type="button" $muted={false} onClick={cancelClarification} aria-label="Cancel — don't send">
+                  Cancel
+                </MuteButton>
+                <MuteButton type="button" $muted style={{ color: 'var(--violet)', borderColor: 'rgba(var(--primary-rgb), 0.4)' }} onClick={confirmClarification} aria-label="Confirm and send">
+                  Confirm
+                </MuteButton>
+              </ExpandedRow>
+            </>
+          ) : (
+            <>
+              <Transcript>{liveTranscript || (voiceMode === 'server' ? 'Listening… speak now' : 'Listening…')}</Transcript>
+              <ExpandedRow>
+                <MuteButton type="button" $muted={false} onClick={toggleMicMuted} aria-label="Mute microphone">
+                  {micMuted ? '🔇 Unmute' : '🎙 Mute'}
+                </MuteButton>
+                <CloseButton onClick={onClose} aria-label="Close voice">×</CloseButton>
+              </ExpandedRow>
+            </>
+          )}
+          {audioBlocked && (
+            <ExpandedRow>
+              <MuteButton type="button" $muted={false} onClick={() => ensureAudioFromGesture()} aria-label="Enable voice">
+                🔊 Enable voice
+              </MuteButton>
+            </ExpandedRow>
+          )}
         </ExpandedCard>
       </Dock>
     );
@@ -305,6 +350,8 @@ const VoiceDock = ({ onClose, activateSignal }) => {
         return { dot: 'var(--violet)', pulse: true, text: 'ARC speaking — tap to stop', action: toggleAdvancedVoice, label: 'Interrupt ARC and listen' };
       case 'processing':
         return { dot: 'var(--warning)', pulse: true, text: agentStatus || 'Thinking…', action: toggleAdvancedVoice, label: 'Cancel generation' };
+      case 'listening':
+        return { dot: 'var(--success)', pulse: true, text: micMuted ? 'Mic muted' : 'Listening…', action: toggleAdvancedVoice, label: micMuted ? 'Unmute microphone' : 'Stop listening and send' };
       case 'muted':
         return { dot: 'var(--warning)', pulse: false, text: 'Mic muted', action: toggleMicMuted, label: 'Unmute microphone' };
       case 'error':
@@ -323,7 +370,7 @@ const VoiceDock = ({ onClose, activateSignal }) => {
         <PillText>{pill.text}</PillText>
         {state !== 'idle' && state !== 'error' && state !== 'muted' ? (
           <RoundButton type="button" onClick={pill.action} aria-label={pill.label}>
-            {state === 'speaking' ? '■' : '✕'}
+            {state === 'speaking' ? '■' : micMuted ? '🔇' : '🎙'}
           </RoundButton>
         ) : null}
         {(state === 'idle' || state === 'error') && (
@@ -349,6 +396,40 @@ const VoiceDock = ({ onClose, activateSignal }) => {
         </MuteButton>
         <CloseButton onClick={onClose} aria-label="Close voice">×</CloseButton>
       </Pill>
+      {audioBlocked && (
+        <Pill>
+          <StatusDot $color="var(--warning)" $pulse={false} />
+          <PillText>Voice blocked by browser</PillText>
+          <MuteButton type="button" $muted={false} onClick={() => ensureAudioFromGesture()} aria-label="Enable voice">
+            🔊 Enable voice
+          </MuteButton>
+        </Pill>
+      )}
+      {(state === 'speaking' || state === 'processing') && (
+        <Pill>
+          <MuteButton
+            type="button"
+            $muted={false}
+            onClick={() => setShowVoiceDetail((v) => !v)}
+            aria-label="Toggle voice details"
+            aria-expanded={showVoiceDetail}
+          >
+            {showVoiceDetail ? '▾ details' : '▸ details'}
+          </MuteButton>
+        </Pill>
+      )}
+      {showVoiceDetail && telemetry && (
+        <Pill>
+          <PillText style={{ fontSize: 11 }}>
+            {[
+              telemetry.ttsFirstByteMs != null ? `tts ${telemetry.ttsFirstByteMs}ms` : null,
+              telemetry.audioPlaybackStartMs != null ? `audio +${telemetry.audioPlaybackStartMs}ms` : null,
+              `underruns ${telemetry.bufferUnderruns ?? 0}`,
+              telemetry.interruptLatencyMs != null ? `interrupt ${telemetry.interruptLatencyMs}ms` : null,
+            ].filter(Boolean).join(' · ') || 'gathering telemetry…'}
+          </PillText>
+        </Pill>
+      )}
     </Dock>
   );
 };

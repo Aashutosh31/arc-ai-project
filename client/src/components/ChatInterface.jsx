@@ -8,6 +8,7 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { HistoryLoader } from '../lib/conversationHistory';
 import MarkdownRenderer from './MarkdownRenderer';
 import { Button as UiButton } from './ui';
+import { getSharedVoiceEngine } from '../audio/voiceEngineSingleton';
 
 /* Fluid readable column: full width on small screens, capped prose width
    on desktop. Code/tables break out wider via MarkdownBody rules. */
@@ -217,6 +218,40 @@ const Composer = styled.div`
   max-width: ${CONTENT_MAX};
   width: 100%;
   margin: 0 auto;
+`;
+
+// Voice Runtime 3.0 — persistent compact voice status. Visible even when the
+// VoiceDock is closed: shows Speaking activity and, crucially, the
+// "Enable voice" action when the AudioContext is blocked by autoplay policy
+// (previously a silent failure for chat-only users). Non-blocking,
+// no focus steal, never overlays the composer.
+const VoiceStatusRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 6px;
+  font-size: 11.5px;
+  color: var(--foreground-subtle);
+`;
+
+const VoiceStatusDot = styled.span`
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: ${({ $color }) => $color || 'var(--foreground-subtle)'};
+  box-shadow: 0 0 6px ${({ $color }) => $color || 'transparent'};
+`;
+
+const EnableVoiceButton = styled.button`
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--warning-rgb), 0.4);
+  background: rgba(var(--warning-rgb), 0.08);
+  color: var(--warning);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  &:hover { background: rgba(var(--warning-rgb), 0.14); }
 `;
 
 const ComposerInner = styled.div`
@@ -492,6 +527,24 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
   const isBusy = isProcessing || isStreaming || isSpeaking || !isConnected;
 
   const handleCancel = () => { cancelActiveExecution?.(); interruptStream(); };
+
+  // Voice Runtime 3.0 blocked-voice signal. The socket layer dispatches
+  // `arc:voice-blocked` whenever streaming audio cannot play (autoplay
+  // policy). This row is the always-visible recourse — no silent failure.
+  const [voiceBlocked, setVoiceBlocked] = useState(false);
+  useEffect(() => {
+    const onBlocked = (event) => setVoiceBlocked(Boolean(event?.detail?.blocked));
+    try { window.addEventListener('arc:voice-blocked', onBlocked); } catch { /* ignore */ }
+    return () => { try { window.removeEventListener('arc:voice-blocked', onBlocked); } catch { /* ignore */ } };
+  }, []);
+  const handleEnableVoice = async () => {
+    try {
+      const ok = await getSharedVoiceEngine()?.ensureFromGesture?.();
+      setVoiceBlocked(!ok);
+    } catch {
+      setVoiceBlocked(true);
+    }
+  };
 
   useEffect(() => {
     if (!socket) return;
@@ -833,6 +886,25 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
               </PreviewItem>
             )}
           </PreviewRow>
+        )}
+
+        {(voiceBlocked || isSpeaking) && (
+          <VoiceStatusRow role="status" aria-live="polite">
+            {voiceBlocked ? (
+              <>
+                <VoiceStatusDot $color="var(--warning)" />
+                <span>Voice playback is blocked by the browser.</span>
+                <EnableVoiceButton type="button" onClick={handleEnableVoice}>
+                  🔊 Enable voice
+                </EnableVoiceButton>
+              </>
+            ) : (
+              <>
+                <VoiceStatusDot $color="var(--violet)" />
+                <span>ARC speaking…</span>
+              </>
+            )}
+          </VoiceStatusRow>
         )}
 
         <ComposerInner as="form" onSubmit={handleSubmit}>

@@ -6,6 +6,9 @@ import { useTextToSpeech } from './useTextToSpeech';
 import { useServerTtsAudio } from './useServerTtsAudio';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { applyTheme } from '../utils/theme';
+import { getSharedVoiceEngine, getSharedVoiceTelemetry } from '../audio/voiceEngineSingleton';
+import { getSharedSttChannel, STT_CHANNEL_EVENTS } from '../utils/sttChannel';
+import { getVoiceSettings } from '../utils/voiceSettings';
 
 // 🚀 FIX: Global deduplication timer shared across all tabs and reloads
 let lastReminderTime = 0;
@@ -21,6 +24,12 @@ const SOCKET_EVENTS = [
   'ai:tts:mode',
   'ai:tts:audio',
   'ai:tts:audio:stop',
+  'voice:tts:start',
+  'voice:tts:audio',
+  'voice:tts:end',
+  'voice:tts:error',
+  'voice:tts:cancel',
+  ...STT_CHANNEL_EVENTS,
   'bot_error',
   'ai:client:action',
   'ai:agent:status',
@@ -50,9 +59,50 @@ const releaseSocketListeners = (socket) => {
 export const useSocket = () => {
   const { socket, isConnected, authInfo, setAuthInfo } = useContext(SocketContext) || {}; 
   const { activeWorkspaceId } = useWorkspace();
-  const { addMessage, appendBotChunk, finishBotStream, markBotInterrupted, setIsProcessing, setIsStreaming, isInterruptedRef, setIsInterrupted, setMediaData, setAgentStatus, setProviderInfo } = useChat();
+  const { addMessage, appendBotChunk, finishBotStream, markBotInterrupted, setIsProcessing, setIsStreaming, isInterruptedRef, setIsInterrupted, setMediaData, setAgentStatus, setProviderInfo, setIsSpeaking } = useChat();
   const { processStreamChunk, stop, stopSpeech } = useTextToSpeech();
   const { enqueueSegment, resetAudio } = useServerTtsAudio();
+  // Voice Runtime 3.0 — streaming voice channel state. The binary PCM
+  // events (voice:tts:*) ride the same authenticated socket (no second
+  // connection). Audio chunks go to the shared AudioWorklet engine with
+  // explicit format metadata + sequence numbers; control stays JSON.
+  // Diagnostic counters only — never speech content.
+  const voiceStreamRef = useRef({ streamId: null });
+  const voiceMetricsRef = useRef({
+    ttsStreamStarted: 0,
+    ttsFirstAudioByte: 0,
+    ttsAudioChunks: 0,
+    ttsAudioBytes: 0,
+  });
+  const voiceBlockedRef = useRef(false);
+  // Voice Runtime 3.0 playback ownership (per response):
+  // - voiceAudioSeenRef: the AudioWorklet path demonstrably received audio
+  //   for this response → the legacy WAV queue must stay silent (no double
+  //   voice). Reset on every new response/mode/interrupt.
+  // - voiceSpeakingRef + voiceSpeakingStreamRef: ARC is audibly speaking via
+  //   the worklet for this stream (drives barge-in + UI, never wedged: the
+  //   drain-watch always terminates).
+  const voiceAudioSeenRef = useRef(false);
+  const voiceSpeakingRef = useRef(false);
+  const voiceSpeakingStreamRef = useRef(null);
+  const drainTimerRef = useRef(null);
+  const cancelDrainWatch = () => {
+    if (drainTimerRef.current) {
+      try { clearInterval(drainTimerRef.current); } catch { /* ignore */ }
+      drainTimerRef.current = null;
+    }
+  };
+  const markVoiceSpeaking = (value, streamId = null) => {
+    voiceSpeakingRef.current = Boolean(value);
+    if (value) voiceSpeakingStreamRef.current = streamId;
+    try { setIsSpeaking(Boolean(value)); } catch { /* ui only */ }
+  };
+  const setVoiceBlocked = (value) => {
+    voiceBlockedRef.current = Boolean(value);
+    try {
+      window.dispatchEvent(new CustomEvent('arc:voice-blocked', { detail: { blocked: Boolean(value) } }));
+    } catch { /* ui hint only */ }
+  };
   // 'browser' = speechSynthesis path (default, current behavior).
   // 'server'  = server-generated audio queue; browser speech is suppressed
   // for the response so the two voices never overlap.
@@ -72,6 +122,12 @@ export const useSocket = () => {
     socket.off('ai:tts:mode');
     socket.off('ai:tts:audio');
     socket.off('ai:tts:audio:stop');
+    socket.off('voice:tts:start');
+    socket.off('voice:tts:audio');
+    socket.off('voice:tts:end');
+    socket.off('voice:tts:error');
+    socket.off('voice:tts:cancel');
+    for (const event of STT_CHANNEL_EVENTS) socket.off(event);
     socket.off('bot_error');
     socket.off('ai:client:action');
     socket.off('ai:agent:status');
@@ -81,18 +137,141 @@ export const useSocket = () => {
     // starts from a clean slate: drop stale audio and reset the mode.
     socket.on('ai:tts:mode', (data) => {
       resetAudio();
+      cancelDrainWatch();
+      voiceAudioSeenRef.current = false;
+      markVoiceSpeaking(false);
       ttsModeRef.current = data?.mode === 'server' ? 'server' : 'browser';
     });
 
     socket.on('ai:tts:audio', (data) => {
       if (ttsModeRef.current !== 'server') return;
       if (data?.isFinal) return;
+      // The AudioWorklet owns speech for this response once it has received
+      // worklet audio — the legacy WAV queue stays silent so the two voices
+      // never overlap. Legacy remains the fallback while the worklet path
+      // has delivered nothing for this response.
+      if (getVoiceSettings().streamingEnabled && voiceAudioSeenRef.current) return;
       enqueueSegment(data);
     });
 
     socket.on('ai:tts:audio:stop', () => {
       resetAudio();
+      cancelDrainWatch();
+      voiceAudioSeenRef.current = false;
+      markVoiceSpeaking(false);
+      try { getSharedVoiceEngine()?.cancelStream(); } catch { /* ignore */ }
+      voiceStreamRef.current = { streamId: null };
     });
+
+    // ---- Voice Runtime 3.0 primary path (streaming server TTS) ----
+    // Continuous audio arrives BEFORE the full LLM response completes; the
+    // worklet plays it as one stream across chunk boundaries. Stream-id
+    // tracking (not a boolean flag) means trailing in-flight chunks are
+    // never dropped by a premature end event, while cancelled/superseded
+    // streams are rejected by the engine and never played stale.
+    socket.on('voice:tts:start', (data) => {
+      const settings = getVoiceSettings();
+      if (!settings.streamingEnabled) return;
+      voiceStreamRef.current = { streamId: data?.streamId || null };
+      voiceMetricsRef.current.ttsStreamStarted += 1;
+      // A new stream supersedes any previous one: adopt its id so sequential
+      // completed turns keep playing (previously every turn after the first
+      // was dropped as stale). A drain-watch from an older stream is over.
+      cancelDrainWatch();
+      voiceAudioSeenRef.current = false;
+      try { getSharedVoiceEngine()?.startStream?.(data?.streamId || null); } catch { /* ignore */ }
+      try { getSharedVoiceTelemetry().markLlmFirstSentence(); } catch { /* ignore */ }
+    });
+
+    socket.on('voice:tts:audio', (data) => {
+      const settings = getVoiceSettings();
+      if (!settings.streamingEnabled) return;
+      const engine = getSharedVoiceEngine();
+      if (!engine) return;
+      const result = engine.ingestSocketPayload(data);
+      if (result === 'played' || result === 'staged') {
+        voiceAudioSeenRef.current = true;
+        // First audible evidence for this stream: ARC is speaking. Drives
+        // barge-in detection + UI; cleared on drain (end) or interrupt.
+        if (!voiceSpeakingRef.current) markVoiceSpeaking(true, data?.streamId || null);
+        const bytes = data?.audio?.byteLength ?? data?.chunk?.byteLength ?? 0;
+        voiceMetricsRef.current.ttsAudioChunks += 1;
+        voiceMetricsRef.current.ttsAudioBytes += Number(bytes) || 0;
+        if (!voiceMetricsRef.current.ttsFirstAudioByte) {
+          voiceMetricsRef.current.ttsFirstAudioByte = Date.now();
+        }
+        try { getSharedVoiceTelemetry().markTtsFirstByte(); } catch { /* ignore */ }
+        // Engine stages pre-activation audio instead of dropping it; only
+        // surface "Enable voice" when the engine reports it is blocked.
+        if (result === 'staged' && engine.blocked) setVoiceBlocked(true);
+        else if (result === 'played' && !engine.blocked) setVoiceBlocked(false);
+      }
+    });
+
+    socket.on('voice:tts:end', (data) => {
+      // Grace completion: release pre-roll, keep the stream id so trailing
+      // in-flight chunks still land. Cancel/new-mode resets tracking.
+      // Speaking stays true until the queued audio actually drains out of
+      // the worklet (polled, bounded) — ending it here would restart the
+      // mic while ARC is still audibly talking.
+      const endedStream = data?.streamId || null;
+      try { getSharedVoiceEngine()?.endStream(endedStream); } catch { /* ignore */ }
+      try { getSharedVoiceTelemetry().markTtsEnd(); } catch { /* ignore */ }
+      if (import.meta?.env?.DEV) {
+        try { getSharedVoiceTelemetry().log(); } catch { /* ignore */ }
+        try {
+          const diag = getSharedVoiceEngine()?.getDiagnostics?.();
+          if (diag) console.debug('[BrowserVoice] end', JSON.stringify(diag.counters));
+        } catch { /* ignore */ }
+      }
+      if (!voiceSpeakingRef.current) return;
+      cancelDrainWatch();
+      let polls = 0;
+      drainTimerRef.current = setInterval(async () => {
+        polls += 1;
+        let drained = false;
+        try {
+          const stats = await getSharedVoiceEngine()?.requestStats?.();
+          const received = Number(stats?.received ?? 0);
+          const rendered = Number(stats?.rendered ?? stats?.renderedFrames ?? 0);
+          if (received > 0 && rendered >= received - 4096) drained = true;
+        } catch {
+          if (polls >= 2) drained = true;
+        }
+        if (drained || polls >= 40) {
+          cancelDrainWatch();
+          // Only clear if no newer stream has taken over speaking meanwhile.
+          if (voiceSpeakingStreamRef.current === endedStream || voiceSpeakingStreamRef.current == null) {
+            markVoiceSpeaking(false);
+          }
+        }
+      }, 750);
+    });
+
+    socket.on('voice:tts:error', () => {
+      // Truthful state: one segment failed; text chat continues unaffected.
+      // Browser speech fallback (if enabled) is driven by the text path.
+    });
+
+    socket.on('voice:tts:cancel', () => {
+      cancelDrainWatch();
+      voiceAudioSeenRef.current = false;
+      markVoiceSpeaking(false);
+      try { getSharedVoiceEngine()?.cancelStream(); } catch { /* ignore */ }
+      voiceStreamRef.current = { streamId: null };
+    });
+
+    // ---- Voice Runtime FINAL: server STT (streaming, provider-owned) ----
+    // The browser never recognizes speech; it only ships PCM frames and
+    // consumes interim/final transcripts. useAdvancedVoice subscribes to the
+    // shared channel; this layer only routes authenticated socket events.
+    const channel = getSharedSttChannel();
+    channel.configure(socket);
+    for (const event of STT_CHANNEL_EVENTS) {
+      socket.on(event, (data) => {
+        try { channel.handleServerEvent(event, data); } catch { /* ignore */ }
+      });
+    }
 
     socket.on('ai:tts:response:chunk', (data) => {
       const { chunk, displayText, isFinal } = data;
@@ -120,13 +299,21 @@ export const useSocket = () => {
 
       if (!isFinal) {
         appendBotChunk(displayText || chunk);
-        if (!suppressSpeechRef.current && ttsModeRef.current !== 'server') {
+        const settings = getVoiceSettings();
+        // Voice Runtime 2.0: when streaming server TTS is enabled and the
+        // server announced server mode, the AudioWorklet owns speech — the
+        // browser SpeechSynthesis fallback stays silent (no double voice).
+        // Otherwise SpeechSynthesis remains the fallback path.
+        const streamingOwnsSpeech = settings.streamingEnabled && ttsModeRef.current === 'server';
+        if (!suppressSpeechRef.current && !streamingOwnsSpeech) {
           processStreamChunk(displayText || chunk, false);
         }
       } else {
         finishBotStream();
         setAgentStatus(null);
-        if (!suppressSpeechRef.current && ttsModeRef.current !== 'server') {
+        const settings = getVoiceSettings();
+        const streamingOwnsSpeech = settings.streamingEnabled && ttsModeRef.current === 'server';
+        if (!suppressSpeechRef.current && !streamingOwnsSpeech) {
           processStreamChunk('', true);
         }
         speechCharCountRef.current = 0;
@@ -224,11 +411,44 @@ export const useSocket = () => {
     });
 
     return () => {
+      cancelDrainWatch();
       releaseSocketListeners(socket);
     };
   }, [socket, appendBotChunk, finishBotStream, addMessage, processStreamChunk, enqueueSegment, resetAudio, isInterruptedRef, setMediaData, setAgentStatus, setAuthInfo]);
 
-  const sendCommand = (text, imageBase64 = null, documentData = null, conversationId = null) => {
+  // Voice Runtime 3.0 reconnect recovery: a dropped socket returns voice
+  // to a safe idle — cancel the stream (flush + drop staged/seq state),
+  // never resume stale audio after reconnect. Voice Runtime FINAL: the STT
+  // session is server-side per socket; a disconnect invalidates it, so the
+  // channel resets and the next begin() starts a fresh session.
+  useEffect(() => {
+    if (!socket) return undefined;
+    const onDisconnect = () => {
+      cancelDrainWatch();
+      voiceAudioSeenRef.current = false;
+      markVoiceSpeaking(false);
+      try { getSharedVoiceEngine()?.cancelStream(); } catch { /* ignore */ }
+      voiceStreamRef.current = { streamId: null };
+      try { getSharedSttChannel().reset(); } catch { /* ignore */ }
+    };
+    const onReconnect = () => {
+      try { getSharedVoiceEngine()?.cancelStream(); } catch { /* ignore */ }
+      voiceStreamRef.current = { streamId: null };
+      try { getSharedVoiceTelemetry().reset(); } catch { /* ignore */ }
+      try {
+        getSharedSttChannel().configure(socket);
+        getSharedSttChannel().reset();
+      } catch { /* ignore */ }
+    };
+    socket.on('disconnect', onDisconnect);
+    socket.on('connect', onReconnect);
+    return () => {
+      try { socket.off('disconnect', onDisconnect); } catch { /* ignore */ }
+      try { socket.off('connect', onReconnect); } catch { /* ignore */ }
+    };
+  }, [socket]);
+
+  const sendCommand = (text, imageBase64 = null, documentData = null, conversationId = null, voiceLanguage = null) => {
     if (socket) {
       isInterruptedRef.current = false; 
       if (setIsInterrupted) setIsInterrupted(false);
@@ -236,6 +456,21 @@ export const useSocket = () => {
       if (setIsStreaming) setIsStreaming(true);
       stop();
       resetAudio();
+      // Voice Runtime 3.0: user gesture (send action) initializes/resumes
+      // the audio engine; afterwards the context is reused. Never blocks send.
+      // The gesture promise clears a stale "blocked" hint when it resolves.
+      try {
+        getSharedVoiceEngine()?.ensureFromGesture?.()?.then?.((ok) => {
+          if (ok) setVoiceBlocked(false);
+          else setVoiceBlocked(true);
+        });
+      } catch { /* ignore */ }
+      try { getSharedVoiceTelemetry().reset(); } catch { /* ignore */ }
+      voiceStreamRef.current = { streamId: null };
+      cancelDrainWatch();
+      voiceAudioSeenRef.current = false;
+      markVoiceSpeaking(false);
+      setVoiceBlocked(false);
       ttsModeRef.current = 'browser';
       speechCharCountRef.current = 0;
       suppressSpeechRef.current = false;
@@ -251,7 +486,9 @@ export const useSocket = () => {
         image: imageBase64,
         document: documentData,
         conversationId,
-        workspaceId: activeWorkspaceId || null
+        workspaceId: activeWorkspaceId || null,
+        // Per-turn voice language auto-detected by server STT (Sarvam), if any.
+        language: typeof voiceLanguage === 'string' && voiceLanguage ? voiceLanguage : null
       }); 
     }
   };
@@ -261,6 +498,20 @@ export const useSocket = () => {
       isInterruptedRef.current = true;
       if (setIsInterrupted) setIsInterrupted(true);
       setAgentStatus(null);
+      // Voice Runtime 3.0 barge-in: abort TTS generation server-side AND
+      // stop scheduled playback client-side, then return to listening.
+      // Never waits for the current sentence. Measures
+      // interruptRequestedAt → audioActuallyStoppedAt (<100ms target).
+      try { getSharedVoiceTelemetry().markInterruptRequest(); } catch { /* ignore */ }
+      try { socket.emit('voice:tts:cancel', { reason: 'barge-in' }); } catch { /* ignore */ }
+      cancelDrainWatch();
+      voiceAudioSeenRef.current = false;
+      markVoiceSpeaking(false);
+      try {
+        const stoppedAt = getSharedVoiceEngine()?.cancelStream?.();
+        try { getSharedVoiceTelemetry().markAudioStopped(stoppedAt); } catch { /* ignore */ }
+      } catch { /* ignore */ }
+      voiceStreamRef.current = { streamId: null };
       if (typeof stopSpeech === 'function') {
         stopSpeech();
       } else {
@@ -271,6 +522,7 @@ export const useSocket = () => {
       speechCharCountRef.current = 0;
       suppressSpeechRef.current = false;
       socket.emit('ai:stream:stop');
+      try { getSharedVoiceTelemetry().markInterruptComplete(); } catch { /* ignore */ }
       markBotInterrupted?.();
       // Local terminal transition: the generation is over as far as the UI is
       // concerned. Previously this relied on the server's terminal events,

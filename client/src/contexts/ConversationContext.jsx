@@ -82,15 +82,17 @@ export const ConversationProvider = ({ children }) => {
     }
   }, [activeWorkspaceId]);
 
-  const ensureConversationReady = useCallback(async (title = 'New Conversation') => {
+  const ensureConversationReady = useCallback(async () => {
     if (activeConversationId) {
       return activeConversationId;
     }
 
+    // Do not make a first user message wait on a separate REST request. The
+    // socket runtime creates the conversation with that message and emits
+    // ai:conversation:created, which the chat already adopts.
     isFirstMessageSendingRef.current = true;
-    const newConversation = await createNewConversation(title);
-    return newConversation?._id || null;
-  }, [activeConversationId, createNewConversation]);
+    return null;
+  }, [activeConversationId]);
 
   // Switch to a conversation
   const switchConversation = useCallback((conversationId) => {

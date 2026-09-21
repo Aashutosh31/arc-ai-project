@@ -117,6 +117,26 @@ io.on('connection', (socket) => {
         AIService.abortForSocket(socket.id);
     });
 
+    // Voice Runtime 2.0 — client barge-in on the streaming voice channel.
+    // Cancels in-flight LLM generation (which aborts TTS synthesis via the
+    // shared AbortSignal) and marks the socket interrupted so late audio is
+    // never delivered. Voice errors never affect chat persistence.
+    socket.on('voice:tts:cancel', () => {
+        socket.isInterrupted = true;
+        AIService.abortForSocket(socket.id);
+    });
+
+    // Voice Runtime FINAL — server STT. Microphone frames arrive as binary
+    // `voice:stt:audio` packets; the server owns transcription. Also cancel
+    // any active STT session when playback/generation starts so ARC's own
+    // voice can never be transcribed as a user command.
+    try {
+        const sttService = require('./services/sttService');
+        sttService.bindSocket(socket);
+    } catch (err) {
+        console.error('[Voice] STT wiring failed:', err?.message || err);
+    }
+
     socket.on('workspace:switch', async (data) => {
         const { workspaceId } = data || {};
         const userId = socket.userId;
@@ -155,9 +175,13 @@ io.on('connection', (socket) => {
     });
 
     socket.on('ai:stt:final', async (data) => {
-        const { command, image, document, conversationId, workspaceId: incomingWorkspaceId } = data; 
+        const { command, image, document, conversationId, workspaceId: incomingWorkspaceId, language } = data; 
         const userId = socket.userId;
         socket.isInterrupted = false; 
+
+        // T2 marker: the finalized transcript was accepted and generation
+        // about to start (STT loop closed → LLM path in processQuery).
+        try { console.log('[VoiceLatency] stt.final.accepted at=%d', Date.now()); } catch { /* telemetry must never break */ }
 
         // Preempt any prior in-flight generation for this socket.
         AIService.abortForSocket(socket.id);
@@ -166,12 +190,15 @@ io.on('connection', (socket) => {
         const effectiveWorkspaceId = incomingWorkspaceId || socket.activeWorkspaceId || null;
 
         console.log(`🧠 Processing command from user ${userId} (workspace: ${effectiveWorkspaceId}): "${command}"`);
-        await AIService.processQuery(userId, command, socket, image, document, conversationId, effectiveWorkspaceId);
+        // `language` is the per-turn STT auto-detected language (Sarvam), if any.
+        // It only shapes the server TTS voice for THIS reply — never stored.
+        await AIService.processQuery(userId, command, socket, image, document, conversationId, effectiveWorkspaceId, language);
     });
 
     socket.on('disconnect', () => {
         console.log(`User disconnected: ${socket.id}`);
         AIService.abortForSocket(socket.id);
+        try { socket.sttSession?.close(); socket.sttSession = null; } catch { /* best effort */ }
         // 🚀 THE FIX: Safely remove ONLY this specific socket, keeping active tabs alive
         const userSockets = global.connectedSockets.get(socket.userId);
         if (userSockets) {
