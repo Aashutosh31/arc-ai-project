@@ -104,6 +104,10 @@ class ExecutionEnvelope {
     this.signalProvided = Boolean(this.signal);
     this.signalAbortedAtStart = Boolean(this.signal && this.signal.aborted);
 
+    // Slice 3: idempotency identity reference (safe digest only, assigned by
+    // the orchestrator after preflight). Never the raw logical key.
+    this.idempotencyKey = opts.idempotencyKey || null;
+
     this.status = STATUS.STARTED;
     this.errorType = null;
     this.startedAtMs = null;
@@ -174,6 +178,7 @@ class ExecutionEnvelope {
       signalProvided: this.signalProvided,
       signalAborted: Boolean(this.signal && this.signal.aborted),
       idempotency: this.idempotency,
+      idempotencyKey: this.idempotencyKey,
       risk: this.risk,
       scope: this.scope,
     };
@@ -194,6 +199,7 @@ class ExecutionEnvelope {
       timeoutMs: this.declaredTimeoutMs,
       cancellation: this.cancellationDeclaration,
       idempotency: this.idempotency,
+      idempotencyKeyHash: this.idempotencyKey,
     };
   }
 }

@@ -2,6 +2,7 @@ const toolRegistry = require('../tools/index');
 const { consumeCredits, isGuestActorId } = require('./creditService');
 const { McpToolSource, isMcpToolName } = require('../lib/mcp');
 const { createExecutionEnvelope } = require('../lib/capabilities');
+const idempotency = require('../lib/capabilities/idempotency');
 
 const TOOL_CREDIT_COSTS = {
     executeCode: 2,
@@ -26,9 +27,9 @@ class TaskExecutor {
     async executeTool(toolName, args, userId, socket = null, executionOptions = {}) {
         console.log(`[TaskExecutor] Before tool execution: ${toolName}`);
 
-        // JARVIS Action Substrate — slice 2: wrap the single governed
-        // execution choke point with a normalized envelope that records
-        // lifecycle/outcome observability. Additive only: the original body
+        // JARVIS Action Substrate — slice 2/3: wrap the single governed
+        // execution choke point with the normalized envelope and the
+        // idempotency guard. Additive only: the original body
         // (_executeToolCore) is preserved verbatim and its result is returned
         // unchanged.
         const envelope = createExecutionEnvelope({
@@ -40,6 +41,15 @@ class TaskExecutor {
             executionOptions,
             isGuest: isGuestActorId(userId)
         });
+
+        // Slice 3: reserve the logical action before ANY side effect runs.
+        // A duplicate (running or terminal) returns the prior outcome and
+        // never re-executes the tool, credit flow, or clientAction emission.
+        const gate = await idempotency.preflight({ envelope, executionOptions });
+        if (gate.decision !== 'execute') {
+            return gate.result;
+        }
+        envelope.idempotencyKey = gate.idempotency.keyHash || null;
         envelope.start();
 
         let result;
@@ -49,7 +59,9 @@ class TaskExecutor {
             console.error(`[TaskExecutor] Critical failure in tool ${toolName}:`, error);
             result = { success: false, error: error.message };
         }
-        return envelope.finalize(result, { signalAborted: Boolean(executionOptions?.signal?.aborted) });
+        const finalized = envelope.finalize(result, { signalAborted: Boolean(executionOptions?.signal?.aborted) });
+        await idempotency.settle({ envelope, idempotency: gate.idempotency });
+        return finalized;
     }
 
     async _executeToolCore(toolName, args, userId, socket = null, executionOptions = {}, envelope = null) {

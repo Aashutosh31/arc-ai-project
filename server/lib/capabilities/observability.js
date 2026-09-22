@@ -13,12 +13,16 @@
 //   capability.execution.succeeded
 //   capability.execution.failed
 //   capability.execution.cancelled
+//   capability.idempotency.duplicatePrevented
+//   capability.idempotency.reservationError
 
 const LOG_EVENTS = Object.freeze({
   EXECUTION_STARTED: 'capability.execution.started',
   EXECUTION_SUCCEEDED: 'capability.execution.succeeded',
   EXECUTION_FAILED: 'capability.execution.failed',
-  EXECUTION_CANCELLED: 'capability.execution.cancelled'
+  EXECUTION_CANCELLED: 'capability.execution.cancelled',
+  IDEMPOTENCY_DUPLICATE_PREVENTED: 'capability.idempotency.duplicatePrevented',
+  IDEMPOTENCY_RESERVATION_ERROR: 'capability.idempotency.reservationError'
 });
 
 // Whitelist of safe scalar fields allowed in logs. Anything not listed here
@@ -26,7 +30,8 @@ const LOG_EVENTS = Object.freeze({
 const SAFE_FIELDS = new Set([
   'executionId', 'capabilityId', 'toolName', 'source',
   'workspaceId', 'status', 'durationMs', 'errorType',
-  'risk', 'scope', 'timeoutMs', 'cancellation', 'idempotency'
+  'risk', 'scope', 'timeoutMs', 'cancellation', 'idempotency',
+  'idempotencyKeyHash', 'duplicateDetected', 'duplicateStatus'
 ]);
 
 const prune = (fields) => {

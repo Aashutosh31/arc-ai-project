@@ -23,6 +23,9 @@ const { CapabilityRegistry, buildCapabilityRegistry } = require('./capabilityReg
 const executionEnvelope = require('./executionEnvelope');
 const envelopeClassification = require('./envelopeClassification');
 const observability = require('./observability');
+const idempotency = require('./idempotency');
+const idempotencyKey = require('./idempotencyKey');
+const idempotencyStore = require('./idempotencyStore');
 
 module.exports = {
   capabilityTypes,
@@ -36,4 +39,8 @@ module.exports = {
   resolveExecutionCapability: executionEnvelope.resolveCapability,
   envelopeClassification,
   observability,
+  // Slice 3: idempotency + duplicate-side-effect protection surface.
+  idempotency,
+  idempotencyKey,
+  idempotencyStore,
 };
