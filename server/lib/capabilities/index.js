@@ -20,6 +20,9 @@ const capabilityTypes = require('./capabilityTypes');
 const risk = require('./risk');
 const discover = require('./discover');
 const { CapabilityRegistry, buildCapabilityRegistry } = require('./capabilityRegistry');
+const executionEnvelope = require('./executionEnvelope');
+const envelopeClassification = require('./envelopeClassification');
+const observability = require('./observability');
 
 module.exports = {
   capabilityTypes,
@@ -27,4 +30,10 @@ module.exports = {
   ...discover,
   CapabilityRegistry,
   buildCapabilityRegistry,
+  // Slice 2: execution-envelope + lifecycle-observability surface (additive).
+  ExecutionEnvelope: executionEnvelope.ExecutionEnvelope,
+  createExecutionEnvelope: executionEnvelope.createExecutionEnvelope,
+  resolveExecutionCapability: executionEnvelope.resolveCapability,
+  envelopeClassification,
+  observability,
 };

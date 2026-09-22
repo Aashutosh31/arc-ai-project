@@ -1,6 +1,7 @@
 const toolRegistry = require('../tools/index');
 const { consumeCredits, isGuestActorId } = require('./creditService');
 const { McpToolSource, isMcpToolName } = require('../lib/mcp');
+const { createExecutionEnvelope } = require('../lib/capabilities');
 
 const TOOL_CREDIT_COSTS = {
     executeCode: 2,
@@ -24,7 +25,34 @@ const TOOL_CREDIT_COSTS = {
 class TaskExecutor {
     async executeTool(toolName, args, userId, socket = null, executionOptions = {}) {
         console.log(`[TaskExecutor] Before tool execution: ${toolName}`);
-        
+
+        // JARVIS Action Substrate — slice 2: wrap the single governed
+        // execution choke point with a normalized envelope that records
+        // lifecycle/outcome observability. Additive only: the original body
+        // (_executeToolCore) is preserved verbatim and its result is returned
+        // unchanged.
+        const envelope = createExecutionEnvelope({
+            toolName,
+            userId,
+            workspaceId: executionOptions?.workspaceId || null,
+            conversationId: executionOptions?.conversationId || null,
+            signal: executionOptions?.signal || null,
+            executionOptions,
+            isGuest: isGuestActorId(userId)
+        });
+        envelope.start();
+
+        let result;
+        try {
+            result = await this._executeToolCore(toolName, args, userId, socket, executionOptions, envelope);
+        } catch (error) {
+            console.error(`[TaskExecutor] Critical failure in tool ${toolName}:`, error);
+            result = { success: false, error: error.message };
+        }
+        return envelope.finalize(result, { signalAborted: Boolean(executionOptions?.signal?.aborted) });
+    }
+
+    async _executeToolCore(toolName, args, userId, socket = null, executionOptions = {}, envelope = null) {
         try {
             if (executionOptions?.signal?.aborted) {
                 return { success: false, cancelled: true, error: 'Execution aborted before tool start.' };
@@ -103,6 +131,7 @@ class TaskExecutor {
             }
             
             // Execute the tool's modular logic
+            if (envelope) envelope.markRunning();
             const result = await tool.execute(args, context, socket);
 
             console.log(`[TaskExecutor] After tool execution: ${toolName}`);
