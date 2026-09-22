@@ -39,6 +39,9 @@ TIMEZONE_BUG_VISUAL_GUIDE.md
 TIMEZONE_FIX_QUICK_REFERENCE.md
 repomix-output.xml
 
+# Session audit/handoff docs (development-session only, not product source)
+docs/ja-*-audit.md
+
 # Dev/test artifacts (never public)
 .tmp-voice-e2e/
 server/test-*.wav
