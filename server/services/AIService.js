@@ -7,6 +7,7 @@ const TaskExecutor = require("./TaskExecutor");
 const toolRegistry = require("../tools/index");
 const pdfExtract = require("pdf-extraction"); // 🚀 The modern, working package!
 const { consumeCredits, isGuestActorId } = require("./creditService");
+const { decisionEngine, decisionPolicy } = require("./decision");
 const LLMRouter = require("../lib/llm/LLMRouter");
 const StreamingRuntime = require("../lib/llm/StreamingRuntime");
 const {
@@ -418,6 +419,8 @@ class AIService {
     this.activeRequests = new Map();
     this.workspaceRuntime = new WorkspaceRuntimeManager({ logger: console });
     this.wsLog = new WorkspaceLogger("AIService");
+    this.decisionEngine = decisionEngine;
+    this.decisionPolicy = decisionPolicy;
   }
 
   getRequestKey(socket, userId) {
@@ -452,6 +455,59 @@ class AIService {
     if (current && !current.controller.signal.aborted) {
       current.controller.abort("user_interrupted");
       this.activeRequests.delete(key);
+    }
+  }
+
+  // Upstream decision gate: Jev runs BEFORE any tool discovery to decide
+  // whether this turn needs external capabilities. Fail-open contract —
+  // if the engine is unavailable or throws, the turn proceeds as legacy
+  // (no skipping), never failing the request.
+  async evaluateUpstreamDecisionGate(
+    {
+      request = "",
+      query = null,
+      recentContext = [],
+      workingState = null,
+      pendingTool = null,
+      hasAttachment = false,
+      signal = null,
+    } = {},
+  ) {
+    const decisionGate = null;
+    let skipMcpGate = false;
+    try {
+      if (
+        !this.decisionEngine ||
+        typeof this.decisionEngine.decide !== "function"
+      ) {
+        return {
+          decisionGate,
+          skipMcpGate,
+          reason: "decision-engine-unavailable",
+        };
+      }
+      const decision = await this.decisionEngine.decide({
+        request: request || "",
+        query,
+        recentContext,
+        workingState,
+        pendingTool,
+        hasAttachment,
+        signal,
+      });
+      const skip = this.decisionPolicy.shouldSkipMcp(decision, {
+        policy: this.decisionEngine.policy,
+      });
+      return {
+        decisionGate: decision,
+        skipMcpGate: Boolean(skip),
+        reason: decision?.provider || "decision-engine",
+      };
+    } catch (error) {
+      console.warn("[Decision] upstream gate failed open:", {
+        reason: error?.message || error,
+      });
+      return { decisionGate, skipMcpGate, reason: "fail-open" };
     }
   }
 
@@ -3816,6 +3872,7 @@ class AIService {
     // still running. Drives the else-branch skip below (text already
     // delivered) and guards the streamed fallback assignments.
     let initialStreamed = false;
+    let conversationalStreamed = false;
     try {
       console.log(
         `[Planner] Incoming user command: ${String(text || "").trim()}`,
@@ -3982,28 +4039,17 @@ class AIService {
       // High-confidence no-tool results disable MCP for this turn;
       // tool results and low-confidence (legacy) results continue
       // through the full pipeline unchanged.
-      let decisionGate = null;
-      let skipMcpGate = false;
-      try {
-        decisionGate = await this.decisionEngine.decide({
-          request: baseMessageContent,
-          query: String(text || "").trim(),
-          recentContext: [],
-          workingState: null,
-          pendingTool: null,
-          hasAttachment: Boolean(imageBase64 || document),
-          signal: controller.signal,
-        });
-        skipMcpGate = decisionPolicy.shouldSkipMcp(decisionGate, {
-          policy: this.decisionEngine.policy,
-          hasAttachments: Boolean(imageBase64 || document),
-          hasPendingTool: false,
-          workingState: null,
-        });
-      } catch {
-        decisionGate = null;
-        skipMcpGate = false;
-      }
+      const upstreamGate = await this.evaluateUpstreamDecisionGate({
+        request: baseMessageContent,
+        query: String(text || "").trim(),
+        recentContext: [],
+        workingState: null,
+        pendingTool: null,
+        hasAttachment: Boolean(imageBase64 || document),
+        signal: controller.signal,
+      });
+      const decisionGate = upstreamGate.decisionGate;
+      let skipMcpGate = upstreamGate.skipMcpGate;
       if (skipMcpGate) {
         console.log("[AIService] decisionGate.skipMcp", {
           provider: decisionGate?.provider || null,
@@ -4220,7 +4266,7 @@ class AIService {
       }
       if (decisionGate) {
         try {
-          skipMcpGate = decisionPolicy.shouldSkipMcp(decisionGate, {
+          skipMcpGate = this.decisionPolicy.shouldSkipMcp(decisionGate, {
             policy: this.decisionEngine.policy,
             hasAttachments: Boolean(imageBase64 || document),
             hasPendingTool: Boolean(pendingForGate),
@@ -5144,7 +5190,6 @@ class AIService {
         // tool-orchestration profile — so the first delta reaches the UI
         // immediately. This flag makes downstream synthesis/emission guards
         // treat streamed text as already delivered.
-        let conversationalStreamed = false;
         // ---- Conversational fast path (decision gate: NO tools, stream) ----
         if (skipMcpGate && !syntheticResponse && Boolean(socket)) {
           try {
