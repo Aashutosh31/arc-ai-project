@@ -172,9 +172,21 @@ const main = async () => {
       assert.strictEqual(byName(name).scope, 'reversible');
       assert.strictEqual(byName(name).risk, 'low');
     }
-    // Unclassified capabilities stay null (never guessed).
-    assert.strictEqual(byName('executeCode').scope, null);
-    assert.strictEqual(byName('sendEmail').risk, null);
+    // Slice 4A: complete native classification — the previously unclassified
+    // representatives are now classified from their implementations.
+    assert.strictEqual(byName('executeCode').scope, 'read');
+    assert.strictEqual(byName('executeCode').risk, 'medium');
+    assert.strictEqual(byName('sendEmail').scope, 'consequential');
+    assert.strictEqual(byName('sendEmail').risk, 'high');
+  });
+
+  await test('native discovery: every registered native tool is classified', () => {
+    const native = caps.discoverNative();
+    assert.ok(native.length >= 20, `expected >= 20 native tools, got ${native.length}`);
+    const unclassified = native
+      .filter((c) => c.scope === null || c.risk === null)
+      .map((c) => c.name);
+    assert.deepStrictEqual(unclassified, [], `unclassified native tools: ${unclassified.join(', ')}`);
   });
 
   await test('native discovery: no execution property leaks into the contract', () => {

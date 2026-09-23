@@ -1,13 +1,15 @@
-# JARVIS Action Substrate — Slices 1, 2 & 3 (handoff)
+# JARVIS Action Substrate — Slices 1, 2, 3 & 4A (handoff)
 
 Additive architectural substrate for JARVIS. Slice 1 introduced a unified
 capability metadata layer; slice 2 added a normalized execution envelope +
 lifecycle observability around the existing single execution choke point;
 slice 3 adds idempotency + duplicate side-effect protection at that same
-single choke point.
+single choke point; slice 4A adds a server-authoritative, capability-keyed
+authorization policy layer and completes native risk/scope classification.
 
 Status: slice 1 committed (`855da62`), slice 2 committed (`a2d55e2`, pushed),
-slice 3 implemented and validated but **not yet committed** (pending review).
+slice 3 committed (`fb56e45`, pushed), slice 4A implemented and validated but
+**not yet committed** (pending review).
 
 ## Integration boundary
 
@@ -160,7 +162,8 @@ Pure mapping, existing `mcp.*` categories preserved:
 
 ## Tests
 
-- `server/tests/capabilities.test.js` — 15/15 (slice 1).
+- `server/tests/capabilities.test.js` — 16/16 (slice 1 + 4A native
+  classification completeness).
 - `server/tests/executionEnvelope.test.js` — 22/22: envelope id/lifecycle/
   terminal-once/pass-through, native + MCP shape preservation, timeout &
   cancellation metadata, observability pruning (secrets never logged),
@@ -181,11 +184,99 @@ Pure mapping, existing `mcp.*` categories preserved:
   duplicate-window consequence + concurrent case both proven; not
   risk-differentiated; recovery resumes dedup; settle failure never fails the
   result).
+- `server/tests/authorizationPolicy.test.js` — 23/23 (slice 4A): verdict
+  model (auto / approval-required / deny / unspecified), scope-derived
+  defaults, explicit operator policy, guest + workspace gating, MCP denial
+  never converted to allow, identity-substitution and malformed-metadata
+  fail-safe, authoritative-substrate identity resolution, purity/
+  determinism, no provider/model/Jev coupling, complete native
+  classification + per-tool assertions.
 - Full regression green except two pre-existing failures not caused by this
   work: `mcpSinglePath` S-08 (quote-style source assertion) and
   `ttsFirstChunk` (2 chunk-merging assertions, fail on pristine HEAD too).
 - Note (`mcpSinglePath` uses the same whitelisted-log assertion technique as
   the envelope suite; the SQL `NEW`/wal handling is unchanged).
+
+## Authorization policy + complete native classification (slice 4A)
+
+`server/lib/capabilities/authorizationPolicy.js` is the first authoritative
+execution-authorization layer. It is a **pure, deterministic, capability-keyed
+verdict engine**: capability metadata + execution context + operator policy in,
+normalized verdict out. It executes nothing, never invokes the provider/model,
+never touches Jev, and creates no pending approval state. Exported on the
+substrate facade as `authorizationPolicy`.
+
+### Verdict model (transitional, slice 4A)
+
+`{ allowed, requiresApproval, state, reason, policySource, risk, scope }`
+
+- `UNSPECIFIED` → **preserve existing behavior** (allowed immediately, no
+  approval). Legacy-compatible; an absent policy entry never breaks ARC.
+- `AUTO` → allowed immediately (low-risk reads/reversible actions, or an
+  operator override).
+- `APPROVAL_REQUIRED` → `requiresApproval: true` **and** `allowed: true`
+  (provisional). Approval-required is a VERDICT ONLY in 4A — it is NOT
+  silently treated as denied while the approval transport does not exist.
+- `DENIED` → execution authorization fails (`allowed: false`). Reached via an
+  explicit operator `deny`, guest/workspace restriction, identity mismatch,
+  malformed metadata, or MCP denial.
+- `mode: 'enforce'` (future): turns `APPROVAL_REQUIRED` into `allowed: false`,
+  still gated by a real approval transport.
+
+### Default policy
+
+The 4A default operator table is empty (`DEFAULT_POLICY`): every capability
+follows its scope/risk-derived default. Policy entries are matched by exact
+capability id first, then source+name. Configurable (additive) dimensions:
+`entries` (auto / approval_required / deny / unspecified), `guestDenied`
+(capability-id list), `workspaceRestricted` ({ id?, workspaceIds }).
+
+### MCP remains authoritative
+
+The engine can only consume the **already-authorized MCP capability
+projection**: for `source: 'mcp'`, `mcpAuthorized` must be `true`, else the
+verdict is DENIED (`mcp-denied` / `mcp-policy-unconfirmed`) from
+`MCP_AUTHORITY`. An MCP denial can never be converted into allow here; on top
+of an MCP allow, capability-tier approval semantics still apply (e.g. a
+consequential MCP tool also yields `approval_required`). Native capabilities
+ignore `mcpAuthorized`.
+
+### Jev remains advisory
+
+The engine never reads the decision plane; `needsConfirmation` from Jev stays
+a decision-plane input. Execution-time authorization derives from resolved
+capability + context + policy.
+
+### Complete native classification
+
+The native classification table (`server/lib/capabilities/risk.js`) now covers
+every registered native tool (22), classified from each tool implementation:
+
+- **read / low:** getTime, getWeather, getTopNews, webSearch, scrapeWebsite,
+  checkCalendar, recallMemory
+- **read / medium:** executeCode (hardened sandbox, arbitrary compute),
+  deepResearchSwarm (network-heavy multi-agent read)
+- **reversible / low:** playMedia, stopMedia, changeTheme, openWebsite,
+  copyToClipboard, createReminder, setReminder, stopReminder, memorize,
+  storeUserFact
+- **consequential / high:** sendEmail, sendWhatsAppMessage, scheduleMeeting
+  (irreversible external side effects)
+
+The classification remains **metadata** in this slice: it flows into
+capability discovery and is consumed by the policy engine, but nothing gates
+execution on it yet. The taxonomy has no destructive category; high-impact
+tools are classified conservatively within read/reversible/consequential.
+
+### Integration boundary
+
+The policy engine analyses resolved capabilities from the authoritative
+substrate (`authorizationPolicy` receives a Slice-1 capability object resolved
+via `discoverNative` / `buildCapabilityRegistry`); it does not create another
+registry. Identity is validated against the substrate shape (native `id`/wire
+form and MCP wire-form/server-slug), so capability id/source cannot be
+substituted. **No execution path consumes the verdict yet** — wiring
+`authorizeCapability` into the TaskExecutor choke point is deferred
+(slice 4B) together with the approval transport/UI.
 
 ## Manual validation (no live providers configured)
 
@@ -207,6 +298,10 @@ key across two users → both execute (no false collision).
 - Risk-aware fail-closed policy for high-risk capabilities during store
   outages (deliberate architectural decision, not part of this slice —
   fail-open is uniform today)
+- **Slice 4A deferred:** enforcement of `authorizationPolicy` verdicts inside
+  TaskExecutor / execution path; approval transport (Socket.IO approval
+  events, pending-approval state); approval UI; guest-native enforcement;
+  runtime policy refresh; Jev is untouched by 4A.
 
 ## Environment note (pre-existing, unrelated)
 
