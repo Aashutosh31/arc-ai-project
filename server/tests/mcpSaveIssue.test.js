@@ -218,7 +218,7 @@ const main = async () => {
   await test('8. inventory contains save_issue only if request.tools does', async () => {
     const sel = selectToolSchemas(CREATE_Q, NATIVE, { mcpSchemas: schemas });
     const block = ai.mcpInventoryBlockForTools(sel.tools.slice(0, 6), {});
-    const invWires = [...new Set([...block.matchAll(/\bmcp_[a-z0-9_]+\b/g)].map((m) => m[0]))].sort();
+    const invWires = [...new Set([...block.matchAll(/\bmcp_[a-z0-9_-]+\b/g)].map((m) => m[0]))].sort();
     assert.deepStrictEqual(invWires, names(sel.tools).filter((n) => n.startsWith('mcp_')).sort());
   });
 

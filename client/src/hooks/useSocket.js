@@ -7,6 +7,7 @@ import { useServerTtsAudio } from './useServerTtsAudio';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { applyTheme } from '../utils/theme';
 import { getSharedVoiceEngine, getSharedVoiceTelemetry } from '../audio/voiceEngineSingleton';
+import { createVoiceOwnership } from '../audio/voiceOwnership';
 import { getSharedSttChannel, STT_CHANNEL_EVENTS } from '../utils/sttChannel';
 import { getVoiceSettings } from '../utils/voiceSettings';
 
@@ -75,14 +76,19 @@ export const useSocket = () => {
     ttsAudioBytes: 0,
   });
   const voiceBlockedRef = useRef(false);
-  // Voice Runtime 3.0 playback ownership (per response):
-  // - voiceAudioSeenRef: the AudioWorklet path demonstrably received audio
-  //   for this response → the legacy WAV queue must stay silent (no double
-  //   voice). Reset on every new response/mode/interrupt.
-  // - voiceSpeakingRef + voiceSpeakingStreamRef: ARC is audibly speaking via
-  //   the worklet for this stream (drives barge-in + UI, never wedged: the
-  //   drain-watch always terminates).
-  const voiceAudioSeenRef = useRef(false);
+  // Voice Runtime 3.0 playback ownership (per response). One state machine
+  // arbitrates the two concurrent audio channels — the legacy WAV queue and
+  // the AudioWorklet PCM stream — so exactly one voice opens per response:
+  //   - legacy segments play only while the worklet owns nothing (fallback);
+  //   - the FIRST worklet chunk PREEMPTS any live legacy segment via
+  //     resetAudio() instead of only muting future ones — that preemption is
+  //     what closes the open-both-voices race (WAV installs+plays instantly
+  //     while the worklet path holds audio behind its pre-roll);
+  //   - reset() on every new response/mode/interrupt/disconnect.
+  // voiceSpeakingRef + voiceSpeakingStreamRef: ARC is audibly speaking via
+  // the worklet for this stream (drives barge-in + UI, never wedged: the
+  // drain-watch always terminates).
+  const voiceOwnershipRef = useRef(createVoiceOwnership());
   const voiceSpeakingRef = useRef(false);
   const voiceSpeakingStreamRef = useRef(null);
   const drainTimerRef = useRef(null);
@@ -138,7 +144,7 @@ export const useSocket = () => {
     socket.on('ai:tts:mode', (data) => {
       resetAudio();
       cancelDrainWatch();
-      voiceAudioSeenRef.current = false;
+      voiceOwnershipRef.current.reset();
       markVoiceSpeaking(false);
       ttsModeRef.current = data?.mode === 'server' ? 'server' : 'browser';
     });
@@ -150,14 +156,14 @@ export const useSocket = () => {
       // worklet audio — the legacy WAV queue stays silent so the two voices
       // never overlap. Legacy remains the fallback while the worklet path
       // has delivered nothing for this response.
-      if (getVoiceSettings().streamingEnabled && voiceAudioSeenRef.current) return;
-      enqueueSegment(data);
+      if (getVoiceSettings().streamingEnabled && !voiceOwnershipRef.current.legacyShouldPlay()) return;
+      if (enqueueSegment(data)) voiceOwnershipRef.current.markLegacyLive();
     });
 
     socket.on('ai:tts:audio:stop', () => {
       resetAudio();
       cancelDrainWatch();
-      voiceAudioSeenRef.current = false;
+      voiceOwnershipRef.current.reset();
       markVoiceSpeaking(false);
       try { getSharedVoiceEngine()?.cancelStream(); } catch { /* ignore */ }
       voiceStreamRef.current = { streamId: null };
@@ -178,7 +184,7 @@ export const useSocket = () => {
       // completed turns keep playing (previously every turn after the first
       // was dropped as stale). A drain-watch from an older stream is over.
       cancelDrainWatch();
-      voiceAudioSeenRef.current = false;
+      voiceOwnershipRef.current.reset();
       try { getSharedVoiceEngine()?.startStream?.(data?.streamId || null); } catch { /* ignore */ }
       try { getSharedVoiceTelemetry().markLlmFirstSentence(); } catch { /* ignore */ }
     });
@@ -190,7 +196,15 @@ export const useSocket = () => {
       if (!engine) return;
       const result = engine.ingestSocketPayload(data);
       if (result === 'played' || result === 'staged') {
-        voiceAudioSeenRef.current = true;
+        // Ownership hand-off: the worklet is now the audible path for this
+        // response. If a legacy WAV segment already opened (it can — the WAV
+        // queue plays synchronously while the worklet path is still behind
+        // its pre-roll), PREEMPT it immediately so only one voice speaks:
+        // resetAudio() stops the current segment, drops queued segments and
+        // the preloaded next one, and makes late 'ended'/play promises
+        // harmless no-ops. Happens once per response (first accepted chunk).
+        const { preemptLegacy } = voiceOwnershipRef.current.onWorkletChunk();
+        if (preemptLegacy) resetAudio();
         // First audible evidence for this stream: ARC is speaking. Drives
         // barge-in detection + UI; cleared on drain (end) or interrupt.
         if (!voiceSpeakingRef.current) markVoiceSpeaking(true, data?.streamId || null);
@@ -255,7 +269,7 @@ export const useSocket = () => {
 
     socket.on('voice:tts:cancel', () => {
       cancelDrainWatch();
-      voiceAudioSeenRef.current = false;
+      voiceOwnershipRef.current.reset();
       markVoiceSpeaking(false);
       try { getSharedVoiceEngine()?.cancelStream(); } catch { /* ignore */ }
       voiceStreamRef.current = { streamId: null };
@@ -425,7 +439,7 @@ export const useSocket = () => {
     if (!socket) return undefined;
     const onDisconnect = () => {
       cancelDrainWatch();
-      voiceAudioSeenRef.current = false;
+      voiceOwnershipRef.current.reset();
       markVoiceSpeaking(false);
       try { getSharedVoiceEngine()?.cancelStream(); } catch { /* ignore */ }
       voiceStreamRef.current = { streamId: null };
@@ -468,7 +482,7 @@ export const useSocket = () => {
       try { getSharedVoiceTelemetry().reset(); } catch { /* ignore */ }
       voiceStreamRef.current = { streamId: null };
       cancelDrainWatch();
-      voiceAudioSeenRef.current = false;
+      voiceOwnershipRef.current.reset();
       markVoiceSpeaking(false);
       setVoiceBlocked(false);
       ttsModeRef.current = 'browser';
@@ -505,7 +519,7 @@ export const useSocket = () => {
       try { getSharedVoiceTelemetry().markInterruptRequest(); } catch { /* ignore */ }
       try { socket.emit('voice:tts:cancel', { reason: 'barge-in' }); } catch { /* ignore */ }
       cancelDrainWatch();
-      voiceAudioSeenRef.current = false;
+      voiceOwnershipRef.current.reset();
       markVoiceSpeaking(false);
       try {
         const stoppedAt = getSharedVoiceEngine()?.cancelStream?.();

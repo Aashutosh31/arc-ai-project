@@ -153,7 +153,7 @@ const runEnforcedTurn = async (schemas, query, firstProse, stubCalls) => {
   assert.ok(plan, `no recovery planned for "${query}" (cap=${sel.mcpCapability})`);
   // Inventory equality on the recovery request.
   const block = ai.mcpInventoryBlockForTools(plan.retryTools, {});
-  const invWires = [...new Set([...block.matchAll(/\bmcp_[a-z0-9_]+\b/g)].map((m) => m[0]))].sort();
+  const invWires = [...new Set([...block.matchAll(/\bmcp_[a-z0-9_-]+\b/g)].map((m) => m[0]))].sort();
   assert.deepStrictEqual(invWires, names(plan.retryTools).sort(), 'recovery inventory mismatch');
   const outcome = await ai.runMcpRecovery({
     plan,
@@ -173,7 +173,7 @@ const runEnforcedTurn = async (schemas, query, firstProse, stubCalls) => {
         assert.ok(req.forcedTool === plan.forcedTool, 'single tool not forced');
       }
       const reqBlock = ai.mcpInventoryBlockForTools(req.tools, {});
-      const reqWires = [...new Set([...reqBlock.matchAll(/\bmcp_[a-z0-9_]+\b/g)].map((m) => m[0]))].sort();
+      const reqWires = [...new Set([...reqBlock.matchAll(/\bmcp_[a-z0-9_-]+\b/g)].map((m) => m[0]))].sort();
       assert.deepStrictEqual(reqWires, names(req.tools).sort(), 'retry inventory mismatch');
       return { text: '', toolCalls: stubCalls(req), provider: 'stub', model: 'stub', tokens: {} };
     }
@@ -358,7 +358,7 @@ const main = async () => {
     assert.ok(names(cont.tools).includes(wire(schemas, 'list_teams')), 'active lost');
     assert.ok(names(cont.tools).includes(wire(schemas, 'list_projects')), 'remaining required lost');
     const block = ai.mcpInventoryBlockForTools(cont.tools, {});
-    const invWires = [...new Set([...block.matchAll(/\bmcp_[a-z0-9_]+\b/g)].map((m) => m[0]))].sort();
+    const invWires = [...new Set([...block.matchAll(/\bmcp_[a-z0-9_-]+\b/g)].map((m) => m[0]))].sort();
     assert.deepStrictEqual(invWires, names(cont.tools).filter((n) => n.startsWith('mcp_')).sort());
     const res = await TaskExecutor.executeTool(wire(schemas, 'list_projects'), {}, 'user-1', null, EXEC_OPTS);
     assert.strictEqual(res.success, true, res.error);

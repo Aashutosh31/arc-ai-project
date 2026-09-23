@@ -163,7 +163,7 @@ const main = async () => {
   await test('S-07 inventory/final-tools equality on a degraded set', async () => {
     const sel = selectToolSchemas(TEAMS_Q, () => [], { mcpSchemas: DEGRADED });
     const block = ai.mcpInventoryBlockForTools(sel.tools.slice(0, 6), {});
-    const invWires = [...new Set([...block.matchAll(/\bmcp_[a-z0-9_]+\b/g)].map((m) => m[0]))].sort();
+    const invWires = [...new Set([...block.matchAll(/\bmcp_[a-z0-9_-]+\b/g)].map((m) => m[0]))].sort();
     assert.deepStrictEqual(invWires, names(sel.tools).filter((n) => n.startsWith('mcp_')).sort());
   });
 

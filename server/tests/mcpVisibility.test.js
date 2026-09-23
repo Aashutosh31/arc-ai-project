@@ -56,7 +56,7 @@ const names = (tools) => (tools || []).map((s) => s?.function?.name).filter(Bool
 // MCP wire names advertised inside an inventory block.
 const inventoryWires = (block) => {
   const out = [];
-  for (const m of String(block || '').matchAll(/\bmcp_[a-z0-9_]+\b/g)) {
+  for (const m of String(block || '').matchAll(/\bmcp_[a-z0-9_-]+\b/g)) {
     if (!out.includes(m[0])) out.push(m[0]);
   }
   return out;
@@ -122,6 +122,40 @@ const main = async () => {
     assert.ok(/authorize\/reconnect/i.test(block), 'authorization path missing');
     const { isManualApiFallbackProse } = require('../lib/llm/toolSelection');
     assert.ok(!isManualApiFallbackProse(block), 'manual-token fallback leaked');
+  });
+
+  await test('A-05 hyphenated MCP wire names are parsed whole (ASSERT-1 regression)', async () => {
+    // Real server slugs/tools carry hyphens (e.g. notion-check-mcp-next-steps).
+    // The parser must not truncate at the hyphen: truncation fabricated a
+    // "leaked" ASSERT-1 mismatch for an advertised tool that was offered.
+    const hyphen = mk('notion-connector', 'notion-check-mcp-next-steps',
+      'Determine the next steps for a Notion page.');
+    const block = ai.mcpInventoryBlockForTools([hyphen], {});
+    const wires = inventoryWires(block);
+    assert.ok(wires.includes('mcp_notion-connector_notion-check-mcp-next-steps'),
+      `hyphenated wire truncated: ${wires.join(',')}`);
+    assert.ok(!wires.some((n) => n === 'mcp_notion-connector_notion'),
+      'parser dropped the hyphenated tail');
+    // Exact-equality path the ASSERT-1 invariant relies on.
+    const final = ai.mcpInventoryBlockForTools([hyphen], { failures: [] });
+    assert.deepStrictEqual(inventoryWires(final), ['mcp_notion-connector_notion-check-mcp-next-steps']);
+  });
+
+  await test('A-06 hyphenated wire survives 64-tool selection + inventory equality', async () => {
+    const hyphen = mk('notion-connector', 'notion-check-mcp-next-steps',
+      'Determine the next steps for a Notion page.');
+    const big = [hyphen, ...EXPOSED];
+    for (let i = 0; i < 50; i += 1) {
+      big.push(mk('linear', `aux_op_${i}`, `Perform auxiliary operation ${i} in the workspace.`));
+    }
+    const sel = selectToolSchemas(CREATE_Q, () => [], { mcpSchemas: big });
+    assert.ok(sel.tools.length <= 6, `cap exceeded: ${sel.tools.length}`);
+    assert.ok(names(sel.tools).includes('mcp_linear_save_issue'), 'mutation missing');
+    const block = ai.mcpInventoryBlockForTools(sel.tools, {});
+    assert.deepStrictEqual(
+      inventoryWires(block).sort(),
+      names(sel.tools).filter((n) => n.startsWith('mcp_')).sort(),
+      'inventory/request.tools mismatch with hyphenated wires present');
   });
 
   // ---- B. create-issue selection ------------------------------------------------

@@ -564,6 +564,14 @@ class VoiceTtsStreamer {
             language: this.language,
             format: { ...this.format },
           });
+          // T-marker: the voice session began streaming to the client (the
+          // client adopts this stream id; first audio follows via
+          // voice:tts:audio / tts.firstSocketEmit).
+          try {
+            console.log("[VoiceLatency] tts.streamStarted at=%d", Date.now());
+          } catch {
+            /* telemetry must never break delivery */
+          }
         }
       }
       this._ensureSession().writeText(String(text));

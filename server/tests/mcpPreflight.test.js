@@ -358,7 +358,7 @@ const main = async () => {
   await test('16. inventory consistency', async () => {
     const { tools } = await runPreflightTurn('What teams and projects do I have in Linear?');
     const block = ai.mcpInventoryBlockForTools(tools, {});
-    const invWires = [...new Set([...block.matchAll(/\bmcp_[a-z0-9_]+\b/g)].map((m) => m[0]))].sort();
+    const invWires = [...new Set([...block.matchAll(/\bmcp_[a-z0-9_-]+\b/g)].map((m) => m[0]))].sort();
     assert.deepStrictEqual(invWires, names(tools).filter((n) => n.startsWith('mcp_')).sort());
   });
 

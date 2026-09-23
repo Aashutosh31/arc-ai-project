@@ -75,9 +75,41 @@ const ttsService = require("./ttsService");
 // a knowledge request); an external target or an imperative side effect is
 // required before we touch MCP.  The downstream selector remains the sole
 // authority for *which* exposed MCP tool is usable.
-const requiresExternalToolCapability = (query) => {
+//
+// Native short-circuit (this gate): intents the app resolves with NATIVE
+// tools (time, weather, reminders, scheduling, themes, media, notes, memory)
+// must NOT trigger MCP discovery — a "current time" request needs getTime,
+// not a 118-tool schema inventory. Discovery is forced only when the query
+// names an external integration target, performs a web/integration lookup,
+// or needs a capability no native tool provides.
+const NATIVE_CAPABILITY_COVERAGE = (() => {
+  const out = new Set();
+  try {
+    for (const tool of Object.values(toolRegistry.tools || {})) {
+      try {
+        for (const cap of declareToolCapabilities(tool?.schema || {})) out.add(cap);
+      } catch { /* a broken schema must not poison coverage */ }
+    }
+  } catch { /* registry unavailable at boot */ }
+  return out;
+})();
+
+// Knowledge-intent vocabulary this app resolves with native tools
+// (getTime / getWeather / setReminder / scheduleMeeting / checkCalendar / …).
+// These verbs only need MCP discovery when an external TARGET is named (e.g.
+// "my Notion calendar") or a classified capability no native tool provides.
+const NATIVE_KNOWLEDGE_RE = /\b(weather|forecast|what(?:'s| is)\s+the\s+time|current\s+time|remind(?:er)?|schedule|meeting|appointment)\b/i;
+
+// Native domain-address relaxation: queries explicitly about app-native
+// subjects (time, weather, theme, media, notes, memory, scheduling) are
+// candidates for the native short-circuit.
+const NATIVE_DOMAIN_RE = /\b(time|weather|forecast|theme|song|music|video|media|remind(?:er)?|schedule|meeting|appointment|note|fact|memory|news)\b/i;
+
+const MCP_GATE_SIDE_EFFECT_CAPS = new Set(["CREATE", "UPDATE", "DELETE", "SEND", "COMMENT", "UPLOAD", "DOWNLOAD", "EXECUTE", "MOVE", "DUPLICATE", "ARCHIVE", "RESTORE"]);
+
+const analyzeMcpGate = (query) => {
   const text = String(query || "").trim();
-  if (!text) return false;
+  if (!text) return { required: false, empty: true };
   let caps;
   try {
     caps = classifyIntentCapabilities(text);
@@ -88,11 +120,35 @@ const requiresExternalToolCapability = (query) => {
   const externalTarget = /\b(linear|notion|calendar|outlook|google\s+calendar|whatsapp|email|e-mail|slack|teams|dropbox|box|sharepoint|website|web\s*site|webpage|browser|online|internet|url|project|issue|ticket|repository|repo)\b/i.test(lower);
   const externalOperation = /\b(check|list|show|find|search|create|update|delete|send|open|read|write|add|remove|schedule|book)\b/i.test(lower);
   const explicitLookup = /\b(search|browse|google|look\s+up|scrape|open)\b[\s\S]{0,80}\b(web|website|webpage|url|online|internet)\b/i.test(lower);
-  const nativeExternal = /\b(weather|forecast|what(?:'s| is)\s+the\s+time|current\s+time|remind(?:er)?|schedule|meeting|appointment)\b/i.test(lower);
-  const sideEffectCaps = new Set(["CREATE", "UPDATE", "DELETE", "SEND", "COMMENT", "UPLOAD", "DOWNLOAD", "EXECUTE", "MOVE", "DUPLICATE", "ARCHIVE", "RESTORE"]);
-  const hasSideEffect = [...caps].some((cap) => sideEffectCaps.has(cap));
-  return explicitLookup || nativeExternal || (externalTarget && (caps.size > 0 || externalOperation)) || hasSideEffect;
+  const nativeKnowledge = NATIVE_KNOWLEDGE_RE.test(lower);
+  const nativeDomain = NATIVE_DOMAIN_RE.test(lower);
+  const capList = [...caps];
+  const nativelyCovered = capList.every((cap) => NATIVE_CAPABILITY_COVERAGE.has(cap));
+  const hasSideEffect = capList.some((cap) => MCP_GATE_SIDE_EFFECT_CAPS.has(cap));
+  // Native-only turn: stays in a native domain, every required capability is
+  // natively satisfiable, and no external target / web lookup is named.
+  const nativeOnly = nativeDomain && nativelyCovered && !externalTarget && !explicitLookup;
+  const required =
+    explicitLookup ||
+    (externalTarget && (capList.length > 0 || externalOperation)) ||
+    (nativeKnowledge && !nativeOnly) ||
+    (hasSideEffect && !nativeOnly);
+  return {
+    required,
+    empty: false,
+    caps: capList,
+    externalTarget,
+    externalOperation,
+    explicitLookup,
+    nativeKnowledge,
+    nativeDomain,
+    nativelyCovered,
+    hasSideEffect,
+    nativeOnly,
+  };
 };
+
+const requiresExternalToolCapability = (query) => analyzeMcpGate(query).required;
 
 // Truthful refusal when a request cannot fit the provider context budget
 // even after deterministic compaction. Used both for pre-provider refusal
@@ -508,6 +564,17 @@ class AIService {
         reason: error?.message || error,
       });
       return { decisionGate, skipMcpGate, reason: "fail-open" };
+    }
+  }
+
+  // Test seam / routing diagnostic: what does the MCP-discovery gate decide
+  // for a query, and why? Pure reflection of the same function processQuery
+  // uses (mcpRequired). Never throws, never touches MCP state.
+  checkMcpDiscoveryGate(query) {
+    try {
+      return analyzeMcpGate(query);
+    } catch (error) {
+      return { required: false, error: String(error?.message || error) };
     }
   }
 
@@ -4995,7 +5062,7 @@ class AIService {
               failures: [],
             });
             const advertised = [
-              ...block.matchAll(/\bmcp_[a-z0-9_]+\b/g),
+              ...block.matchAll(/\bmcp_[a-z0-9_-]+\b/g),
             ].map((m) => m[0]);
             const offered = new Set(
               (Array.isArray(tools) ? tools : [])
@@ -5228,12 +5295,16 @@ class AIService {
             }
             const convOnChunk = async (chunkText) => {
               assistantDraftContent += chunkText;
+              // Voice first, persist after: the per-delta Mongo round-trip
+              // must never sit between an LLM delta and its TTS text feed —
+              // otherwise first-audio latency on the conversational fast path
+              // is whatever the DB adds per chunk, not the provider's.
+              if (ttsBuffer) ttsBuffer.push(chunkText);
+              if (voiceStreamer) voiceStreamer.push(chunkText);
               await persistAssistantDraft(assistantDraftContent, {
                 interrupted: false,
                 state: "streaming",
               });
-              if (ttsBuffer) ttsBuffer.push(chunkText);
-              if (voiceStreamer) voiceStreamer.push(chunkText);
             };
             const convGen = await this.llmRouter.generate({
               messages,
@@ -6428,12 +6499,12 @@ class AIService {
 
             const plannerStreamOnChunk = async (chunkText) => {
               assistantDraftContent += chunkText;
+              if (ttsBuffer) ttsBuffer.push(chunkText);
+              if (voiceStreamer) voiceStreamer.push(chunkText);
               await persistAssistantDraft(assistantDraftContent, {
                 interrupted: false,
                 state: "streaming",
               });
-              if (ttsBuffer) ttsBuffer.push(chunkText);
-              if (voiceStreamer) voiceStreamer.push(chunkText);
             };
             const followUp = [];
             finalOutputText = await consumeContinuation(

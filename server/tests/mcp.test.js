@@ -142,7 +142,7 @@ const main = async () => {
     assert.strictEqual(conn.tools.length, 8);
     const wires = conn.tools.map((t) => t.function.name);
     assert.ok(wires.includes('mcp_github_get_test_value'));
-    assert.ok(wires.every((n) => /^mcp_[a-z0-9_]+$/.test(n)), 'all wire names are safe');
+    assert.ok(wires.every((n) => /^mcp_[a-z0-9_-]+$/.test(n)), 'all wire names are safe');
     assert.ok(wires.every((n) => n.length <= 64));
     await McpToolSource.shutdown();
     await pair.server.close();
