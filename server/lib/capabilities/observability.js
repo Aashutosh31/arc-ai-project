@@ -20,6 +20,13 @@
 //   capability.authorization.allowed
 //   capability.authorization.denied
 //   capability.authorization.approval_required
+//
+// Slice 4C — approval workflow lifecycle (state authority = approvalStore):
+//   capability.approval.requested
+//   capability.approval.approved
+//   capability.approval.denied
+//   capability.approval.expired
+//   capability.approval.cancelled
 
 const LOG_EVENTS = Object.freeze({
   EXECUTION_STARTED: 'capability.execution.started',
@@ -31,7 +38,13 @@ const LOG_EVENTS = Object.freeze({
   // Slice 4B: execution-time authorization decisions (safe metadata only).
   AUTH_ALLOWED: 'capability.authorization.allowed',
   AUTH_DENIED: 'capability.authorization.denied',
-  AUTH_APPROVAL_REQUIRED: 'capability.authorization.approval_required'
+  AUTH_APPROVAL_REQUIRED: 'capability.authorization.approval_required',
+  // Slice 4C: approval lifecycle (approvalId is the only identity added).
+  APPROVAL_REQUESTED: 'capability.approval.requested',
+  APPROVAL_APPROVED: 'capability.approval.approved',
+  APPROVAL_DENIED: 'capability.approval.denied',
+  APPROVAL_EXPIRED: 'capability.approval.expired',
+  APPROVAL_CANCELLED: 'capability.approval.cancelled'
 });
 
 // Whitelist of safe scalar fields allowed in logs. Anything not listed here
@@ -41,7 +54,8 @@ const SAFE_FIELDS = new Set([
   'workspaceId', 'status', 'durationMs', 'errorType',
   'risk', 'scope', 'timeoutMs', 'cancellation', 'idempotency',
   'idempotencyKeyHash', 'duplicateDetected', 'duplicateStatus',
-  'state', 'reason', 'policySource'
+  'state', 'reason', 'policySource',
+  'approvalId', 'decision'
 ]);
 
 const prune = (fields) => {

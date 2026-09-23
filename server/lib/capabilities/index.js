@@ -28,6 +28,7 @@ const observability = require('./observability');
 const idempotency = require('./idempotency');
 const idempotencyKey = require('./idempotencyKey');
 const idempotencyStore = require('./idempotencyStore');
+const approvalStore = require('./approvalStore');
 
 module.exports = {
   capabilityTypes,
@@ -49,4 +50,6 @@ module.exports = {
   idempotency,
   idempotencyKey,
   idempotencyStore,
+  // Slice 4C: server-authoritative approval state + transport contract.
+  approvalStore,
 };

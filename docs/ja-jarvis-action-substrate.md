@@ -1,4 +1,4 @@
-# JARVIS Action Substrate — Slices 1, 2, 3, 4A & 4B (handoff)
+# JARVIS Action Substrate — Slices 1, 2, 3, 4A, 4B & 4C (handoff)
 
 Additive architectural substrate for JARVIS. Slice 1 introduced a unified
 capability metadata layer; slice 2 added a normalized execution envelope +
@@ -7,12 +7,16 @@ slice 3 adds idempotency + duplicate side-effect protection at that same
 single choke point; slice 4A adds a server-authoritative, capability-keyed
 authorization policy layer and completes native risk/scope classification;
 slice 4B enforces that authorization verdict at the same single execution
-choke point (explicit DENIED and MCP denials block before any side effect),
-while approval-required stays transitional.
+choke point (explicit DENIED and MCP denials block before any side effect);
+slice 4C makes APPROVAL_REQUIRED a real server-authoritative approval
+workflow — pending-approval state, a Socket.IO approval transport to the
+initiating session only, and a fail-closed approval gate whose APPROVED
+decision continues the SAME execution attempt exactly once.
 
 Status: slice 1 committed (`855da62`), slice 2 committed (`a2d55e2`, pushed),
 slice 3 committed (`fb56e45`, pushed), slice 4A committed (`ffb1d4d`, pushed),
-slice 4B implemented and validated but **not yet committed** (pending review).
+slice 4B committed (`9ae8847`, pushed), slice 4C implemented and validated but
+**not yet committed** (pending review).
 
 ## Integration boundary
 
@@ -137,6 +141,10 @@ Guarantees:
 Events (`[Capability]` prefix, mirrors `server/lib/mcp/logger.js`):
 `capability.execution.started / succeeded / failed / cancelled` plus slice 3's
 `capability.idempotency.duplicatePrevented` / `capability.idempotency.reservationError`.
+Slice 4C added the approval lifecycle events
+`capability.approval.requested / approved / denied / expired / cancelled` and
+extended `SAFE_FIELDS` with `approvalId` and `decision` (tool inputs/outputs,
+nested results, payload fields and secret-looking keys remain dropped).
 Emission is deferred via `enqueueMicrotask` and never throws. Log payloads are
 pruned to a `SAFE_FIELDS` whitelist; tool inputs/outputs, nested results,
 payload fields and secret-looking keys are dropped. Slice 3 added the safe
@@ -198,15 +206,37 @@ Pure mapping, existing `mcp.*` categories preserved:
 - `server/tests/taskExecutorAuthorization.test.js` — 20/20 (slice 4B):
   native AUTO executes with an unmodified result shape; DENIED never runs
   the tool body, never charges credits, emits no clientAction/socket event;
-  APPROVAL_REQUIRED stays transitional (executes, verdict observable only);
-  MCP policy denial stays denied and a capability allow cannot override it;
-  an MCP tool authorized by the live in-memory pipeline executes; direct
-  TaskExecutor calls and recovery retries cannot bypass DENIED; verdicts key
-  on the authoritative capability id; forged `mcpAuthorized` claims, unknown
+  APPROVAL_REQUIRED engages the slice 4C approval gate (without an
+  authenticated session it fails closed and never executes); MCP policy
+  denial stays denied and a capability allow cannot override it; an MCP tool
+  authorized by the live in-memory pipeline executes; direct TaskExecutor
+  calls and recovery retries cannot bypass DENIED; verdicts key on the
+  authoritative capability id; forged `mcpAuthorized` claims, unknown
   capabilities and malformed policies all fail safe; idempotency still
   deduplicates allowed and denied executions; the envelope records a single
   authorization failure; Jev is never consulted; a source scan proves no
   second execution path exists.
+- `server/tests/approvalStore.test.js` — 14/14 (slice 4C): the authoritative
+  approval state — create → PENDING with TTL, approve/deny/expire/cancel
+  transitions, single-use exactly-one terminal, duplicate/after-deny/
+  after-expiry rejections, user/execution/workspace/capability identity
+  binding, malformed input and unknown ids.
+- `server/tests/taskExecutorApproval.test.js` — 24/24 (slice 4C): the
+  execution-time approval gate — no execution before approval; approve
+  continues the SAME envelope exactly once; deny/expire/cancel never execute
+  and settle a normalized `execution.not_authorized`; credits are charged
+  only after approval (once); concurrent approve races have exactly one
+  winner; wrong-user and wrong-workspace approvals are rejected; stale
+  approvals cannot approve; direct/continuation/planner/recovery paths all
+  obey the gate (no bypass, no-session fails closed); MCP denial stays denial;
+  idempotency stays correct across the lifecycle (one approval per logical
+  action, settled FAILED vs replayable SUCCEEDED, timeout never becomes a
+  replayable success); the envelope records single started/succeeded and
+  authorization terminal events; the request reaches only the initiating
+  socket with safe preview metadata; and a real Socket.IO transport contract
+  over raw engine.io websockets proves requested→resolve end-to-end
+  (approve once, deny zero, timeout zero, duplicate once, different-user
+  socket rejected).
 - `mcpPolicy` R-12 (part of slice 4B behavior change): the outer
   `TaskExecutor.executeTool` result for an MCP-policy-denied tool is now
   normalized to `execution.not_authorized` (with `authorization.policySource:
@@ -227,7 +257,7 @@ normalized verdict out. It executes nothing, never invokes the provider/model,
 never touches Jev, and creates no pending approval state. Exported on the
 substrate facade as `authorizationPolicy`.
 
-### Verdict model (transitional, slice 4A)
+### Verdict model (slice 4A)
 
 `{ allowed, requiresApproval, state, reason, policySource, risk, scope }`
 
@@ -236,13 +266,19 @@ substrate facade as `authorizationPolicy`.
 - `AUTO` → allowed immediately (low-risk reads/reversible actions, or an
   operator override).
 - `APPROVAL_REQUIRED` → `requiresApproval: true` **and** `allowed: true`
-  (provisional). Approval-required is a VERDICT ONLY in 4A — it is NOT
-  silently treated as denied while the approval transport does not exist.
+  (provisional). In 4A/4B this was a verdict only; slice 4C makes it real: the
+  gate blocks until the initiating session approves, then continues the SAME
+  execution attempt exactly once (see the 4C section). Without an
+  authenticated session it fails closed — never silently allowed, never
+  executed.
 - `DENIED` → execution authorization fails (`allowed: false`). Reached via an
   explicit operator `deny`, guest/workspace restriction, identity mismatch,
   malformed metadata, or MCP denial.
-- `mode: 'enforce'` (future): turns `APPROVAL_REQUIRED` into `allowed: false`,
-  still gated by a real approval transport.
+- `mode: 'enforce'` (future): an alternative that would turn
+  `APPROVAL_REQUIRED` into `allowed: false`. NOT built — 4C implements the
+  interactive gate (allowed with a real approval round-trip) instead, which
+  keeps the approving decision on the same session and never runs two
+  executor attempts.
 
 ### Default policy
 
@@ -358,15 +394,11 @@ idempotency semantics.
 - forged `mcpAuthorized` on a native/denied tool → blocked (native ignores the
   projection; `capability.source` stays authoritative)
 
-### APPROVAL_REQUIRED stays transitional (NOT blocked in 4B)
+### APPROVAL_REQUIRED is real (slice 4C)
 
-The approval transport (Socket.IO approval events, pending-approval state) and
-the approval UI do not exist yet. APPROVAL_REQUIRED therefore still executes
-now and is surfaced ONLY as the `capability.authorization.approval_required`
-observability event + `requiresApproval` metadata on allowed results — no fake
-approval event, no pending state is created. Blocking on approval is an
-explicit non-goal of 4B (deferred to a later slice that adds the transport
-first).
+Slice 4C replaces the transitional spreadsheet. See the "Approval state +
+server-side approval transport (slice 4C)" section below for the gate, the
+state model and the transport contract.
 
 ### MCP authority preserved
 
@@ -394,11 +426,102 @@ reset. It is the process-wide base for operator configuration; per-request
 `executionOptions.authorizationPolicy` takes precedence. NOT a store — no
 persistence, no per-workspace CRUD (those come with the approval/admin slice).
 
-### What remains for later slices (4C+)
+### What remains for later slices (4D+)
 
-Approval transport (Socket.IO approval events + pending-approval state),
-approval/admin UI, enforcement of APPROVAL_REQUIRED (block until approved),
-runtime policy refresh + persistence, per-workspace policy CRUD.
+Approval UI (fourth-party — the frontend consumes the 4C events only); runtime
+policy refresh + persistence; per-workspace policy CRUD; durable out-of-band
+approval (mobile push, e-mail links) and multi-node approval coordination.
+
+## Approval state + server-side approval transport (slice 4C)
+
+`APPROVAL_REQUIRED` is now a real, server-authoritative approval. A pending
+approval is created at the single choke point (`TaskExecutor._executeToolCore`,
+`_awaitApproval`), the initiating session is notified on the Socket.IO
+transport, and execution WAITS for approve/deny/expire/cancel — then continues
+the SAME execution attempt (no second executor, no re-resolution, no duplicated
+idempotency reservation). The frontend approval UI is deliberately deferred to
+a later slice; 4C ships the state + transport + enforcement only.
+
+### Approval state (`server/lib/capabilities/approvalStore.js`)
+
+- In-memory, per-process, transient **on purpose** (documented tradeoff): an
+  approval is a bounded-lifetime interactive gate over an execution attempt
+  that is itself in-flight in this process. If the process dies mid-wait, the
+  awaiting execution dies with it — a durable record would only orphan state
+  or let a stale durable "approved" later release a NEW execution. The
+  identity that must survive restarts is the side-effect dedup key, already
+  served by the DB-backed idempotencyStore (slice 3).
+- States: `PENDING → APPROVED | DENIED | EXPIRED | CANCELLED`. Single-use and
+  exactly-once: each terminal transition is an atomic compare-and-swap on the
+  record with **no await between check and store**, so concurrent
+  approve/deny/timeout/cancel serialize and exactly ONE wins.
+- Identity binding at creation: `executionId`, authenticated `userId`,
+  `workspaceId` (when applicable), `capabilityId`. `resolve()` re-checks every
+  value it is given against the stored binding; the transport never trusts a
+  client-supplied userId/executionId.
+- TTL: `DEFAULT_TTL_MS = 30000`, env `APPROVAL_TTL_MS`, mirroring the MCP
+  constant `REQUEST_TIMEOUT_MS` (`server/lib/mcp/limits.js`) — one bounded
+  interactive round-trip. Lazy expiry on resolve/cancel plus a per-record
+  unref'd timer; a PENDING record past expiry can never approve.
+- `approvalId` = `apr-<hex>` — always distinct from `executionId`.
+- Exposed on the substrate facade (`approvalStore`) with create/resolve/
+  cancel/waitForDecision/read/list + test surface (`_reset`, `_expireNow`).
+
+### The gate (`TaskExecutor._awaitApproval`)
+
+Runs inside `_executeToolCore` right after the authorization verdict, BEFORE
+credits, clientAction, recovery/retry and any side effect. Fail-closed by
+construction: no authenticated session (`socket.userId` must equal the
+executing user, never a client-asserted identity), a store-write failure, or a
+failed notification each return the normalized
+`{ success:false, errorType:'execution.not_authorized', authorization:{…,
+  approvalId, approvalState, decision, reason }, cancelled? }` and NEVER
+execute. Only an `APPROVED` decision (or a pending post-approval signal
+abort) moves past the gate; approve continues the same call, so credits and
+the tool body run exactly once.
+
+Abort/cancel: driven by the execution AbortSignal, not by socket disconnect.
+`_abortWatch` races the decision wait; aborting transitions the PENDING record
+to `CANCELLED`. Transient Socket.IO reconnects do NOT cancel — ARC already
+supports multi-tab (`global.connectedSockets`), and a stale/reconnecting socket
+cannot approve (the record resolves only against the authenticated userId).
+
+### Transport contract
+
+- `agent:approval:requested` (server → initiating session only, safe preview
+  metadata — no args, credentials, auth data or outputs): `{ approvalId,
+  executionId, capabilityId, toolName, source, risk, scope, reason,
+  expiresAt, state }`.
+- `agent:approval:resolve` (client → server, wired in `server/index.js`):
+  `{ approvalId, decision: 'approve' | 'deny' }`. The handler resolves with
+  `socket.userId` (server-authenticated); optional ack returns the store
+  result. Identity/state checks happen in the store, so a different user,
+  duplicate, stale or expired resolve is rejected exactly once.
+
+### Observable lifecycle + integration
+
+- New frozen events: `capability.approval.requested / approved / denied /
+  expired / cancelled`; `SAFE_FIELDS` extended with `approvalId`, `decision`.
+- Approval sits after the idempotency reservation, so one logical action
+  yields exactly one approval; DENIED/EXPIRED/CANCELLED approvals settle an
+  `authorization` failure (never a replayable success), APPROVED settle
+  `SUCCEEDED` (duplicates replay). The envelope records a single
+  started→succeeded or a single authorization-failure terminal.
+- MCP policy denial remains authoritative and non-overridable; a capability
+  approval entry can never override it (no approval is created for an MCP
+  denial).
+
+### Part 12 — real localhost transport validation
+
+The `Socket.IO transport` test in `taskExecutorApproval.test.js` boots a real
+`http` + `socket.io` Server with test auth middleware (stamping
+`socket.userId`), wires the same `agent:approval:resolve` handler shape, runs a
+real TaskExecutor (approval policy on harmless `getTime`), and connects real
+raw engine.io websocket clients. Verified over the wire: no execution before
+approval; requested event reaches the initiating socket with safe metadata; a
+different-user socket cannot approve; approve → exactly one execution;
+deny → zero executions; too-late response → EXPIRED and zero executions;
+duplicate approve → still exactly one execution.
 
 ## Manual validation (no live providers configured)
 
@@ -419,6 +542,14 @@ policy default is empty and resets cleanly, so no policy change persists after
 the check. MCP denial is validated by the in-memory server tests (denied wire
 tool rejected at the gate; pipeline-authorized tool executes).
 
+Slice 4C approval check: a real local TaskExecutor under
+`approval_required` on `getTime`, wired to a real Socket.IO server with
+client-driven resolve — the tool does not run before approval, the requested
+event carries only safe preview metadata, an approve over the wire executes
+exactly once, a deny over the wire executes zero times, and a too-late resolve
+finds the record EXPIRED and still zero executions (covered end-to-end by the
+transport test; see Part 12 above).
+
 ## Intentionally NOT implemented (deferred)
 
 - Retries / recovery orchestration / proactive jobs / new capabilities
@@ -432,12 +563,14 @@ tool rejected at the gate; pipeline-authorized tool executes).
   fail-open is uniform today)
 - **Slice 4A → 4B boundary:** enforcement of `authorizationPolicy` verdicts
   inside TaskExecutor / execution path is DONE in 4B (DENIED + MCP denials
-  block; approval-required is deliberately NOT blocked yet because no
-  approval transport exists). Still deferred: approval transport (Socket.IO
-  approval events, pending-approval state); approval UI; runtime policy
+  block; approval-required deliberately NOT blocked yet because no approval
+  transport exists). **Slice 4C now supplies that transport and enforcement**
+  (pending-approval state + Socket.IO approval events + fail-closed gate).
+  Still deferred: approval/admin UI; durable out-of-band approval (mobile
+  push, e-mail links); multi-node approval coordination; runtime policy
   refresh + persistence; per-workspace policy CRUD; guest-native and
   workspace gating is enforced through the gate since 4B. Jev remains
-  untouched by 4A/4B.
+  untouched by 4A/4B/4C.
 
 ## Environment note (pre-existing, unrelated)
 

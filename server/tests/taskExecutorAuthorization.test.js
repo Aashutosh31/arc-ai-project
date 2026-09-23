@@ -8,7 +8,7 @@
 //   2.  native DENIED never executes (tool body never invoked)
 //   3.  native DENIED does not charge credits
 //   4.  native DENIED produces no clientAction
-//   5.  native APPROVAL_REQUIRED stays transitional/non-blocking (4B)
+//   5.  native APPROVAL_REQUIRED engages the approval gate (4C: fail-closed)
 //   6.  MCP policy denial remains denied
 //   7.  capability policy cannot override MCP denial
 //   8.  direct TaskExecutor execution cannot bypass DENIED
@@ -270,16 +270,20 @@ const main = async () => {
     } finally { caps.operatorPolicy.resetOperatorPolicy(); }
   });
 
-  // 5. APPROVAL_REQUIRED stays transitional / non-blocking
-  await test('native APPROVAL_REQUIRED remains transitional (executes, verdict-only)', async () => {
+  // 5. APPROVAL_REQUIRED engages the real approval gate (slice 4C): without
+  // an authenticated session the request fails closed and never executes.
+  // The full approve/deny/expire/cancel workflow is proven in
+  // taskExecutorApproval.test.js.
+  await test('native APPROVAL_REQUIRED fails closed without an authenticated session', async () => {
     resetEverything();
     const restore = installNativeCounter('getTime');
     caps.operatorPolicy.setOperatorPolicy(approvalPolicy('native:getTime'));
     try {
       const r = await TaskExecutor.executeTool('getTime', {}, 'u-4b', null, PLAIN_OPTS);
-      assert.strictEqual(r.success, true, 'approval-required must NOT block in 4B');
-      assert.strictEqual(toolCalls, 1);
-      assert.strictEqual(r.authorization, undefined, 'approved result carries no denial metadata');
+      assert.strictEqual(r.success, false, 'approval-required blocks without an authenticated session');
+      assert.strictEqual(r.errorType, 'execution.not_authorized');
+      assert.ok(String(r.authorization.reason).includes('no-session'), 'no-session block is fail-closed');
+      assert.strictEqual(toolCalls, 0, 'never executes without a session');
     } finally { restore(); caps.operatorPolicy.resetOperatorPolicy(); }
 
     // Verdict metadata is observable, not fabricated into the result.

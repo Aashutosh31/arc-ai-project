@@ -9,6 +9,7 @@ const {
     capabilityTypes,
     observability
 } = require('../lib/capabilities');
+const approvalStore = require('../lib/capabilities/approvalStore');
 const idempotency = require('../lib/capabilities/idempotency');
 
 // Slice 4B: normalized failure type for an execution-time authorization
@@ -168,18 +169,24 @@ class TaskExecutor {
                 return { success: false, cancelled: true, error: 'Execution aborted before credit charge.' };
             }
 
-            // JARVIS Action Substrate — slice 4B: server-authoritative
-            // execution-time authorization at the single choke point.
+            // JARVIS Action Substrate — slice 4B/4C: server-authoritative
+            // execution-time authorization + approval at the single choke
+            // point.
             //
-            // Resolution (native or MCP) has already produced the authoritative
-            // capability identity above. The verdict runs BEFORE credits,
-            // clientAction emission, recovery/retry, provider fallback, and any
-            // side-effect execution. MCP policy denial remains non-overridable
-            // (authorizationPolicy consumes the pipeline projection only).
+            // Resolution (native or MCP) has already produced the
+            // authoritative capability identity above. The verdict runs
+            // BEFORE credits, clientAction emission, recovery/retry, provider
+            // fallback, and any side-effect execution. MCP policy denial
+            // remains non-overridable (authorizationPolicy consumes the
+            // pipeline projection only).
             //
-            // APPROVAL_REQUIRED stays TRANSITIONAL in this slice: it executes,
-            // because the approval transport/store/UI do not exist yet (the
-            // verdict is surfaced through observability and safe metadata).
+            // APPROVAL_REQUIRED (slice 4C) — a real, server-authoritative
+            // approval: create pending approval state, notify only the
+            // initiating session, WAIT for approve/deny/cancel/timeout, then
+            // continue THIS SAME execution attempt (no second executor, no
+            // re-resolution, no duplicated idempotency reservation). Only an
+            // APPROVED decision continues; deny/expire/cancel return the
+            // normalized authorization failure and never execute.
             const authorization = this._authorizeExecution(toolName, { isMcp, userId, executionOptions, envelope });
             authorization.observe();
             if (!authorization.verdict.allowed) {
@@ -190,6 +197,16 @@ class TaskExecutor {
                     tool: toolName,
                     authorization: authorization.metadata
                 };
+            }
+
+            if (authorization.verdict.requiresApproval === true) {
+                const approval = await this._awaitApproval({
+                    toolName, userId, socket, executionOptions, envelope, authorization
+                });
+                if (!approval.allowed) return approval.result;
+                if (executionOptions?.signal?.aborted) {
+                    return { success: false, cancelled: true, error: 'Execution aborted after approval before credit charge.' };
+                }
             }
 
             if (!executionOptions?.skipCreditCharge) {
@@ -319,6 +336,165 @@ class TaskExecutor {
         };
 
         return { verdict, metadata, observe };
+    }
+
+    /**
+     * Slice 4C: the approval gate around ONE execution attempt.
+     *
+     * Runs INSIDE _executeToolCore after the authorization verdict, before
+     * credits / side effects — so there is exactly one resolution, one
+     * idempotency reservation and one candidate execution for the whole
+     * request. Only an APPROVED decision continues the same call.
+     *
+     * Fail-closed by construction: no authenticated session, a store write
+     * failure, or a failed notification all return the normalized
+     * authorization failure and NEVER execute the side effect.
+     */
+    async _awaitApproval({ toolName, userId, socket, executionOptions, envelope, authorization }) {
+        const workspaceId = executionOptions?.workspaceId || null;
+        const metadata = authorization.metadata;
+
+        // Part 3/10 — approval can only be requested for an authenticated
+        // initiating session, and the record binds to the socket-authenticated
+        // identity (never a client-asserted userId).
+        const hasSession =
+            socket &&
+            typeof socket.emit === 'function' &&
+            socket.userId !== undefined &&
+            String(socket.userId) === String(userId);
+
+        if (!hasSession) {
+            return {
+                allowed: false,
+                result: this._approvalFailure({
+                    toolName, metadata,
+                    reason: 'no-session: an authenticated socket is required to request approval',
+                }),
+            };
+        }
+
+        let approval;
+        try {
+            approval = approvalStore.create({
+                executionId: envelope.executionId,
+                userId,
+                workspaceId,
+                capabilityId: metadata.capabilityId,
+                source: metadata.source,
+                toolName,
+                risk: metadata.risk,
+                scope: metadata.scope,
+                reason: metadata.reason || null,
+                ttlMs: executionOptions?.approvalTtlMs,
+            });
+        } catch (error) {
+            console.error('[TaskExecutor] Approval store failure for', toolName, ':', error?.message || error);
+            return {
+                allowed: false,
+                result: this._approvalFailure({
+                    toolName, metadata,
+                    reason: 'store-failure: approval state could not be established',
+                }),
+            };
+        }
+
+        // Notify ONLY the initiating session, with safe preview metadata.
+        // Never args, credentials, auth data, or tool outputs.
+        try {
+            socket.emit(approvalStore.EVENTS.APPROVAL_REQUESTED, {
+                approvalId: approval.approvalId,
+                executionId: approval.executionId,
+                capabilityId: approval.capabilityId,
+                toolName: approval.toolName,
+                source: approval.source,
+                risk: approval.risk,
+                scope: approval.scope,
+                reason: approval.reason,
+                expiresAt: new Date(approval.expiresAt).toISOString(),
+                state: approval.state,
+            });
+        } catch (error) {
+            approvalStore.cancel({ approvalId: approval.approvalId, userId });
+            console.error('[TaskExecutor] Approval notification failed for', toolName, ':', error?.message || error);
+            return {
+                allowed: false,
+                result: this._approvalFailure({
+                    toolName, metadata, approvalId: approval.approvalId,
+                    reason: 'notify-failed: approval could not reach the requesting session',
+                }),
+            };
+        }
+
+        // WAIT for the terminal decision. The abort watch resolves first when
+        // the execution is interrupted; otherwise the store's own TTL timer or
+        // a resolve event terminates the wait exactly once.
+        const outcome = await Promise.race([
+            approvalStore.waitForDecision(approval.approvalId),
+            this._abortWatch(executionOptions && executionOptions.signal),
+        ]);
+
+        if (outcome.aborted === true) {
+            approvalStore.cancel({ approvalId: approval.approvalId, userId });
+            const after = approvalStore.read(approval.approvalId);
+            return {
+                allowed: false,
+                result: this._approvalFailure({
+                    toolName, metadata,
+                    approvalId: approval.approvalId,
+                    approvalState: after ? after.state : approvalStore.STATES.CANCELLED,
+                    cancelled: true,
+                    reason: 'request cancelled while awaiting approval',
+                }),
+            };
+        }
+
+        if (outcome.state === approvalStore.STATES.APPROVED) {
+            return { allowed: true, approvalId: approval.approvalId };
+        }
+
+        return {
+            allowed: false,
+            result: this._approvalFailure({
+                toolName, metadata,
+                approvalId: approval.approvalId,
+                approvalState: outcome.state,
+                decision: outcome.decision || null,
+                reason: `approval not granted (${outcome.state.toLowerCase()})`,
+            }),
+        };
+    }
+
+    // Resolves { aborted:true } when the given AbortSignal fires; never
+    // resolves when there is no signal (safe to race — the store/TTL wins).
+    _abortWatch(signal) {
+        return new Promise((resolve) => {
+            if (!signal) return;
+            if (signal.aborted) { resolve({ aborted: true }); return; }
+            try {
+                signal.addEventListener('abort', () => resolve({ aborted: true }), { once: true });
+            } catch {
+                // Cannot watch the signal — the store/TTL still bounds the wait.
+            }
+        });
+    }
+
+    // Normalized not-granted result: authorization failure type, safe
+    // authorization + approval metadata only.
+    _approvalFailure({ toolName, metadata, approvalId = null, approvalState = null, decision = null, cancelled = false, reason = null }) {
+        return {
+            success: false,
+            error: `Tool ${toolName} was not approved.`,
+            errorType: EXEC_NOT_AUTHORIZED,
+            tool: toolName,
+            cancelled: cancelled === true,
+            authorization: {
+                ...metadata,
+                approvalId,
+                approvalState,
+                decision,
+                reason: reason || metadata.reason || null,
+            },
+        };
     }
 }
 

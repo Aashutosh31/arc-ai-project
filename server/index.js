@@ -117,6 +117,28 @@ io.on('connection', (socket) => {
         AIService.abortForSocket(socket.id);
     });
 
+    // JARVIS Action Substrate — slice 4C: approval resolution. Payload is
+    // { approvalId, decision: 'approve'|'deny' }. The authenticated socket
+    // identity (never a client-asserted userId) is bound against the stored
+    // approval record; approvalId/executionId/workspaceId/capabilityId were
+    // bound server-side at request time and can never be re-targeted from the
+    // client. Exactly one terminal decision ever wins (approvalStore CAS).
+    socket.on('agent:approval:resolve', async (data, ack) => {
+        let result;
+        try {
+            const approvalStore = require('./lib/capabilities/approvalStore');
+            result = approvalStore.resolve({
+                approvalId: data && data.approvalId,
+                decision: data && data.decision,
+                userId: socket.userId,
+            });
+        } catch (err) {
+            console.error('[Approval] resolve error:', err?.message || err);
+            result = { ok: false, reason: 'store-error' };
+        }
+        if (typeof ack === 'function') ack(result);
+    });
+
     // Voice Runtime 2.0 — client barge-in on the streaming voice channel.
     // Cancels in-flight LLM generation (which aborts TTS synthesis via the
     // shared AbortSignal) and marks the socket interrupted so late audio is
