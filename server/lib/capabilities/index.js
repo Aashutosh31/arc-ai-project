@@ -20,6 +20,7 @@ const capabilityTypes = require('./capabilityTypes');
 const risk = require('./risk');
 const discover = require('./discover');
 const authorizationPolicy = require('./authorizationPolicy');
+const operatorPolicy = require('./operatorPolicy');
 const { CapabilityRegistry, buildCapabilityRegistry } = require('./capabilityRegistry');
 const executionEnvelope = require('./executionEnvelope');
 const envelopeClassification = require('./envelopeClassification');
@@ -36,6 +37,8 @@ module.exports = {
   buildCapabilityRegistry,
   // Slice 4A: server-authoritative authorization policy (pure verdict engine).
   authorizationPolicy,
+  // Slice 4B: process-wide operator policy base read at the execution boundary.
+  operatorPolicy,
   // Slice 2: execution-envelope + lifecycle-observability surface (additive).
   ExecutionEnvelope: executionEnvelope.ExecutionEnvelope,
   createExecutionEnvelope: executionEnvelope.createExecutionEnvelope,

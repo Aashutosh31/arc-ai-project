@@ -280,7 +280,11 @@ const main = async () => {
     const blocked = await TaskExecutor.executeTool(WIRE_VALUE, {}, 'user-1', null,
       { workspaceId: 'ws-X', skipCreditCharge: true });
     assert.strictEqual(blocked.success, false);
-    assert.strictEqual(blocked.errorType, 'mcp.not_authorized');
+    assert.strictEqual(blocked.errorType, 'execution.not_authorized',
+      'outer gate normalizes the MCP-policy denial to the authorization failure type');
+    assert.strictEqual(blocked.authorization.state, 'denied');
+    assert.strictEqual(blocked.authorization.policySource, 'mcp-authority',
+      'MCP pipeline admission remains authoritative');
     assert.ok(!JSON.stringify(blocked).includes('42'), 'blocked result carries no value');
 
     // Non-denied echo succeeds through the identical path.

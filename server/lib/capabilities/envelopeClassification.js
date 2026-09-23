@@ -85,6 +85,10 @@ const classifyOutcome = (result, { signalAborted = false } = {}) => {
     }
     // Prefer the structured MCP category when present.
     if (result && typeof result.errorType === 'string') {
+      // Slice 4B: execution-time authorization denial.
+      if (result.errorType === 'execution.not_authorized') {
+        return { status: STATUS.FAILED, errorType: ERROR_TYPES.AUTHORIZATION };
+      }
       return { status: STATUS.FAILED, errorType: classifyMcpErrorType(result.errorType) };
     }
     return {

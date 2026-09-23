@@ -1,8 +1,68 @@
 const toolRegistry = require('../tools/index');
 const { consumeCredits, isGuestActorId } = require('./creditService');
 const { McpToolSource, isMcpToolName } = require('../lib/mcp');
-const { createExecutionEnvelope } = require('../lib/capabilities');
+const {
+    createExecutionEnvelope,
+    resolveExecutionCapability,
+    authorizationPolicy: { authorizeCapability },
+    operatorPolicy,
+    capabilityTypes,
+    observability
+} = require('../lib/capabilities');
 const idempotency = require('../lib/capabilities/idempotency');
+
+// Slice 4B: normalized failure type for an execution-time authorization
+// denial. Consumed by the envelope classification as an authorization error.
+const EXEC_NOT_AUTHORIZED = 'execution.not_authorized';
+
+/**
+ * Read-only projection of the authoritative MCP pipeline state: whether the
+ * live registry currently authorizes this wire tool for the given context.
+ * Reuses the pipeline's OWN matchers (configsForWorkspace, toolAllowed) and
+ * never modifies anything. McpManager.resolveTool still performs its own
+ * final policy recheck during execution — this is a consumption point, not
+ * a duplicate of the MCP policy.
+ */
+const mcpAuthorizedFor = (toolName, { workspaceId = null, isGuest = false } = {}) => {
+    if (!isMcpToolName(toolName)) return null;
+    let registry;
+    try { registry = McpToolSource.registry; } catch { return false; }
+    if (!registry) return false;
+
+    let entry = null;
+    try {
+        entry = typeof registry.toolByWireName === 'function' ? registry.toolByWireName(toolName) : null;
+    } catch { return false; }
+    if (!entry) return false;
+
+    let config = null;
+    try {
+        config = typeof registry.get === 'function' ? registry.get(entry.configId) : null;
+    } catch { return false; }
+    if (!config || config.disabled) return false;
+
+    // Workspace/guest visibility via the pipeline's own query (handles scope,
+    // disabled, and guest opt-in).
+    if (typeof registry.configsForWorkspace === 'function') {
+        let visible = false;
+        try {
+            const configs = registry.configsForWorkspace({ workspaceId, isGuest }) || [];
+            visible = configs.some((c) => String(c.id) === String(entry.configId));
+        } catch { return false; }
+        if (!visible) return false;
+    }
+
+    // Allow/deny policy via the pipeline's own matcher (denied always wins).
+    if (typeof registry.toolAllowed === 'function') {
+        try {
+            if (!registry.toolAllowed(entry.configId, entry.wireName, entry.originalToolName, workspaceId, isGuest)) {
+                return false;
+            }
+        } catch { return false; }
+    }
+
+    return true;
+};
 
 const TOOL_CREDIT_COSTS = {
     executeCode: 2,
@@ -108,6 +168,30 @@ class TaskExecutor {
                 return { success: false, cancelled: true, error: 'Execution aborted before credit charge.' };
             }
 
+            // JARVIS Action Substrate — slice 4B: server-authoritative
+            // execution-time authorization at the single choke point.
+            //
+            // Resolution (native or MCP) has already produced the authoritative
+            // capability identity above. The verdict runs BEFORE credits,
+            // clientAction emission, recovery/retry, provider fallback, and any
+            // side-effect execution. MCP policy denial remains non-overridable
+            // (authorizationPolicy consumes the pipeline projection only).
+            //
+            // APPROVAL_REQUIRED stays TRANSITIONAL in this slice: it executes,
+            // because the approval transport/store/UI do not exist yet (the
+            // verdict is surfaced through observability and safe metadata).
+            const authorization = this._authorizeExecution(toolName, { isMcp, userId, executionOptions, envelope });
+            authorization.observe();
+            if (!authorization.verdict.allowed) {
+                return {
+                    success: false,
+                    error: `Tool ${toolName} is not authorized for this action.`,
+                    errorType: EXEC_NOT_AUTHORIZED,
+                    tool: toolName,
+                    authorization: authorization.metadata
+                };
+            }
+
             if (!executionOptions?.skipCreditCharge) {
                 const creditCost = TOOL_CREDIT_COSTS[toolName] || 1;
                 const creditResult = await consumeCredits(userId, creditCost, toolName);
@@ -169,6 +253,72 @@ class TaskExecutor {
             console.error(`[TaskExecutor] Critical failure in tool ${toolName}:`, error);
             return { success: false, error: error.message };
         }
+    }
+
+    /**
+     * Slice 4B authorization decision for ONE execution. Pure within the
+     * boundary: builds the authoritative capability identity (Slice-1
+     * substrate builders — never the raw requested name alone), derives the
+     * MCP policy projection from the live registry, and asks the pure
+     * authorizationPolicy for a verdict. Denied executions are returned at
+     * the call site with safe metadata; approval-required stays allowed.
+     */
+    _authorizeExecution(toolName, { isMcp, userId, executionOptions, envelope }) {
+        const isGuest = Boolean(isGuestActorId(userId));
+        const workspaceId = executionOptions?.workspaceId || null;
+
+        // Authoritative capability identity. Unresolvable capabilities fail
+        // safe: authorizeCapability(null) yields a malformed DENIED verdict.
+        const capability = resolveExecutionCapability(toolName, { isGuest });
+
+        const mcpAuthorized =
+            isMcp && capability && capability.source === capabilityTypes.SOURCE_MCP
+                ? mcpAuthorizedFor(toolName, { workspaceId, isGuest })
+                : null;
+
+        const policy = executionOptions?.authorizationPolicy || operatorPolicy.getOperatorPolicy() || operatorPolicy.DEFAULT_POLICY;
+        const verdict = authorizeCapability(
+            capability,
+            { userId, workspaceId, isGuest },
+            { policy, mcpAuthorized }
+        );
+
+        const source = capability
+            ? capability.source
+            : (isMcp ? capabilityTypes.SOURCE_MCP : capabilityTypes.SOURCE_NATIVE);
+        const metadata = {
+            capabilityId: capability ? capability.id : null,
+            source,
+            risk: verdict.risk,
+            scope: verdict.scope,
+            state: verdict.state,
+            reason: verdict.reason,
+            policySource: verdict.policySource,
+            requiresApproval: Boolean(verdict.requiresApproval)
+        };
+
+        const observe = () => {
+            let event;
+            if (!verdict.allowed) event = observability.LOG_EVENTS.AUTH_DENIED;
+            else if (verdict.requiresApproval === true) event = observability.LOG_EVENTS.AUTH_APPROVAL_REQUIRED;
+            else event = observability.LOG_EVENTS.AUTH_ALLOWED;
+            if (event) {
+                observability.log(event, {
+                    executionId: envelope && envelope.executionId,
+                    capabilityId: metadata.capabilityId,
+                    toolName,
+                    source,
+                    workspaceId,
+                    risk: metadata.risk,
+                    scope: metadata.scope,
+                    state: metadata.state,
+                    reason: metadata.reason,
+                    policySource: metadata.policySource
+                });
+            }
+        };
+
+        return { verdict, metadata, observe };
     }
 }
 

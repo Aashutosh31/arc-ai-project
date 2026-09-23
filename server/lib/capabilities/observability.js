@@ -15,6 +15,11 @@
 //   capability.execution.cancelled
 //   capability.idempotency.duplicatePrevented
 //   capability.idempotency.reservationError
+//
+// Slice 4B — authorization decisions (safe metadata only, no args/outputs):
+//   capability.authorization.allowed
+//   capability.authorization.denied
+//   capability.authorization.approval_required
 
 const LOG_EVENTS = Object.freeze({
   EXECUTION_STARTED: 'capability.execution.started',
@@ -22,7 +27,11 @@ const LOG_EVENTS = Object.freeze({
   EXECUTION_FAILED: 'capability.execution.failed',
   EXECUTION_CANCELLED: 'capability.execution.cancelled',
   IDEMPOTENCY_DUPLICATE_PREVENTED: 'capability.idempotency.duplicatePrevented',
-  IDEMPOTENCY_RESERVATION_ERROR: 'capability.idempotency.reservationError'
+  IDEMPOTENCY_RESERVATION_ERROR: 'capability.idempotency.reservationError',
+  // Slice 4B: execution-time authorization decisions (safe metadata only).
+  AUTH_ALLOWED: 'capability.authorization.allowed',
+  AUTH_DENIED: 'capability.authorization.denied',
+  AUTH_APPROVAL_REQUIRED: 'capability.authorization.approval_required'
 });
 
 // Whitelist of safe scalar fields allowed in logs. Anything not listed here
@@ -31,7 +40,8 @@ const SAFE_FIELDS = new Set([
   'executionId', 'capabilityId', 'toolName', 'source',
   'workspaceId', 'status', 'durationMs', 'errorType',
   'risk', 'scope', 'timeoutMs', 'cancellation', 'idempotency',
-  'idempotencyKeyHash', 'duplicateDetected', 'duplicateStatus'
+  'idempotencyKeyHash', 'duplicateDetected', 'duplicateStatus',
+  'state', 'reason', 'policySource'
 ]);
 
 const prune = (fields) => {

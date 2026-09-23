@@ -1,15 +1,18 @@
-# JARVIS Action Substrate — Slices 1, 2, 3 & 4A (handoff)
+# JARVIS Action Substrate — Slices 1, 2, 3, 4A & 4B (handoff)
 
 Additive architectural substrate for JARVIS. Slice 1 introduced a unified
 capability metadata layer; slice 2 added a normalized execution envelope +
 lifecycle observability around the existing single execution choke point;
 slice 3 adds idempotency + duplicate side-effect protection at that same
 single choke point; slice 4A adds a server-authoritative, capability-keyed
-authorization policy layer and completes native risk/scope classification.
+authorization policy layer and completes native risk/scope classification;
+slice 4B enforces that authorization verdict at the same single execution
+choke point (explicit DENIED and MCP denials block before any side effect),
+while approval-required stays transitional.
 
 Status: slice 1 committed (`855da62`), slice 2 committed (`a2d55e2`, pushed),
-slice 3 committed (`fb56e45`, pushed), slice 4A implemented and validated but
-**not yet committed** (pending review).
+slice 3 committed (`fb56e45`, pushed), slice 4A committed (`ffb1d4d`, pushed),
+slice 4B implemented and validated but **not yet committed** (pending review).
 
 ## Integration boundary
 
@@ -20,7 +23,7 @@ fallback). Slice 2 wraps this method; it does not introduce a second execution
 engine.
 
 Call sites that continue to use the choke point unchanged:
-`AIService.js` (`:3178/3651/3688/4327/5965/6542/6623`), `TaskPlanner.js:104`,
+`AIService.js` (`:3245/3718/3755/4394/6036/6613/6694`), `TaskPlanner.js:104`,
 `ToolRecoveryManager.js` (`:187/220/253`).
 
 ## Idempotency + duplicate side-effect protection (slice 3)
@@ -145,6 +148,7 @@ redacted hash is the only idempotency identity ever logged).
 Pure mapping, existing `mcp.*` categories preserved:
 - `invalid_arguments` → `validation`
 - `not_authorized`, `auth_required`, `authentication_failed` → `authorization`
+- `execution.not_authorized` (slice 4B normalized authorization failure) → `authorization`
 - `connection_timeout` → `timeout`
 - `cancelled` → `cancelled`
 - `tool_not_found`, `tool_execution_error`, `output_too_large` → `tool`
@@ -191,6 +195,23 @@ Pure mapping, existing `mcp.*` categories preserved:
   fail-safe, authoritative-substrate identity resolution, purity/
   determinism, no provider/model/Jev coupling, complete native
   classification + per-tool assertions.
+- `server/tests/taskExecutorAuthorization.test.js` — 20/20 (slice 4B):
+  native AUTO executes with an unmodified result shape; DENIED never runs
+  the tool body, never charges credits, emits no clientAction/socket event;
+  APPROVAL_REQUIRED stays transitional (executes, verdict observable only);
+  MCP policy denial stays denied and a capability allow cannot override it;
+  an MCP tool authorized by the live in-memory pipeline executes; direct
+  TaskExecutor calls and recovery retries cannot bypass DENIED; verdicts key
+  on the authoritative capability id; forged `mcpAuthorized` claims, unknown
+  capabilities and malformed policies all fail safe; idempotency still
+  deduplicates allowed and denied executions; the envelope records a single
+  authorization failure; Jev is never consulted; a source scan proves no
+  second execution path exists.
+- `mcpPolicy` R-12 (part of slice 4B behavior change): the outer
+  `TaskExecutor.executeTool` result for an MCP-policy-denied tool is now
+  normalized to `execution.not_authorized` (with `authorization.policySource:
+  'mcp-authority'`). The MCP rejection stub itself still reports
+  `mcp.not_authorized` when invoked directly (unchanged MCP contract).
 - Full regression green except two pre-existing failures not caused by this
   work: `mcpSinglePath` S-08 (quote-style source assertion) and
   `ttsFirstChunk` (2 chunk-merging assertions, fail on pristine HEAD too).
@@ -274,9 +295,110 @@ substrate (`authorizationPolicy` receives a Slice-1 capability object resolved
 via `discoverNative` / `buildCapabilityRegistry`); it does not create another
 registry. Identity is validated against the substrate shape (native `id`/wire
 form and MCP wire-form/server-slug), so capability id/source cannot be
-substituted. **No execution path consumes the verdict yet** — wiring
-`authorizeCapability` into the TaskExecutor choke point is deferred
-(slice 4B) together with the approval transport/UI.
+substituted. Slice 4B now wires `authorizeCapability` into the TaskExecutor
+choke point (see below); the approval transport/UI remain deferred together
+with subsequent slices.
+
+## Execution-time authorization enforcement (slice 4B)
+
+`authorizationPolicy` verdicts are now enforced at the single governed
+execution choke point: `TaskExecutor._executeToolCore` (`executeTool`). This is
+the only place authorization is checked; there is no second executor, no
+duplicated MCP policy, and capability resolution stays inside the substrate
+(not in tools).
+
+### Authoritative flow (in order)
+
+1. Resolve the tool (native `toolRegistry.getTool` → MCP
+   `McpToolSource.resolveTool` fallback; native can never be shadowed).
+2. Unknown tool → existing `Tool X not found` failure (unchanged).
+3. **Authorization gate** (`_authorizeExecution`), running BEFORE credits,
+   clientAction emission, recovery/retry, provider fallback and any side
+   effect:
+   - authoritative capability = `resolveExecutionCapability(...)` (slice-1
+     builders over the live registries);
+   - MCP projection = `mcpAuthorizedFor(...)`, a READ-ONLY view over the MCP
+     pipeline's own matchers (`McpToolSource.registry.toolByWireName` /
+     `registry.get` / `configsForWorkspace` / `toolAllowed`) — no MCP policy
+     is duplicated and `McpManager`/`McpRegistry` are untouched;
+   - policy = per-request `executionOptions.authorizationPolicy` (future
+     hook) → `operatorPolicy.getOperatorPolicy()` → `DEFAULT_POLICY` (empty);
+   - verdict = `authorizeCapability(capability, { userId, workspaceId,
+     isGuest }, { policy, mcpAuthorized })`;
+   - emit safe observability event only
+     (`capability.authorization.allowed / denied / approval_required`).
+4. DENIED → return the normalized failure `{ success: false, error:
+   'Tool <name> is not authorized for this action.', errorType:
+   'execution.not_authorized', tool, authorization: { capabilityId, source,
+   risk, scope, state, reason, policySource, requiresApproval } }`. The tool
+   body, credits, clientAction, socket events, recovery/retry and provider
+   fallback all never run. The result still flows through the envelope term
+   (`failed` / `authorization`) and idempotency settlement, so denied
+   attempts record and deduplicate exactly like any other terminal.
+5. ALLOWED → continue the existing flow verbatim: credits (unless
+   `skipCreditCharge`), signal check, then the single `tool.execute(...)`
+   call. Successful results are byte-for-byte unchanged and never carry an
+   `authorization` key.
+
+### Ordering (documented)
+
+`envelope.start()` and idempotency preflight intentionally precede the gate in
+`executeTool` (unchanged slice-2/3 contract). Inside `_executeToolCore`:
+resolve → unknown-check → **authorization gate** → signal check → credits →
+signal check → `tool.execute`. No unnecessary reordering of envelope or
+idempotency semantics.
+
+### DENIED behavior (slice 4B)
+
+- explicit operator deny (by capability id, or source+name) → blocked
+- guest/workspace restriction, identity mismatch, malformed capability or
+  malformed policy → blocked (fail safe)
+- MCP policy denial (or unconfirmed MCP admission) → blocked; a capability
+  AUTO/approval entry can never override an MCP denial
+- forged `mcpAuthorized` on a native/denied tool → blocked (native ignores the
+  projection; `capability.source` stays authoritative)
+
+### APPROVAL_REQUIRED stays transitional (NOT blocked in 4B)
+
+The approval transport (Socket.IO approval events, pending-approval state) and
+the approval UI do not exist yet. APPROVAL_REQUIRED therefore still executes
+now and is surfaced ONLY as the `capability.authorization.approval_required`
+observability event + `requiresApproval` metadata on allowed results — no fake
+approval event, no pending state is created. Blocking on approval is an
+explicit non-goal of 4B (deferred to a later slice that adds the transport
+first).
+
+### MCP authority preserved
+
+`McpManager.resolveTool` still performs its own final admission recheck during
+execution; the gate only consumes the pipeline projection. An MCP-policy
+denial now short-circuits at the gate (before any MCP network call) and the
+outer result is normalized to `execution.not_authorized`; the MCP rejection
+stub itself still reports `mcp.not_authorized` when invoked directly.
+
+### Direct-execution protection
+
+There is no bypass: the main loop, continuation, planner, `ToolRecoveryManager`
+and every other `AIService` path converge on `TaskExecutor.executeTool`.
+`taskExecutorAuthorization.test.js` includes source scans proving no other
+`execute(...)` call, no `_executeToolCore` invocation and no duplicate
+execution path exist outside the choke point; behavioral tests call
+`TaskExecutor.executeTool` directly and via `ToolRecoveryManager` and confirm
+DENIED holds on both.
+
+### Process-wide operator policy (`server/lib/capabilities/operatorPolicy.js`)
+
+A tiny accessor: `setOperatorPolicy` / `getOperatorPolicy` /
+`resetOperatorPolicy`, defaulting to `DEFAULT_POLICY` (empty) at boot and after
+reset. It is the process-wide base for operator configuration; per-request
+`executionOptions.authorizationPolicy` takes precedence. NOT a store — no
+persistence, no per-workspace CRUD (those come with the approval/admin slice).
+
+### What remains for later slices (4C+)
+
+Approval transport (Socket.IO approval events + pending-approval state),
+approval/admin UI, enforcement of APPROVAL_REQUIRED (block until approved),
+runtime policy refresh + persistence, per-workspace policy CRUD.
 
 ## Manual validation (no live providers configured)
 
@@ -286,6 +408,16 @@ terminal events with safe logs and unchanged result shapes. Real idempotency
 flow: native getTime twice with the same key → one execution + one replay;
 in-memory MCP read twice with same key → one server call + one replay; same
 key across two users → both execute (no false collision).
+
+Slice 4B manual check (real local execution path, DB-attached TaskExecutor):
+default `getTime` executes with an unchanged result shape (no `authorization`
+key); an operator deny on the harmless `changeTheme` fixture → rejected with
+`execution.not_authorized`, no clientAction and no side effect; undernied
+`changeTheme` still returns its `CHANGE_THEME` clientAction; a direct
+`getTime` call under a deny is equally rejected (no bypass); the operator
+policy default is empty and resets cleanly, so no policy change persists after
+the check. MCP denial is validated by the in-memory server tests (denied wire
+tool rejected at the gate; pipeline-authorized tool executes).
 
 ## Intentionally NOT implemented (deferred)
 
@@ -298,10 +430,14 @@ key across two users → both execute (no false collision).
 - Risk-aware fail-closed policy for high-risk capabilities during store
   outages (deliberate architectural decision, not part of this slice —
   fail-open is uniform today)
-- **Slice 4A deferred:** enforcement of `authorizationPolicy` verdicts inside
-  TaskExecutor / execution path; approval transport (Socket.IO approval
-  events, pending-approval state); approval UI; guest-native enforcement;
-  runtime policy refresh; Jev is untouched by 4A.
+- **Slice 4A → 4B boundary:** enforcement of `authorizationPolicy` verdicts
+  inside TaskExecutor / execution path is DONE in 4B (DENIED + MCP denials
+  block; approval-required is deliberately NOT blocked yet because no
+  approval transport exists). Still deferred: approval transport (Socket.IO
+  approval events, pending-approval state); approval UI; runtime policy
+  refresh + persistence; per-workspace policy CRUD; guest-native and
+  workspace gating is enforced through the gate since 4B. Jev remains
+  untouched by 4A/4B.
 
 ## Environment note (pre-existing, unrelated)
 
