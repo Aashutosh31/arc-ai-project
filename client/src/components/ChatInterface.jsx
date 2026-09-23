@@ -5,6 +5,8 @@ import { useSocket } from '../hooks/useSocket';
 import { useConversation } from '../contexts/ConversationContext';
 import { useExecution } from '../contexts/ExecutionContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { useApprovals } from '../contexts/ApprovalContext';
+import ApprovalCard from './ApprovalCard';
 import { HistoryLoader } from '../lib/conversationHistory';
 import MarkdownRenderer from './MarkdownRenderer';
 import { Button as UiButton } from './ui';
@@ -441,6 +443,15 @@ const PresenceDot = styled.span`
   background: ${({ $status }) => ($status === 'Completed' ? 'var(--success)' : $status === 'Failed' ? 'var(--destructive)' : 'var(--primary-hex)')};
 `;
 
+// Slice 4D: stack of inline conversation cards for approvals awaiting user
+// decision. Rendered beside the message flow — never modal, never blocking.
+const ApprovalStack = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+`;
+
 const SUGGESTIONS = [
   { icon: '💡', label: 'Explain a concept', prompt: 'Explain a fascinating science concept in simple terms' },
   { icon: '💻', label: 'Help me code', prompt: 'Help me write clean, well explained code for a common task' },
@@ -486,6 +497,7 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
   const { messages, replaceMessages, prependMessages: prependStoreMessages, clearMessages, isProcessing, isStreaming, isSpeaking, getLiveVisionFrame } = useChat();
   const { interruptStream, sendCommand, socket, isConnected } = useSocket();
   const { activeExecution, presence, cancelActiveExecution } = useExecution();
+  const { approvals, now, resolveApproval } = useApprovals();
   const { activeConversationId, activeConversationRevision, switchConversation, fetchConversations, fetchConversationMessages, updateConversationTitle, ensureConversationReady, isFirstMessageSendingRef } = useConversation();
   const { activeWorkspaceId } = useWorkspace();
 
@@ -858,6 +870,29 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
                 ARC-AI
               </AssistantLabel>
               <TypingIndicator><span /><span /><span /></TypingIndicator>
+            </AssistantDoc>
+          </MessageRow>
+        )}
+
+        {approvals.length > 0 && (
+          <MessageRow $role="assistant">
+            <AssistantDoc>
+              {approvals.length > 1 && (
+                <AssistantLabel>
+                  <AssistantAvatar>A</AssistantAvatar>
+                  {approvals.length} permission requests waiting
+                </AssistantLabel>
+              )}
+              <ApprovalStack>
+                {approvals.map((approval) => (
+                  <ApprovalCard
+                    key={approval.approvalId}
+                    approval={approval}
+                    now={now}
+                    onResolve={resolveApproval}
+                  />
+                ))}
+              </ApprovalStack>
             </AssistantDoc>
           </MessageRow>
         )}

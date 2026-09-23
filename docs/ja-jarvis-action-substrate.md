@@ -1,4 +1,4 @@
-# JARVIS Action Substrate — Slices 1, 2, 3, 4A, 4B & 4C (handoff)
+# JARVIS Action Substrate — Slices 1, 2, 3, 4A, 4B, 4C & 4D (handoff)
 
 Additive architectural substrate for JARVIS. Slice 1 introduced a unified
 capability metadata layer; slice 2 added a normalized execution envelope +
@@ -11,11 +11,15 @@ choke point (explicit DENIED and MCP denials block before any side effect);
 slice 4C makes APPROVAL_REQUIRED a real server-authoritative approval
 workflow — pending-approval state, a Socket.IO approval transport to the
 initiating session only, and a fail-closed approval gate whose APPROVED
-decision continues the SAME execution attempt exactly once.
+decision continues the SAME execution attempt exactly once. Slice 4D ships the
+conversation-first frontend approval UI: a pure approval state model, a
+presentational in-flow card, and the client half of the 4C transport, wired
+into the existing dashboard and validated in a real browser.
 
 Status: slice 1 committed (`855da62`), slice 2 committed (`a2d55e2`, pushed),
 slice 3 committed (`fb56e45`, pushed), slice 4A committed (`ffb1d4d`, pushed),
 slice 4B committed (`9ae8847`, pushed), slice 4C implemented and validated but
+**not yet committed** (pending review), slice 4D implemented and validated but
 **not yet committed** (pending review).
 
 ## Integration boundary
@@ -426,11 +430,11 @@ reset. It is the process-wide base for operator configuration; per-request
 `executionOptions.authorizationPolicy` takes precedence. NOT a store — no
 persistence, no per-workspace CRUD (those come with the approval/admin slice).
 
-### What remains for later slices (4D+)
+### What remains for later slices (4E+)
 
-Approval UI (fourth-party — the frontend consumes the 4C events only); runtime
-policy refresh + persistence; per-workspace policy CRUD; durable out-of-band
-approval (mobile push, e-mail links) and multi-node approval coordination.
+Runtime policy refresh + persistence; per-workspace policy CRUD; durable
+out-of-band approval (mobile push, e-mail links) and multi-node approval
+coordination. (The fourth-party approval UI is now shipped in slice 4D.)
 
 ## Approval state + server-side approval transport (slice 4C)
 
@@ -439,8 +443,8 @@ approval is created at the single choke point (`TaskExecutor._executeToolCore`,
 `_awaitApproval`), the initiating session is notified on the Socket.IO
 transport, and execution WAITS for approve/deny/expire/cancel — then continues
 the SAME execution attempt (no second executor, no re-resolution, no duplicated
-idempotency reservation). The frontend approval UI is deliberately deferred to
-a later slice; 4C ships the state + transport + enforcement only.
+idempotency reservation). The frontend approval UI ships as slice 4D below; 4C
+shipped the state + transport + enforcement only.
 
 ### Approval state (`server/lib/capabilities/approvalStore.js`)
 
@@ -523,6 +527,84 @@ different-user socket cannot approve; approve → exactly one execution;
 deny → zero executions; too-late response → EXPIRED and zero executions;
 duplicate approve → still exactly one execution.
 
+## Frontend approval UI (slice 4D)
+
+4D is the fourth part of the slice-4 approval story: the dashboard renders a
+conversation-first permission card for each pending approval and lets the user
+approve/deny it. It is a pure client addition — it **only consumes** the 4C
+events and the 4C resolve handler; no backend file was modified and no
+approval semantics were changed. The design goal is that a conversation reads
+as "ARC asked, the user answered, the server decided".
+
+### Files
+
+- `client/src/lib/approvalUi.js` — pure, dependency-free approval UI state
+  machine (normalize / request-add upsert / resolve-start / ack reconcile /
+  display-only expiry tick / status & risk & scope & source mapping / pending
+  count / socket.io ack normalizers). Single source of truth for every
+  transition the UI can take.
+- `client/src/contexts/ApprovalContext.jsx` — the only transport owner: it
+  subscribes `agent:approval:requested` **directly on the socket** (mirroring
+  `ExecutionContext`, deliberately NOT on `useSocket`'s ref-counted
+  `SOCKET_EVENTS` teardown scope so another consumer can never strip the
+  listener) and is the only place that emits `agent:approval:resolve` with the
+  exact 4C payload `{ approvalId, decision }` (identity is socket-bound, never
+  sent). A 6s lost-ack timer reverts a stuck card to retryable pending.
+- `client/src/components/ApprovalCard.jsx` — presentation-only card: nothing
+  in it can auto-approve, emit on the socket, or fabricate a result. Rendered
+  inline in the ChatInterface message flow (non-modal, no autofocus, real
+  buttons, `role="status"` + `aria-live="polite"` status footer, risk accent
+  mirrored by text labels so it is never color-only).
+- Wiring: `ApprovalProvider` wraps the routes inside `ExecutionProvider`
+  (`client/src/App.jsx`); `ChatInterface.jsx` renders an `ApprovalStack` after
+  the typing indicator and binds `onResolve={resolveApproval}`.
+
+### State machine (client view)
+
+`PENDING → BUSY → APPROVED | DENIED | CANCELLED | EXPIRED | ERROR`, plus
+`PENDING → EXPIRED` for display when the local clock passes `expiresAt` (the
+server's lazy TTL stays the enforcement authority). A double-click race is
+guarded on both sides: the UI only starts a resolve from PENDING, and the
+server CAS lets exactly one terminal transition win. A resolve whose server
+ack is lost (`no-ack`/`network`) reverts to PENDING with a retry note — the
+card is never stranded and a later tap self-heals through the server's
+`already_resolved` response. Terminal status is never resurrected by a
+duplicate `requested` event (upsert is idempotent).
+
+### Safety + wording contract
+
+The card renders only the whitelisted preview fields from the 4C event — args,
+credentials, auth data and tool outputs never reach the UI model or the DOM.
+Copy is explicit that nothing runs before a decision ("ARC is requesting
+permission to use <tool>", "Nothing runs before you decide", "Denied · the
+tool will not run", "Expired · no decision was received"). Risk/scope/source
+read out as text labels (`High risk`, `Has lasting external effects`,
+`MCP tool`) in addition to any accent styling.
+
+### Tests
+
+- `client/tests/approvalUiState.test.mjs` (24) — full state matrix: payload
+  whitelist, idempotent upsert, double-click guard, authoritative ack
+  (approve/deny/already_resolved/expired), network + lost-ack revert,
+  display-only expiry, risk/scope/source labels, and the socket.io ack-arg
+  normalizers.
+- `client/tests/approvalCardSource.test.mjs` (8) — source regression: card can
+  never auto-approve/emit; exact resolve payload; listener registered outside
+  the useSocket teardown scope; a11y (live region, keyboard reachable,
+  non-blocking); inline stack wiring.
+- Real-browser QA (`client/tests/qa/approvalHarnessServer.mjs` +
+  `client/tests/qa/test_approval_browser.py`) — Playwright + system Chromium
+  against the real dashboard, real `approvalStore`, real socket and the real
+  `TaskExecutor` approval gate on `getTime`, all validated across the wire:
+  native approve → tool executes exactly once; deny → zero executions with
+  `Denied` status; expiry while the card is open (buttons removed, server
+  record EXPIRED); rapid double-click → still a single execution; socket
+  reconnect (offline → online) → the pending card resolves over the new
+  connection; MCP-shaped request renders `High risk` / `MCP tool` /
+  consequential scope. Responsive/a11y matrix at 1920/1440/1024/768/390/360:
+  no page-level horizontal overflow, cards never cover the composer, decision
+  buttons never clipped, and keyboard focus + Enter approves.
+
 ## Manual validation (no live providers configured)
 
 Real native `getTime`, real in-memory MCP (read + failing tool + aborted
@@ -565,9 +647,10 @@ transport test; see Part 12 above).
   inside TaskExecutor / execution path is DONE in 4B (DENIED + MCP denials
   block; approval-required deliberately NOT blocked yet because no approval
   transport exists). **Slice 4C now supplies that transport and enforcement**
-  (pending-approval state + Socket.IO approval events + fail-closed gate).
-  Still deferred: approval/admin UI; durable out-of-band approval (mobile
-  push, e-mail links); multi-node approval coordination; runtime policy
+  (pending-approval state + Socket.IO approval events + fail-closed gate), and
+  **slice 4D ships the fourth-party approval UI** (in-flow permission cards +
+  approve/deny on the dashboard). Still deferred: durable out-of-band approval
+  (mobile push, e-mail links); multi-node approval coordination; runtime policy
   refresh + persistence; per-workspace policy CRUD; guest-native and
   workspace gating is enforced through the gate since 4B. Jev remains
   untouched by 4A/4B/4C.

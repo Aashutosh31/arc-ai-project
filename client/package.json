@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test:history": "node tests/historyLoader.test.mjs",
     "test:mcp-oauth-ui": "node tests/mcpOAuthUiState.test.mjs",
+    "test:approvals": "node tests/approvalUiState.test.mjs && node tests/approvalCardSource.test.mjs",
     "test:voice": "node tests/voiceRuntime.test.mjs && node scripts/testVoiceMachine.js"
   },
   "dependencies": {

@@ -4,6 +4,7 @@ import { SocketProvider } from './components/SocketProvider';
 import { WorkspaceProvider } from './contexts/WorkspaceContext';
 import { ChatProvider } from './contexts/ChatContext';
 import { ExecutionProvider } from './contexts/ExecutionContext';
+import { ApprovalProvider } from './contexts/ApprovalContext';
 import styled, { createGlobalStyle } from 'styled-components';
 import { Analytics } from "@vercel/analytics/react"
 import { applyTheme, getStoredTheme } from './utils/theme';
@@ -122,30 +123,32 @@ const App = () => {
         <WorkspaceProvider>
           <ChatProvider>
             <ExecutionProvider>
-              <GlobalStyle />
-              <GlobalContainer>
-                <Suspense fallback={(
-                  <LoadingScreen>
-                    <LoadingCard>
-                      <div>Loading ARC-AI...</div>
-                      <LoadingBar />
-                    </LoadingCard>
-                  </LoadingScreen>
-                )}>
-                  <Routes>
-                    <Route path="/" element={<Navigate to="/features" replace />} />
-                    <Route path="/features" element={<Features />} />
-                    <Route path="/features/rag-memory" element={<RAGMemory />} />
-                    <Route path="/features/web-research" element={<WebResearch />} />
-                    <Route path="/features/automation" element={<Automation />} />
-                    <Route path="/architecture" element={<Architecture />} />
-                    <Route path="/about" element={<About />} />
-                    <Route path="/login" element={<AuthPage isRegister={false} />} />
-                    <Route path="/register" element={<AuthPage isRegister={true} />} />
-                    <Route path="/dashboard" element={<DashboardPage />} />
-                  </Routes>
-                </Suspense>
-              </GlobalContainer>
+              <ApprovalProvider>
+                <GlobalStyle />
+                <GlobalContainer>
+                  <Suspense fallback={(
+                    <LoadingScreen>
+                      <LoadingCard>
+                        <div>Loading ARC-AI...</div>
+                        <LoadingBar />
+                      </LoadingCard>
+                    </LoadingScreen>
+                  )}>
+                    <Routes>
+                      <Route path="/" element={<Navigate to="/features" replace />} />
+                      <Route path="/features" element={<Features />} />
+                      <Route path="/features/rag-memory" element={<RAGMemory />} />
+                      <Route path="/features/web-research" element={<WebResearch />} />
+                      <Route path="/features/automation" element={<Automation />} />
+                      <Route path="/features/architecture" element={<Architecture />} />
+                      <Route path="/about" element={<About />} />
+                      <Route path="/login" element={<AuthPage isRegister={false} />} />
+                      <Route path="/register" element={<AuthPage isRegister={true} />} />
+                      <Route path="/dashboard" element={<DashboardPage />} />
+                    </Routes>
+                  </Suspense>
+                </GlobalContainer>
+              </ApprovalProvider>
             </ExecutionProvider>
           </ChatProvider>
         </WorkspaceProvider>
