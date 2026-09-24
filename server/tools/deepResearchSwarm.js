@@ -1,5 +1,7 @@
-const webSearchTool = require('./webSearch');
-const scrapeWebsiteTool = require('./scrapeWebsite');
+// Lazy reference: tools/index <-> deepResearchSwarm <-> services/TaskExecutor
+// would otherwise form a fragile require cycle depending on boot order.
+// Resolved only at execution time, when every module is fully loaded.
+const getTaskExecutor = () => require('../services/TaskExecutor');
 const Message = require('../models/Message');
 const Conversation = require('../models/Conversation');
 const LLMRouter = require('../lib/llm/LLMRouter');
@@ -173,7 +175,23 @@ module.exports = {
             emitUpdate(`Searching the web for latest data...`);
             logSwarm('tool.start', { tool: 'webSearch', query: `${topic} latest news comprehensive overview` });
             const searchStartedAt = Date.now();
-            const searchResults = await webSearchTool.execute({ query: topic + " latest news comprehensive overview" });
+            // JARVIS Action Substrate — slice 4E item 4: nested research tools
+            // run through the SAME governed choke point as every other
+            // capability (resolution -> authorization -> approval -> envelope
+            // -> idempotency -> credits -> execution). Caller context
+            // (userId/socket/workspaceId/conversationId/signal) is propagated
+            // explicitly and is never derived from untrusted tool args.
+            const searchResults = await getTaskExecutor().executeTool(
+                'webSearch',
+                { query: topic + " latest news comprehensive overview" },
+                userId,
+                socket,
+                {
+                    workspaceId,
+                    conversationId,
+                    signal: localAbortController.signal,
+                }
+            );
             logSwarm('tool.result', {
                 tool: 'webSearch',
                 durationMs: Date.now() - searchStartedAt,
@@ -200,7 +218,17 @@ module.exports = {
 
                 logSwarm('tool.start', { tool: 'scrapeWebsite', url: targetUrl });
                 const scrapeStartedAt = Date.now();
-                const scrapeResult = await scrapeWebsiteTool.execute({ url: targetUrl });
+                const scrapeResult = await getTaskExecutor().executeTool(
+                    'scrapeWebsite',
+                    { url: targetUrl },
+                    userId,
+                    socket,
+                    {
+                        workspaceId,
+                        conversationId,
+                        signal: localAbortController.signal,
+                    }
+                );
                 logSwarm('tool.result', {
                     tool: 'scrapeWebsite',
                     durationMs: Date.now() - scrapeStartedAt,

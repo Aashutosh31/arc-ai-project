@@ -207,6 +207,24 @@ class TaskExecutor {
                 if (executionOptions?.signal?.aborted) {
                     return { success: false, cancelled: true, error: 'Execution aborted after approval before credit charge.' };
                 }
+                // TOCTOU revalidation (slice 4E): the operator policy / MCP
+                // registry / workspace membership may have changed while the
+                // human approval was pending. Re-derive the authoritative
+                // verdict NOW — before credits or any side effect — and fail
+                // closed if authority was revoked in the meantime.
+                const recheck = this._authorizeExecution(toolName, {
+                    isMcp, userId, executionOptions, envelope
+                });
+                if (!recheck.verdict.allowed) {
+                    recheck.observe();
+                    return {
+                        success: false,
+                        blocked: true,
+                        error: 'Execution blocked: authorization revoked after approval.',
+                        reason: recheck.verdict.reason || null,
+                        authorization: recheck.metadata,
+                    };
+                }
             }
 
             if (!executionOptions?.skipCreditCharge) {

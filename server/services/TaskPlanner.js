@@ -43,6 +43,13 @@ class TaskPlanner {
     if (requestWorkspaceId && String(exec.workspaceId || '') !== String(requestWorkspaceId)) {
       throw new Error('Execution not found in this workspace');
     }
+    // Identity hardening (slice 4E): the execution must belong to the
+    // authenticated requester. Ownership is never inferred from a
+    // client-asserted workspaceId — it is bound to the socket identity.
+    const requesterId = (options.userId || (socket && socket.userId)) || null;
+    if (requesterId && String(exec.userId || '') !== String(requesterId)) {
+      throw new Error('Execution not found');
+    }
     
     if (exec.status === 'RUNNING') throw new Error('Execution already running');
 

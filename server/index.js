@@ -14,6 +14,7 @@ const memoryRoutes = require('./routes/memory.js');
 const workspaceRoutes = require('./routes/workspaces.js');
 const voiceRoutes = require('./routes/voice.js');
 const AIService = require('./services/AIService.js'); 
+const operatorPolicySource = require('./lib/capabilities/operatorPolicySource');
 
 const app = express();
 const server = http.createServer(app); 
@@ -47,6 +48,11 @@ app.use(cors({
 
 // 8mb allows short base64 voice clips for /api/voice/transcribe; other
 // endpoints send small JSON payloads and are unaffected.
+//
+// The operator policy router is mounted BEFORE the global parser so its own
+// 64 KB JSON body cap is authoritative (a policy PUT has no business parsing
+// anything large; the strict limit is part of the route contract).
+app.use('/api/policy', require('./routes/policy.js'));
 app.use(express.json({ limit: '8mb' }));
 
 const mongoUri = process.env.MONGO_URI || process.env.DATABASE_URL;
@@ -57,6 +63,17 @@ mongoose.connect(mongoUri)
         try {
             await mongoose.connection.collection('aimemories').dropIndex('userId_1');
         } catch (err) { }
+        // Operator policy is THE authoritative policy source once hydrated;
+        // the bounded timer keeps the process-local copy fresh. On any
+        // hydrate failure the process keeps the seeded guest-deny defaults
+        // and the timer retries — the server stays up.
+        try {
+            await operatorPolicySource.hydrate();
+            console.log(`🟢 Operator policy loaded (${operatorPolicySource.getMeta().source === 'mongo' ? 'Mongo authoritative' : 'seeded defaults'}${operatorPolicySource.getMeta().lastError ? `; lastError=${operatorPolicySource.getMeta().lastError}` : ''}).`);
+        } catch (err) {
+            console.error('⚠️ Operator policy initial hydrate failed; running on seeded defaults (timer will retry).', err && err.message ? err.message : err);
+        }
+        operatorPolicySource.startRefreshTimer();
     })
     .catch(err => console.error('MongoDB connection error:', err));
 
@@ -208,8 +225,26 @@ io.on('connection', (socket) => {
         // Preempt any prior in-flight generation for this socket.
         AIService.abortForSocket(socket.id);
 
-        // Use socket's active workspace or incoming workspace ID or null
-        const effectiveWorkspaceId = incomingWorkspaceId || socket.activeWorkspaceId || null;
+        // Use socket's active workspace or incoming workspace ID or null.
+        // Identity hardening (slice 4E): an incoming workspaceId is only
+        // honored when the requesting user owns that workspace — mirrors the
+        // owner gate in workspace:switch. A forged/cross-user workspaceId
+        // falls back to the socket's active workspace instead of being
+        // trusted.
+        let effectiveWorkspaceId = socket.activeWorkspaceId || null;
+        if (incomingWorkspaceId && !String(userId).startsWith('guest_')) {
+            try {
+                const Workspace = require('./models/Workspace');
+                const owned = await Workspace.findOne({ _id: incomingWorkspaceId, owner: userId }).lean();
+                if (owned) {
+                    effectiveWorkspaceId = String(incomingWorkspaceId);
+                } else {
+                    console.warn(`[Workspace:Identity] user ${userId} sent unowned workspaceId ${incomingWorkspaceId}; ignored.`);
+                }
+            } catch (err) {
+                console.warn('[Workspace:Identity] workspace lookup failed:', err?.message || err);
+            }
+        }
 
         console.log(`🧠 Processing command from user ${userId} (workspace: ${effectiveWorkspaceId}): "${command}"`);
         // `language` is the per-turn STT auto-detected language (Sarvam), if any.
@@ -259,6 +294,9 @@ const gracefulShutdown = async (signal) => {
     }, 10000);
 
     try {
+        // 0. Stop the operator policy refresh timer before closing stores
+        operatorPolicySource.stopRefreshTimer();
+
         // 1. Close HTTP & Socket.io server
         console.info('[Shutdown] Closing HTTP server and Socket.io...');
         await new Promise((resolve) => {

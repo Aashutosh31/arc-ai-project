@@ -1,4 +1,4 @@
-# JARVIS Action Substrate — Slices 1, 2, 3, 4A, 4B, 4C & 4D (handoff)
+# JARVIS Action Substrate — Slices 1, 2, 3, 4A, 4B, 4C, 4D & 4E (handoff)
 
 Additive architectural substrate for JARVIS. Slice 1 introduced a unified
 capability metadata layer; slice 2 added a normalized execution envelope +
@@ -14,12 +14,17 @@ initiating session only, and a fail-closed approval gate whose APPROVED
 decision continues the SAME execution attempt exactly once. Slice 4D ships the
 conversation-first frontend approval UI: a pure approval state model, a
 presentational in-flow card, and the client half of the 4C transport, wired
-into the existing dashboard and validated in a real browser.
+into the existing dashboard and validated in a real browser. Slice 4E hardens
+the edges: owner-scoped workspace identity (incoming workspace ids and plan
+executions are bound to the authenticated requester), seeded process-wide
+guest hard-deny defaults, and post-approval TOCTOU revalidation that fails
+closed if authority was revoked while a human decision was pending.
 
 Status: slice 1 committed (`855da62`), slice 2 committed (`a2d55e2`, pushed),
 slice 3 committed (`fb56e45`, pushed), slice 4A committed (`ffb1d4d`, pushed),
 slice 4B committed (`9ae8847`, pushed), slice 4C implemented and validated but
 **not yet committed** (pending review), slice 4D implemented and validated but
+**not yet committed** (pending review), slice 4E implemented and validated but
 **not yet committed** (pending review).
 
 ## Integration boundary
@@ -427,14 +432,18 @@ DENIED holds on both.
 A tiny accessor: `setOperatorPolicy` / `getOperatorPolicy` /
 `resetOperatorPolicy`, defaulting to `DEFAULT_POLICY` (empty) at boot and after
 reset. It is the process-wide base for operator configuration; per-request
-`executionOptions.authorizationPolicy` takes precedence. NOT a store — no
-persistence, no per-workspace CRUD (those come with the approval/admin slice).
+`executionOptions.authorizationPolicy` takes precedence. Deliberately no-I/O —
+the durable authority behind the knob is the Mongo-backed
+`operatorPolicySource` (slice 4E item 2), which hydrates this accessor; the
+execution path performs zero DB round trips.
 
 ### What remains for later slices (4E+)
 
-Runtime policy refresh + persistence; per-workspace policy CRUD; durable
-out-of-band approval (mobile push, e-mail links) and multi-node approval
-coordination. (The fourth-party approval UI is now shipped in slice 4D.)
+Runtime policy refresh + persistence is now shipped (slice 4E item 2 — the
+Mongo-backed operator policy with bounded refresh). Still deferred:
+per-workspace policy CRUD; durable out-of-band approval (mobile push, e-mail
+links) and multi-node approval coordination. (The fourth-party approval UI is
+now shipped in slice 4D.)
 
 ## Approval state + server-side approval transport (slice 4C)
 
@@ -605,6 +614,184 @@ read out as text labels (`High risk`, `Has lasting external effects`,
   no page-level horizontal overflow, cards never cover the composer, decision
   buttons never clipped, and keyboard focus + Enter approves.
 
+## Workspace identity + guest hard-deny + approval TOCTOU (slice 4E)
+
+Slice 4E bolts the remaining hard edges onto the 4B/4C gate:
+
+1. **Workspace identity** — an incoming `workspaceId` may no longer be
+   asserted blindly. `WorkspaceRuntimeManager.getWorkspaceById` now accepts an
+   optional `ownerUserId` and scopes the lookup to that owner; `resolveWorkspace`
+   passes the authenticated `userId`, so a forged/cross-user workspace resolves
+   to nothing and falls through to the user's default workspace instead. The
+   `ai:stt:final` socket handler mirrors the same owner gate before trusting an
+   incoming workspace id. `TaskPlanner.executePlan` additionally requires the
+   execution document to belong to the socket-authenticated requester (identical
+   `Execution not found` response — no existence leak), even when a matching
+   `workspaceId` is supplied.
+
+2. **Seeded guest hard-deny** — `operatorPolicy` now boots with
+   `GUEST_DENY_DEFAULTS` (`native:webSearch`, `native:scrapeWebsite`,
+   `native:deepResearchSwarm`, `native:sendEmail`, `native:memorize`,
+   `native:storeUserFact`, `native:executeCode`, `native:scheduleMeeting`),
+   every id verified against the live native registry. Guests are hard-denied
+   these external/consequential natives by default even with **no operator
+   configuration**, while the frozen pure-engine `DEFAULT_POLICY` remains
+   untouched (empty `guestDenied`). `resetOperatorPolicy` restores the seeded
+   base.
+
+3. **Approval TOCTOU revalidation** — after an approval resolves to `allowed`,
+   `TaskExecutor` re-derives the authoritative authorization verdict *before*
+   credits or any side effect. If the operator policy / MCP registry /
+   workspace membership changed while the human decision was pending, the
+   execution is failed closed (`blocked`) — the tool body and credit charge
+   never run.
+
+### Files
+
+- `server/services/WorkspaceRuntimeManager.js` — owner-scoped lookup.
+- `server/index.js` — `ai:stt:final` owner gate on incoming workspace id.
+- `server/services/TaskPlanner.js` — execution ownership check.
+- `server/lib/capabilities/operatorPolicy.js` — seeded guest-deny base.
+- `server/services/TaskExecutor.js` — post-approval revalidation.
+- `server/tests/slice4eIdentifyHarness.test.js` — 11 tests (owner-scoping,
+  planner gating, seeded defaults, `DEFAULT_POLICY` immutability, boundary
+  enforcement, TOCTOU blocked + normal-approval regression).
+
+### Mongo-backed operator policy + bounded runtime refresh (slice 4E item 2)
+
+Items 1/3/5 (above) made the *in-process* policy conservative. Item 2 makes
+the operator policy **durable and operator-manageable** without adding a DB
+round trip to the execution path.
+
+- **Model** (`server/models/OperatorPolicy.js`): exactly ONE document lives in
+  the collection, guaranteed by a unique `key` (default `operator-policy`). The
+  shape mirrors the pure engine exactly: `guestDenied`, `workspaceRestricted`
+  (subdoc `{ id, workspaceIds }`), `entries` (subdoc
+  `{ id?, source?, name?, action, reason? }` with the engine's action enum),
+  `updatedAt`.
+- **Source** (`server/lib/capabilities/operatorPolicySource.js`): the only
+  module that reads/writes the document. On startup it **hydrates** the
+  in-process accessor (`operatorPolicy.setOperatorPolicy`) and, if no document
+  exists, upserts THE default document from the guest-deny seeds (a unique-key
+  E11000 insert race is retried as a re-read — never a duplicate authority).
+- **Bounded refresh**: an unref'd interval (`startRefreshTimer` /
+  `stopRefreshTimer`) refreshes at least every `FRESHNESS_BOUND_MS` (default
+  60 s, override `OPERATOR_POLICY_REFRESH_MS`, floor 1 s; graceful shutdown
+  stops the timer before the connection closes). Refresh is single-flight
+  (concurrent refreshes share one in-flight read) and a revision counter
+  discards a stale read that raced an operator write.
+- **Failure behavior** (all preserve last-known-good): Mongo unavailable →
+  `lastError: mongo-unavailable`, kept + logged, last-known-good survives
+  (`storeReady()` fails fast on a disconnected connection instead of buffering);
+  a malformed PERSISTED document is never applied and never overwritten (an
+  operator PUT repairs it); a missing document is recreated from seeds.
+- **Routes** (`server/routes/policy.js`, mounted at `/api/policy` before the
+  global JSON parser so its own **64 KB body cap** is authoritative):
+  - `GET` — served entirely from the in-process cache (zero Mongo reads),
+    returns `{ policy, meta }` (freshness bound, last-loaded, last-error,
+    next-refresh, revision); never leaks store meta fields.
+  - `PUT` — full replace of the policy document (bare body or `{ policy }`
+    envelope). Validation is synchronous and whitelist-only: unknown fields,
+    Mongo `$` operators, wrong `action`, bad capability ids, and oversized
+    bodies are rejected **before** any write (400/413; one atomic upsert on
+    success). The apply to the in-process policy is immediate and serialized
+    (concurrent PUTs are last-writer-wins in both the document and memory);
+    a failed persist never touches the in-process policy (503/500).
+  - Authorization is operator-only and non-guest (fail-closed): a signed-in
+    operator/admin role, or membership in `OPERATOR_EMAILS` /
+    `OPERATOR_USER_IDS` (read at request time). Guests → 403 `GATE.GUEST`;
+    non-operators → 403 `GATE.OPERATOR`.
+- **Execution path unchanged**: TaskExecutor still reads only the in-process
+  knob on every execution — zero per-request Mongo queries.
+- **Files**: `server/models/OperatorPolicy.js`,
+  `server/lib/capabilities/operatorPolicySource.js`, `server/routes/policy.js`,
+  `server/index.js` (startup hydrate + timer + route + shutdown).
+- **Tests**: `server/tests/operatorPolicySource.test.js` — 25 tests (schema,
+  single-authority hydration + E11000 race, bounded interval refresh, cache-only
+  GET, operator/gate matrix, immediate atomic PUT + envelope, malformed body /
+  `$` injection / 64 KB 413 rejection, malformed-persisted never applied,
+  last-known-good under outage + disconnect, zero per-request Mongo across real
+  TaskExecutor executions, PUT-driven verdict change through the real executor,
+  single-flight refresh, last-writer-wins PUT serialization).
+
+### Governed nested tool calls inside the swarm (slice 4E item 4)
+
+Slice 4E item 4 closes the last ungoverned execution path: `deepResearchSwarm`
+no longer calls the `webSearch` / `scrapeWebsite` leaf tools directly. Both
+nested calls now route through the **same** `TaskExecutor.executeTool` choke
+point every other capability uses, so a research tool invocation inherits the
+full substrate path — capability resolution → authorization → approval →
+execution envelope → idempotency → credits → execution — with the caller's real
+context.
+
+- **One executor, no second flow** — there is no separate nested executor and no
+  recursive `deepResearchSwarm`. The nested call is literally the public
+  `getTaskExecutor().executeTool('webSearch' | 'scrapeWebsite', ..., userId,
+  socket, { workspaceId, conversationId, signal })` API the AI service uses.
+  `getTaskExecutor()` is a lazy `require` inside the tool to keep
+  `tools/index ⇄ deepResearchSwarm ⇄ services/TaskExecutor` from forming a boot-order-dependent require cycle.
+- **Context comes from the caller, never from tool args** — `userId`, `socket`,
+  `workspaceId`, `conversationId`, and the swarm's own `localAbortController`
+  signal are propagated explicitly into the nested dispatch. A malicious
+  `{ query: ... }`/`{ url: ... }` payload cannot spoof the actor or the
+  workspace; the authorization engine sees the authenticated requester.
+- **Ordering and events preserved** — the swarm still emits its `logSwarm`
+  `tool.start` / `tool.result` / `tool.failure` events, keeps its rate-limit
+  delays, and formats its final report identically. Nested results adopt the
+  normalized `{ success, error, cancelled }` failure shape, and the existing
+  result formatting (`searchResults.success`, `searchResults.content`,
+  `scrapeResult.content`) is unchanged.
+- **Authorization / denial** — an operator deny on `native:webSearch` (or the
+  ephemeral-tool route in `authorizationPolicy`) is enforced on the nested call:
+  the swarm starts, the nested envelope is refused with `authorization.denied`,
+  the real tool body never executes, and no credit is charged.
+- **Approval re-entrancy** — a nested call that requires approval uses the same
+  single-use approval store + Socket.IO transport as slice 4C, requesting its
+  own approval from the initiating session. Post-approval TOCTOU re-checking (4E
+  item 3) applies to the nested call exactly as it does to any top-level one;
+  no second approval flow exists.
+- **Credits** — the cost of a nested governed execution is 2 credits per
+  `webSearch` / `scrapeWebsite` and 8 for the outer `deepResearchSwarm`; no
+  `skipCreditCharge` escape is passed to nested calls.
+- **Emergency stop** — the existing `localAbortController` keeps working: the
+  nested signal propagates into the dispatched tool; cancellation before start,
+  in-flight, or while an approval is pending follows the same abort path and
+  leaves no orphaned execution.
+- **Idempotency** — outer and nested executions each get their own
+  `executionId`; the idempotency gate is active whenever a logical key exists,
+  so outer and nested runs never collide on a shared key.
+- **Seed reconciliation** — two registered natives were verified against the
+  live registry and appended (order-preserving) to `GUEST_DENY_DEFAULTS`:
+  `native:executeCode` and `native:scheduleMeeting` (now 8 ids). `memorize` is
+  the capability id for the `memoryWriter` surface — no alias is used.
+- **Files**: `server/tools/deepResearchSwarm.js` (lazy executor ref + two
+  governed nested calls), `server/lib/capabilities/operatorPolicy.js`
+  (seed list +2), `server/tests/slice4eSwarmGovernance.test.js` — 18 tests
+  (governed routing, credit inheritance, envelope identity + caller workspace,
+  default allow, operator deny, guest hard-deny, workspace restriction,
+  caller-not-args context, the full 4C approve/deny/no-session/TOCTOU flow,
+  cancellation before start + in-flight + pending approval, no recursion,
+  unchanged success shape, distinct idempotency identity per execution).
+- **Real-config validation** — with `dotenv` real config and only the
+  Mongo-dependent layers (credits backend, Message/Conversation models, and the
+  LLM report generator) substituted in-process, the real `TaskExecutor`,
+  real `deepResearchSwarm`, and the REAL live-network `webSearch` (Wikipedia)
+  and `scrapeWebsite` (example.com) tools were exercised end-to-end: the
+  swarm-nested webSearch produced the full
+  `capability.execution.started → capability.authorization.allowed →
+  live fetch → capability.execution.succeeded` chain with real Wikipedia data
+  (`title="Microsoft Azure"`), the governed scrape enveloped a live 200 fetch,
+  and an operator deny on `native:webSearch` produced
+  `capability.authorization.denied` with ZERO live invocations, ZERO envelope
+  success, and ZERO credit charge while the swarm started normally (17/17
+  checks). The box itself cannot reach the real `server/.env` Mongo Atlas URI
+  (the Atlas IP allow-list rejects this network; boot error reproduced), so the
+  full HTTP-boot validation is environment-blocked here, not blocked by code —
+  the harness + this real-config run cover the governed behavior directly.
+  Wikipedia intermittently rate-limits undici bursts from this shared egress IP
+  with an HTML page; a retry-with-backoff on HTML-only wiki responses (still
+  the real URL + real HTTP round-trip) makes the live run deterministic.
+
 ## Manual validation (no live providers configured)
 
 Real native `getTime`, real in-memory MCP (read + failing tool + aborted
@@ -649,11 +836,12 @@ transport test; see Part 12 above).
   transport exists). **Slice 4C now supplies that transport and enforcement**
   (pending-approval state + Socket.IO approval events + fail-closed gate), and
   **slice 4D ships the fourth-party approval UI** (in-flow permission cards +
-  approve/deny on the dashboard). Still deferred: durable out-of-band approval
-  (mobile push, e-mail links); multi-node approval coordination; runtime policy
-  refresh + persistence; per-workspace policy CRUD; guest-native and
-  workspace gating is enforced through the gate since 4B. Jev remains
-  untouched by 4A/4B/4C.
+  approve/deny on the dashboard). **Slice 4E adds workspace-identity
+  isolation, seeded guest hard-deny, and post-approval TOCTOU revalidation.**
+  Still deferred: durable out-of-band approval (mobile push, e-mail links);
+  multi-node approval coordination; **per-workspace policy CRUD** (runtime
+  policy refresh + persistence itself is now shipped in slice 4E item 2). Jev
+  remains untouched by 4A through 4E.
 
 ## Environment note (pre-existing, unrelated)
 

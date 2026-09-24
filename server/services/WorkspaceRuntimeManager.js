@@ -8,13 +8,17 @@ class WorkspaceRuntimeManager {
     this.wsLog = new WorkspaceLogger('WorkspaceRuntime');
   }
 
-  async getWorkspaceById(workspaceId) {
+  async getWorkspaceById(workspaceId, { ownerUserId = null } = {}) {
     if (!workspaceId) return null;
     if (!mongoose.Types.ObjectId.isValid(workspaceId)) return null;
-    const ws = await Workspace.findOne({
+    // Identity hardening (slice 4E): when an owner is supplied, the lookup is
+    // owner-scoped so a forged/cross-user workspaceId resolves to nothing.
+    const filter = {
       _id: workspaceId,
       $or: [{ 'metadata.archived': { $exists: false } }, { 'metadata.archived': { $ne: true } }]
-    }).lean();
+    };
+    if (ownerUserId) filter.owner = ownerUserId;
+    const ws = await Workspace.findOne(filter).lean();
     if (!ws) this.logger.info('[WorkspaceRuntimeManager] workspace not found:', workspaceId);
     return ws;
   }
@@ -59,7 +63,7 @@ class WorkspaceRuntimeManager {
     if (!userId || String(userId).startsWith('guest_')) return null;
     // priority: explicit workspaceId -> user's default workspace -> create default
     if (workspaceId) {
-      const ws = await this.getWorkspaceById(workspaceId);
+      const ws = await this.getWorkspaceById(workspaceId, { ownerUserId: userId });
       if (ws) {
         this.wsLog.workspaceResolved(userId, ws._id.toString(), ws.vectorNamespace || `workspace_${ws._id}`);
         return ws;
