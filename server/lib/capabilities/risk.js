@@ -2,15 +2,16 @@
 
 // Pure capability risk/scope mapping.
 //
-// The FIRST substrate slice is inventory-only: this module classifies
-// capabilities by scope and risk as METADATA. It has no policy behavior —
-// nothing in ARC consults it for gating, and none of the existing
-// authority (native TaskExecutor, MCP policy) is consulted through it.
-// Slice 4A completes the native table so EVERY registered native tool is
-// classified; the classification remains metadata — the authorization
-// policy layer (authorizationPolicy.js) consumes it, it does not gate here.
+// This module is the single source of truth for how each capability is
+// classified. It holds no policy behavior of its own and gates nothing
+// directly, but it is NOT unused metadata: authorizationPolicy.js consumes it
+// to derive default verdicts, which is what makes a consequential/high
+// capability require a real server-authoritative approval and what makes the
+// guest hard-deny set complete. Changing a classification here therefore
+// changes enforcement, so tests/authorizationPolicy.test.js re-derives the
+// expectations from the live registry rather than hardcoding them.
 //
-//   nativeRiskFor(name)   -> { scope, risk } | null   (declared mapping)
+//   nativeRiskFor(name)   -> { scope, risk } | null  (declared mapping)
 //   mcpRiskFor(annotations) -> { scope, risk } | null (MCP hint-derived)
 //
 // Unclassified capabilities return null so the registry can surface them as

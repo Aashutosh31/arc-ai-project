@@ -1,26 +1,41 @@
 'use strict';
 
-// JARVIS Action Substrate — slice 4A: server-authoritative authorization
-// policy.
+// JARVIS Action Substrate — server-authoritative authorization policy.
 //
 // Pure, deterministic, capability-keyed verdict engine. It consumes an
 // authoritative capability (the Slice-1 substrate shape) plus an execution
 // context plus an operator policy configuration, and returns a normalized
 // authorization verdict. It NEVER executes anything, never touches the
-// provider/model, never consults Jev, and imposes no pending approval state:
-// "approval required" is a VERDICT ONLY in this slice.
+// provider/model, and never consults Jev.
 //
-// Verdict model (transitional, slice 4A default):
+// This engine stays pure: it holds NO approval state and performs NO I/O.
+// APPROVAL_REQUIRED is the verdict it returns; TaskExecutor (slice 4C) is
+// what turns that verdict into a real, server-authoritative approval — it
+// creates pending state in approvalStore, notifies ONLY the initiating
+// session, waits for the decision, and re-derives this verdict afterwards to
+// close the TOCTOU window (slice 4E). So "verdict only" is accurate HERE and
+// only here: enforcement lives at the TaskExecutor boundary, not in this file.
+//
+// Verdict model:
 //   UNSPECIFIED       -> preserve existing behavior (allowed immediately).
 //   AUTO              -> allowed immediately (low-risk / operator-override).
-//   APPROVAL_REQUIRED -> requiresApproval=true AND allowed=true (provisional):
-//                        NOT treated as denied while the approval transport
-//                        (slice 4B) does not exist. Approval-required is a
-//                        verdict; ARC must not silently block these actions.
-//   DENIED            -> execution authorization fails.
+//   APPROVAL_REQUIRED -> requiresApproval=true; `allowed` is mode-dependent:
+//                        - MODE_TRANSITIONAL (DEFAULT): allowed=true
+//                          (provisional), for rollout only. The caller still
+//                          runs the real approval flow.
+//                        - MODE_ENFORCE: allowed=false, so the caller must
+//                          obtain a real approval before any side effect.
+//                        TaskExecutor runs the approval flow in BOTH modes —
+//                        it keys off requiresApproval, not off `allowed`, so
+//                        the mode never skips a required approval.
+//                        DENIED is unaffected by the mode: a denial can never
+//                        be relaxed into an allow by any mode.
+//   DENIED            -> execution authorization fails; no approval, no retry,
+//                        no fallback can convert it into an allow.
 //
-//   mode 'enforce' (future, once the approval transport exists) turns
-//   APPROVAL_REQUIRED into allowed=false, still gated by a real approval.
+// Guest and workspace gating are enforced here from the operator policy
+// (operatorPolicy.js seeds conservative guest hard-denies; the authoritative
+// persisted policy is owned by operatorPolicySource.js).
 //
 // MCP remains authoritative: an MCP capability is denied unless the caller
 // supplies the already-authorized MCP projection (mcpAuthorized === true).

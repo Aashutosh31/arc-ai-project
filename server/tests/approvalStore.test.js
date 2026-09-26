@@ -45,6 +45,8 @@ const ctx = () => ({
   userId: 'u-1',
   workspaceId: 'ws-1',
   capabilityId: 'native:sendEmail',
+  // P0 #2: the initiating connection is part of the identity binding.
+  initiatingSocketId: 'sock-1',
   source: 'native',
   toolName: 'sendEmail',
   risk: 'high',
@@ -60,6 +62,8 @@ const resolve = (over = {}) => {
     decision: 'approve',
     userId: 'u-1',
     ...over.opts,
+    // After the spread, so a test can override the expected socket via opts.
+    socketId: 'sock-1',
   }) };
 };
 
@@ -89,7 +93,7 @@ const main = async () => {
   await test('approve transitions PENDING -> APPROVED exactly once', async () => {
     approvalStore._reset();
     const r = mk();
-    const out = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1' });
+    const out = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1' });
     assert.strictEqual(out.ok, true);
     assert.strictEqual(out.state, STATES.APPROVED);
     assert.strictEqual(out.record.decision, 'approve');
@@ -102,7 +106,7 @@ const main = async () => {
   await test('deny transitions PENDING -> DENIED', async () => {
     approvalStore._reset();
     const r = mk();
-    const out = approvalStore.resolve({ approvalId: r.approvalId, decision: 'deny', userId: 'u-1' });
+    const out = approvalStore.resolve({ approvalId: r.approvalId, decision: 'deny', userId: 'u-1', socketId: 'sock-1' });
     assert.strictEqual(out.ok, true);
     assert.strictEqual(out.state, STATES.DENIED);
     assert.strictEqual(out.record.decision, 'deny');
@@ -115,7 +119,7 @@ const main = async () => {
     const r = mk({ ttlMs: 30 });
     await new Promise((res) => setTimeout(res, 70));
     assert.strictEqual(approvalStore.read(r.approvalId).state, STATES.EXPIRED, 'TTL timer expired the record');
-    const out = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1' });
+    const out = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1' });
     assert.strictEqual(out.ok, false);
     assert.strictEqual(out.reason, 'expired');
     approvalStore._reset();
@@ -135,8 +139,8 @@ const main = async () => {
   await test('a resolved approval cannot be re-transitioned (single-use)', async () => {
     approvalStore._reset();
     const r = mk();
-    assert.strictEqual(approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1' }).ok, true);
-    const again = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1' });
+    assert.strictEqual(approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1' }).ok, true);
+    const again = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1' });
     assert.strictEqual(again.ok, false);
     assert.strictEqual(again.reason, 'already_resolved');
     assert.strictEqual(approvalStore.read(r.approvalId).state, STATES.APPROVED);
@@ -147,8 +151,8 @@ const main = async () => {
   await test('duplicate approve: only the first wins', async () => {
     approvalStore._reset();
     const r = mk();
-    const first = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1' });
-    const second = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1' });
+    const first = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1' });
+    const second = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1' });
     assert.strictEqual(first.ok, true);
     assert.strictEqual(second.ok, false);
     assert.strictEqual(approvalStore.read(r.approvalId).state, STATES.APPROVED);
@@ -159,8 +163,8 @@ const main = async () => {
   await test('approve after a deny is rejected', async () => {
     approvalStore._reset();
     const r = mk();
-    assert.strictEqual(approvalStore.resolve({ approvalId: r.approvalId, decision: 'deny', userId: 'u-1' }).ok, true);
-    const late = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1' });
+    assert.strictEqual(approvalStore.resolve({ approvalId: r.approvalId, decision: 'deny', userId: 'u-1', socketId: 'sock-1' }).ok, true);
+    const late = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1' });
     assert.strictEqual(late.ok, false);
     assert.strictEqual(late.reason, 'already_resolved');
     assert.strictEqual(approvalStore.read(r.approvalId).state, STATES.DENIED);
@@ -172,7 +176,7 @@ const main = async () => {
     approvalStore._reset();
     const r = mk({ ttlMs: 30 });
     await new Promise((res) => setTimeout(res, 70));
-    const out = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1' });
+    const out = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1' });
     assert.strictEqual(out.ok, false);
     assert.strictEqual(out.reason, 'expired');
     assert.strictEqual(approvalStore.read(r.approvalId).state, STATES.EXPIRED);
@@ -183,7 +187,7 @@ const main = async () => {
   await test('wrong authenticated user cannot resolve an approval', async () => {
     approvalStore._reset();
     const r = mk();
-    const wrongUser = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-evil' });
+    const wrongUser = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-evil', socketId: 'sock-1' });
     assert.strictEqual(wrongUser.ok, false);
     assert.strictEqual(wrongUser.reason, 'user_mismatch');
     assert.strictEqual(approvalStore.read(r.approvalId).state, STATES.PENDING);
@@ -204,6 +208,7 @@ const main = async () => {
       decision: 'approve',
       userId: 'u-1',
       executionId: 'cap-99999999-9999-9999-9999-999999999999',
+      socketId: 'sock-1',
     });
     assert.strictEqual(out.ok, false);
     assert.strictEqual(out.reason, 'execution_mismatch');
@@ -220,6 +225,7 @@ const main = async () => {
       decision: 'approve',
       userId: 'u-1',
       workspaceId: 'ws-other',
+      socketId: 'sock-1',
     });
     assert.strictEqual(out.ok, false);
     assert.strictEqual(out.reason, 'workspace_mismatch');
@@ -236,6 +242,7 @@ const main = async () => {
       decision: 'approve',
       userId: 'u-1',
       capabilityId: 'native:changeTheme',
+      socketId: 'sock-1',
     });
     assert.strictEqual(out.ok, false);
     assert.strictEqual(out.reason, 'capability_mismatch');
@@ -246,15 +253,169 @@ const main = async () => {
   // Extra safety: unknown approvalId + malformed decision
   await test('malformed decision and unknown approvalId are rejected', async () => {
     approvalStore._reset();
-    const unknown = approvalStore.resolve({ approvalId: 'apr-nonexistent', decision: 'approve', userId: 'u-1' });
+    const unknown = approvalStore.resolve({ approvalId: 'apr-nonexistent', decision: 'approve', userId: 'u-1', socketId: 'sock-1' });
     assert.strictEqual(unknown.ok, false);
     assert.strictEqual(unknown.reason, 'unknown');
 
     const r = mk();
-    const malformed = approvalStore.resolve({ approvalId: r.approvalId, decision: 'maybe', userId: 'u-1' });
+    const malformed = approvalStore.resolve({ approvalId: r.approvalId, decision: 'maybe', userId: 'u-1', socketId: 'sock-1' });
     assert.strictEqual(malformed.ok, false);
     assert.strictEqual(malformed.reason, 'invalid_decision');
     assert.strictEqual(approvalStore.read(r.approvalId).state, STATES.PENDING);
+    approvalStore._reset();
+  });
+
+  // ---- P0 #2: initiating-socket binding -------------------------------------
+  await test('create refuses to make an approval with no initiating socket', async () => {
+    approvalStore._reset();
+    for (const bad of [undefined, null, '', '   ']) {
+      assert.throws(
+        () => approvalStore.create({ ...ctx(), initiatingSocketId: bad }),
+        /initiatingSocketId are required/,
+        `refuses initiatingSocketId=${JSON.stringify(bad)}`
+      );
+    }
+    assert.strictEqual(approvalStore.list().length, 0, 'no unbound record is created');
+    approvalStore._reset();
+  });
+
+  await test('the initiating socket resolves; a sibling socket of the same user does not', async () => {
+    approvalStore._reset();
+    const r = mk();
+    const sibling = approvalStore.resolve({
+      approvalId: r.approvalId,
+      decision: 'approve',
+      userId: 'u-1',
+      socketId: 'sock-1-other-tab',
+    });
+    assert.strictEqual(sibling.ok, false, 'same-user cross-socket resolve refused');
+    assert.strictEqual(sibling.reason, 'socket_mismatch');
+    assert.strictEqual(approvalStore.read(r.approvalId).state, STATES.PENDING,
+      'a refused sibling resolve leaves the approval pending');
+
+    const owner = approvalStore.resolve({
+      approvalId: r.approvalId,
+      decision: 'approve',
+      userId: 'u-1',
+      socketId: 'sock-1',
+    });
+    assert.strictEqual(owner.ok, true, 'initiating socket still resolves');
+    assert.strictEqual(owner.state, STATES.APPROVED);
+    approvalStore._reset();
+  });
+
+  await test('an absent socket identity is refused, never treated as a match', async () => {
+    approvalStore._reset();
+    const r = mk();
+    for (const opts of [{}, { socketId: undefined }, { socketId: null }, { socketId: '' }, { socketId: '  ' }]) {
+      const out = approvalStore.resolve({
+        approvalId: r.approvalId,
+        decision: 'approve',
+        userId: 'u-1',
+        ...opts,
+      });
+      assert.strictEqual(out.ok, false, `refused for ${JSON.stringify(opts)}`);
+      assert.strictEqual(out.reason, 'socket_mismatch');
+    }
+    assert.strictEqual(approvalStore.read(r.approvalId).state, STATES.PENDING);
+    approvalStore._reset();
+  });
+
+  await test('a different user is refused before the socket check (no new oracle)', async () => {
+    approvalStore._reset();
+    const r = mk();
+    const wrongUser = approvalStore.resolve({
+      approvalId: r.approvalId,
+      decision: 'approve',
+      userId: 'u-evil',
+      socketId: 'sock-1',
+    });
+    assert.strictEqual(wrongUser.reason, 'user_mismatch', 'pre-existing reason preserved');
+    const wrongUserOwnSocket = approvalStore.resolve({
+      approvalId: r.approvalId,
+      decision: 'approve',
+      userId: 'u-evil',
+      socketId: 'sock-evil',
+    });
+    assert.strictEqual(wrongUserOwnSocket.reason, 'user_mismatch',
+      'a foreign user learns nothing different from a foreign socket');
+    const unknown = approvalStore.resolve({
+      approvalId: 'apr-does-not-exist',
+      decision: 'approve',
+      userId: 'u-1',
+      socketId: 'sock-anything',
+    });
+    assert.strictEqual(unknown.reason, 'unknown',
+      'the socket binding cannot be used to probe which approvals exist');
+    assert.strictEqual(approvalStore.read(r.approvalId).state, STATES.PENDING);
+    approvalStore._reset();
+  });
+
+  await test('duplicate, expired, wrong-workspace and wrong-execution are all still refused', async () => {
+    approvalStore._reset();
+    const r = mk();
+    const ok = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1' });
+    assert.strictEqual(ok.ok, true);
+    const dup = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1' });
+    assert.strictEqual(dup.ok, false);
+    assert.strictEqual(dup.reason, 'already_resolved', 'duplicate approve refused');
+    const dupOtherSocket = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1-tab-2' });
+    assert.strictEqual(dupOtherSocket.ok, false);
+    assert.strictEqual(dupOtherSocket.reason, 'socket_mismatch');
+
+    const expiredRec = mk({ ttlMs: 1 });
+    await new Promise((r2) => setTimeout(r2, 12));
+    const expired = approvalStore.resolve({ approvalId: expiredRec.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1' });
+    assert.strictEqual(expired.ok, false);
+    assert.strictEqual(expired.reason, 'expired');
+    assert.strictEqual(expired.state, STATES.EXPIRED);
+
+    const wsRec = mk();
+    const wrongWs = approvalStore.resolve({ approvalId: wsRec.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1', workspaceId: 'ws-evil' });
+    assert.strictEqual(wrongWs.reason, 'workspace_mismatch');
+
+    const exRec = mk();
+    const wrongEx = approvalStore.resolve({ approvalId: exRec.approvalId, decision: 'approve', userId: 'u-1', socketId: 'sock-1', executionId: 'cap-22222222-2222-2222-2222-222222222222' });
+    assert.strictEqual(wrongEx.reason, 'execution_mismatch');
+    approvalStore._reset();
+  });
+
+  await test('reconnect: the replacement connection can never resolve the old approval', async () => {
+    approvalStore._reset();
+    const r = mk({ ttlMs: 60 });
+    // A reconnect mints a NEW socket id (this process uses no
+    // connectionStateRecovery), so the new session cannot present the old id.
+    const afterReconnect = approvalStore.resolve({
+      approvalId: r.approvalId,
+      decision: 'approve',
+      userId: 'u-1',
+      socketId: 'sock-1-reconnected',
+    });
+    assert.strictEqual(afterReconnect.ok, false);
+    assert.strictEqual(afterReconnect.reason, 'socket_mismatch');
+    assert.strictEqual(approvalStore.read(r.approvalId).state, STATES.PENDING,
+      'it stays pending until its own TTL, then fails closed');
+    // The store's TTL timer is unref'd, so race a ref'd timer to keep the loop
+    // alive long enough to observe the terminal state.
+    const settled = await Promise.race([
+      approvalStore.waitForDecision(r.approvalId),
+      new Promise((res) => setTimeout(() => res(approvalStore.read(r.approvalId)), 250)),
+    ]);
+    assert.strictEqual(settled.state, STATES.EXPIRED, 'fails closed at the TTL, never executes');
+    approvalStore._reset();
+  });
+
+  await test('the bound socket id is never disclosed in the public record', async () => {
+    approvalStore._reset();
+    const r = mk();
+    const publicShape = Object.keys(r).sort();
+    assert.ok(!publicShape.some((k) => /socket/i.test(k)),
+      'the ack echoes this record, so it must not carry the socket id');
+    const failed = approvalStore.resolve({ approvalId: r.approvalId, decision: 'approve', userId: 'u-evil', socketId: 'sock-1' });
+    assert.ok(failed.record, 'failure results carry the record');
+    assert.ok(!JSON.stringify(failed.record).includes('sock-1'),
+      'a foreign user cannot learn the initiating socket id from the ack');
+    assert.ok(!JSON.stringify(approvalStore.list()).includes('sock-1'), 'list() is clean too');
     approvalStore._reset();
   });
 

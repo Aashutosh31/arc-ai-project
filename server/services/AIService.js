@@ -7,6 +7,11 @@ const TaskExecutor = require("./TaskExecutor");
 const toolRegistry = require("../tools/index");
 const pdfExtract = require("pdf-extraction"); // 🚀 The modern, working package!
 const { consumeCredits, isGuestActorId } = require("./creditService");
+const {
+  isConversationOwned,
+  ownedConversationFilter,
+  updateOwnedConversation,
+} = require("../lib/conversationAccess");
 const { decisionEngine, decisionPolicy } = require("./decision");
 const LLMRouter = require("../lib/llm/LLMRouter");
 const StreamingRuntime = require("../lib/llm/StreamingRuntime");
@@ -149,6 +154,245 @@ const analyzeMcpGate = (query) => {
 };
 
 const requiresExternalToolCapability = (query) => analyzeMcpGate(query).required;
+
+const NEWS_REGION_ALIASES = Object.freeze({
+  "united states": "United States",
+  "united states of america": "United States",
+  usa: "United States",
+  us: "United States",
+  america: "United States",
+  uk: "United Kingdom",
+  "united kingdom": "United Kingdom",
+  britain: "United Kingdom",
+  india: "India",
+  indian: "India",
+  canada: "Canada",
+  chinese: "China",
+  china: "China",
+  australia: "Australia",
+  australian: "Australia",
+  germany: "Germany",
+  german: "Germany",
+  france: "France",
+  french: "France",
+  japan: "Japan",
+  japanese: "Japan",
+  singapore: "Singapore",
+  brazil: "Brazil",
+  russia: "Russia",
+  russian: "Russia",
+});
+
+const NEWS_GENERIC_TERMS = new Set(
+  [
+    "a",
+    "an",
+    "and",
+    "any",
+    "are",
+    "breaking",
+    "current",
+    "for",
+    "give",
+    "headline",
+    "headlines",
+    "in",
+    "latest",
+    "me",
+    "news",
+    "now",
+    "of",
+    "only",
+    "please",
+    "right",
+    "show",
+    "some",
+    "tell",
+    "that",
+    "the",
+    "this",
+    "to",
+    "today",
+    "top",
+    "update",
+    "what",
+    "whats",
+  ],
+);
+
+const NEWS_BLOCKER_RE =
+  /\b(weather|forecast|temperature|calendar|meeting|schedule|remind|reminder|time|music|song|video|email|message|fact|memory|document|file|image|photo|math|calculate|translate)\b/i;
+
+const normalizeNewsText = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const canonicalNewsRegion = (value) => {
+  const raw = String(value || "")
+    .trim()
+    .replace(/^the\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const key = normalizeNewsText(raw);
+  if (NEWS_REGION_ALIASES[key]) return NEWS_REGION_ALIASES[key];
+  return raw
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ")
+    .slice(0, 80);
+};
+
+const knownNewsRegion = (value) => {
+  const key = normalizeNewsText(value);
+  return Boolean(NEWS_REGION_ALIASES[key]);
+};
+
+const extractNewsRegion = (text) => {
+  const normalized = normalizeNewsText(text);
+  if (!normalized) return "";
+  const preposition = normalized.match(
+    /\b(?:in|from|for)\s+(.+?)(?=\s+(?:only|about|regarding|and|news|headlines)\b|$)/,
+  );
+  if (preposition?.[1]) {
+    const candidate = preposition[1].trim();
+    if (knownNewsRegion(candidate) || candidate.split(" ").length <= 4) {
+      return canonicalNewsRegion(candidate);
+    }
+  }
+  const aliases = Object.keys(NEWS_REGION_ALIASES).sort(
+    (left, right) => right.length - left.length,
+  );
+  for (const alias of aliases) {
+    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`\\b${escaped}\\b`, "i").test(normalized)) {
+      return NEWS_REGION_ALIASES[alias];
+    }
+  }
+  return "";
+};
+
+const extractNewsTopic = (text) => {
+  const normalized = normalizeNewsText(text);
+  if (!normalized) return "";
+  const candidates = [];
+  const only = normalized.match(
+    /\bonly\s+(.+?)(?=\s+(?:in|from|for|about|regarding|and)\b|$)/,
+  );
+  if (only?.[1]) candidates.push(only[1]);
+  const about = normalized.match(
+    /\b(?:about|regarding|focus\s+on)\s+(.+?)(?=\s+(?:in|from|for|only|and)\b|$)/,
+  );
+  if (about?.[1]) candidates.push(about[1]);
+  if (/\b(?:news|headlines?)\b/.test(normalized)) {
+    candidates.push(normalized.replace(/\b(?:news|headlines?)\b/g, " "));
+  }
+  for (const candidate of candidates) {
+    const words = normalizeNewsText(candidate)
+      .split(" ")
+      .filter((word) => word && !NEWS_GENERIC_TERMS.has(word));
+    if (!words.length) continue;
+    const topic = words.join(" ").slice(0, 100).trim();
+    if (topic && !knownNewsRegion(topic)) return topic;
+  }
+  return "";
+};
+
+const parseNewsIntent = (text, activeSearch) => {
+  const raw = String(text || "").trim();
+  if (!raw || raw.length > 180) return null;
+  const normalized = normalizeNewsText(raw);
+  if (!normalized || NEWS_BLOCKER_RE.test(normalized)) return null;
+
+  const active =
+    activeSearch &&
+    typeof activeSearch === "object" &&
+    (activeSearch.tool === "getTopNews" || activeSearch.operation === "news")
+      ? activeSearch
+      : null;
+  const hasNewsWords = /\b(news|headlines?)\b/.test(normalized);
+  const hasRegion = Boolean(extractNewsRegion(raw));
+  const hasTopic = Boolean(extractNewsTopic(raw));
+  const explicitRefresh = /\b(latest|current|refresh|update|again)\b/.test(
+    normalized,
+  );
+
+  if (!active && !hasNewsWords) return null;
+
+  const region = hasRegion ? extractNewsRegion(raw) : "";
+  const topic = hasTopic ? extractNewsTopic(raw) : "";
+  const clearTopic = /\b(?:all|general)\s+(?:news|headlines?)\b/.test(normalized);
+  const previousRegion = String(active?.region || "").trim();
+  const previousTopic = String(active?.topic || "").trim();
+  const nextRegion = region || previousRegion;
+  const nextTopic = clearTopic ? "" : topic || previousTopic;
+  const changed =
+    Boolean(active) &&
+    (nextRegion !== previousRegion || nextTopic !== previousTopic);
+  const refresh = Boolean(active) && explicitRefresh && hasNewsWords;
+
+  if (active && !changed && !refresh) return null;
+  if (!nextRegion && !nextTopic && !active) {
+    return {
+      args: {},
+      state: {
+        tool: "getTopNews",
+        operation: "news",
+        query: "current news",
+      },
+    };
+  }
+
+  const args = {};
+  if (nextRegion) args.region = nextRegion;
+  if (nextTopic) args.topic = nextTopic;
+  const query = `current news${nextRegion ? ` in ${nextRegion}` : ""}${
+    nextTopic ? ` about ${nextTopic}` : ""
+  }`;
+  return {
+    args,
+    state: {
+      tool: "getTopNews",
+      operation: "news",
+      query,
+      ...(nextRegion ? { region: nextRegion } : {}),
+      ...(nextTopic ? { topic: nextTopic } : {}),
+    },
+  };
+};
+
+const newsIntentKey = (args = {}) => {
+  const normalize = (value) => normalizeNewsText(value);
+  const parsedLimit = Number(args.limit);
+  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0
+    ? Math.min(20, Math.max(1, Math.trunc(parsedLimit)))
+    : 5;
+  return JSON.stringify({
+    region: normalize(args.region),
+    topic: normalize(args.topic),
+    limit,
+  });
+};
+
+// Stable logical identity for ONE model tool call inside ONE turn.
+//
+// The substrate dedupes on (capability scope + logical key). A provider's
+// tool_call id is unique only WITHIN one response, so it must be paired with
+// a per-turn identifier; otherwise a later turn that happens to reuse the
+// same id (providers commonly number them "call_1", "call_2", …) would be
+// wrongly suppressed as a duplicate and a legitimate repeat would silently
+// do nothing. Returns null when either half is missing, which leaves the
+// execution in the substrate's documented pass-through mode rather than
+// guessing an identity from tool arguments.
+const toolCallIdempotencyKey = (toolCallId, turnId) => {
+  const call = String(toolCallId == null ? "" : toolCallId).trim();
+  const turn = String(turnId == null ? "" : turnId).trim();
+  if (!call || !turn) return null;
+  return `turn:${turn}:call:${call}`;
+};
 
 // Truthful refusal when a request cannot fit the provider context budget
 // even after deterministic compaction. Used both for pre-provider refusal
@@ -468,6 +712,42 @@ const buildEmptyToolResponse = ({
   return "Done.";
 };
 
+const parseToolResultPayload = (result) => {
+  if (result?.content && typeof result.content === "object") {
+    return result.content;
+  }
+
+  try {
+    return JSON.parse(String(result?.content || ""));
+  } catch {
+    return null;
+  }
+};
+
+const buildToolFailureText = (toolResults = []) => {
+  const failed = (Array.isArray(toolResults) ? toolResults : []).find((result) => {
+    const payload = parseToolResultPayload(result);
+    return payload?.success === false || Boolean(payload?.error);
+  });
+
+  if (failed?.name === "getTopNews") {
+    const error = String(parseToolResultPayload(failed)?.error || "");
+    if (/timed out|timeout/i.test(error)) {
+      return "Current-news retrieval timed out. I couldn't retrieve current results, and no headlines were returned.";
+    }
+    return "I couldn't retrieve current news right now. No headlines were returned.";
+  }
+
+  return "ARC couldn't complete the requested lookup. No result was returned.";
+};
+
+const createTextStream = (text) => {
+  const value = String(text || "");
+  return (async function* textStream() {
+    if (value) yield { text: value };
+  })();
+};
+
 class AIService {
   constructor() {
     this.llmRouter = new LLMRouter();
@@ -600,10 +880,17 @@ class AIService {
   // conversation record, so pending is disabled for them (single-turn
   // behavior unchanged). All methods are failure-silent: pending is an
   // optimization over the normal flow, never load-bearing for it.
+  //
+  // OWNERSHIP: every read/write filters on the owner (lib/conversationAccess.js
+  // is the single resolver; the Socket boundary also pre-verifies the id). A
+  // conversationId that is not this actor's can therefore neither leak
+  // pendingToolCall nor be cleared by this turn.
   async loadPendingToolCall(conversationId, userId) {
     if (isGuestActorId(userId) || !conversationId) return null;
     try {
-      const doc = await Conversation.findById(conversationId)
+      const doc = await Conversation.findOne(
+        ownedConversationFilter(userId, conversationId),
+      )
         .select("pendingToolCall")
         .lean();
       const p = doc?.pendingToolCall;
@@ -623,7 +910,7 @@ class AIService {
   async savePendingToolCall(conversationId, userId, pending) {
     if (isGuestActorId(userId) || !conversationId || !pending) return;
     try {
-      await Conversation.findByIdAndUpdate(conversationId, {
+      await updateOwnedConversation(userId, conversationId, {
         pendingToolCall: pending,
       });
     } catch {
@@ -634,7 +921,7 @@ class AIService {
   async clearPendingToolCall(conversationId, userId) {
     if (isGuestActorId(userId) || !conversationId) return;
     try {
-      await Conversation.findByIdAndUpdate(conversationId, {
+      await updateOwnedConversation(userId, conversationId, {
         pendingToolCall: null,
       });
     } catch {
@@ -3366,6 +3653,10 @@ class AIService {
   async loadRecentTurns(conversationId, userId, limit = 10) {
     if (isGuestActorId(userId) || !conversationId) return [];
     try {
+      // Message carries no userId, so ownership is proven once against the
+      // Conversation before any history row is read. A foreign/malformed id
+      // yields no turns at all (empty window), never another actor's content.
+      if (!(await isConversationOwned(userId, conversationId))) return [];
       // Newest-first fetch, then chronological. Excludes nothing: the
       // just-saved current user message is appended by the budget
       // pipeline itself, so fetching limit+1 and dropping a trailing
@@ -3402,7 +3693,9 @@ class AIService {
   async loadWorkingState(conversationId, userId) {
     if (isGuestActorId(userId) || !conversationId) return null;
     try {
-      const doc = await Conversation.findById(conversationId)
+      const doc = await Conversation.findOne(
+        ownedConversationFilter(userId, conversationId),
+      )
         .select("workingState conversationSummary pendingToolCall")
         .lean();
       return doc || null;
@@ -3422,7 +3715,7 @@ class AIService {
       const update = { workingState };
       if (typeof summary === "string" && summary)
         update.conversationSummary = summary.slice(0, 1200);
-      await Conversation.findByIdAndUpdate(conversationId, update);
+      await updateOwnedConversation(userId, conversationId, update);
     } catch {
       // Persistence must never break the request path.
     }
@@ -3578,6 +3871,18 @@ class AIService {
     }
   }
 
+  resolveNewsIntent(text, activeSearch) {
+    return parseNewsIntent(text, activeSearch);
+  }
+
+  getNewsIntentKey(args) {
+    return newsIntentKey(args);
+  }
+
+  toolCallIdempotencyKey(toolCallId, turnId) {
+    return toolCallIdempotencyKey(toolCallId, turnId);
+  }
+
   // Refresh persisted working state after tool executions (inline + planner
   // paths share this): extracts compact refs from executed tool results and
   // merges them over the stored state. Bounded inputs, failure-silent.
@@ -3624,6 +3929,7 @@ class AIService {
         }
         const payload = content && typeof content === "object" ? content : {};
         if (!name) continue;
+        if (name === "getTopNews" && payload?.success !== true) continue;
         if (["playMedia", "stopMedia"].includes(name)) {
           const title = compactStr(
             payload?.clientAction?.title || payload?.message || payload?.title,
@@ -3644,7 +3950,24 @@ class AIService {
           } catch {
             refs = [];
           }
-          base.activeSearch = { tool: name, results: refs };
+          const nextSearch =
+            name === "getTopNews"
+              ? {
+                  tool: name,
+                  operation: "news",
+                  ...(compactStr(payload?.query, 140)
+                    ? { query: compactStr(payload.query, 140) }
+                    : {}),
+                  ...(compactStr(payload?.region, 80)
+                    ? { region: compactStr(payload.region, 80) }
+                    : {}),
+                  ...(compactStr(payload?.topic, 100)
+                    ? { topic: compactStr(payload.topic, 100) }
+                    : {}),
+                  results: refs,
+                }
+              : { tool: name, results: refs };
+          base.activeSearch = nextSearch;
         } else if (name.startsWith("mcp_")) {
           const ref = compactStr(
             payload?.title || payload?.id || payload?.message,
@@ -3837,6 +4160,23 @@ class AIService {
     let isFirstConversationTurn = false;
     if (!isGuestActorId(userId)) {
       try {
+        // Ownership gate (defense in depth — the Socket boundary already
+        // verified this id against the authenticated actor). processQuery is
+        // also callable directly, so the rule is enforced HERE as well: a
+        // conversationId this actor does not own is dropped, never read and
+        // never written. Dropping it (rather than erroring) degrades to the
+        // normal first-turn shape, which creates a fresh conversation owned
+        // by the caller — no cross-actor data can reach the provider.
+        if (
+          conversationId &&
+          !(await isConversationOwned(userId, conversationId))
+        ) {
+          console.warn(
+            `[Conversation:Access] processQuery dropped non-owned conversationId for user ${userId}.`,
+          );
+          conversationId = null;
+        }
+
         if (!conversationId) {
           isFirstConversationTurn = true;
           // Create a new conversation
@@ -4009,7 +4349,7 @@ class AIService {
             contentLength: normalizedContent.length,
           });
 
-          await Conversation.findByIdAndUpdate(conversationId, {
+          await updateOwnedConversation(userId, conversationId, {
             lastMessage: {
               content: normalizedContent.substring(0, 100),
               role: "ai",
@@ -4040,7 +4380,7 @@ class AIService {
           contentLength: normalizedContent.length,
         });
 
-        await Conversation.findByIdAndUpdate(conversationId, {
+        await updateOwnedConversation(userId, conversationId, {
           lastMessage: {
             content: normalizedContent.substring(0, 100),
             role: "ai",
@@ -4297,7 +4637,7 @@ class AIService {
       // "make it slower" / "summarize the second result" / "do it
       // again" resurface the prior turn's capability. Generic — no
       // pronoun or entity special-casing.
-      const toolSelectionQuery = this.buildToolSelectionQuery(
+      let toolSelectionQuery = this.buildToolSelectionQuery(
         baseMessageContent,
         recentTurns,
       );
@@ -4330,6 +4670,36 @@ class AIService {
         }
       } catch {
         turnWorkingState = persistedWorkingState;
+      }
+      const newsIntent =
+        !pendingForGate &&
+        !imageBase64 &&
+        !document &&
+        !isCancelText(baseMessageContent)
+          ? this.resolveNewsIntent(
+              baseMessageContent,
+              turnWorkingState?.activeSearch,
+            )
+          : null;
+      if (newsIntent) {
+        const currentSearch =
+          turnWorkingState?.activeSearch && typeof turnWorkingState.activeSearch === "object"
+            ? turnWorkingState.activeSearch
+            : {};
+        turnWorkingState = {
+          ...(turnWorkingState && typeof turnWorkingState === "object"
+            ? turnWorkingState
+            : {}),
+          activeSearch: {
+            ...currentSearch,
+            ...newsIntent.state,
+          },
+        };
+        toolSelectionQuery = `${toolSelectionQuery}\nCurrent news request: ${newsIntent.state.query}`.slice(
+          0,
+          1200,
+        );
+        skipMcpGate = false;
       }
       if (decisionGate) {
         try {
@@ -4627,7 +4997,25 @@ class AIService {
           mcpDegradedNote = "";
         }
       }
+      if (newsIntent) {
+        const newsSchema = this.resolvePendingSchema(
+          "getTopNews",
+          toolPick.tools,
+          mcpSchemas,
+        );
+        if (newsSchema) {
+          toolPick.tools = [
+            newsSchema,
+            ...(toolPick.tools || []).filter(
+              (schema) => schema?.function?.name !== "getTopNews",
+            ),
+          ].slice(0, 6);
+        }
+      }
       const outputIntent = detectOutputIntent(baseMessageContent);
+      const currentNewsGuidance = newsIntent
+        ? "\n\nCURRENT NEWS TURN: Use the getTopNews result already requested for this turn. Do not call another search, webSearch, or scraping tool. After the one retrieval, synthesize the answer directly from its articles and state when the source data is unavailable or rate-limited."
+        : "";
       const outputBudget =
         outputIntent === "extended"
           ? OUTPUT_BUDGET_EXTENDED
@@ -4844,6 +5232,36 @@ class AIService {
             }
           }
         }
+        if (!pendingState && !syntheticResponse && newsIntent) {
+          const schema = this.resolvePendingSchema(
+            "getTopNews",
+            toolPick.tools,
+            mcpSchemas,
+          );
+          const checked = schema
+            ? validateArgs(schema, newsIntent.args || {})
+            : { ok: false, errors: [{ name: "getTopNews" }] };
+          if (schema && checked.ok) {
+            console.log("[AIService] currentNews.synthetic", {
+              key: newsIntentKey(checked.coerced || newsIntent.args),
+            });
+            syntheticResponse = {
+              text: "",
+              toolCalls: [
+                {
+                  id: `news-${Date.now().toString(36)}`,
+                  function: {
+                    name: "getTopNews",
+                    arguments: checked.coerced || newsIntent.args || {},
+                  },
+                },
+              ],
+              provider: null,
+              model: null,
+              tokens: { input: 0, output: 0 },
+            };
+          }
+        }
       }
 
       const systemTemplate = `You are ARC-AI, an advanced, highly intelligent autonomous agent.
@@ -4879,7 +5297,8 @@ class AIService {
                     If a user asks "who created you", "who made you", or similar identity/creator questions, reply exactly with:
 
                     "I am ARC-AI, an autonomous multimodal AI platform created by Aashutosh Bairagi — an AI systems engineer focused on realtime architectures, autonomous agents, and next-generation intelligent software systems."
-                    ${mcpPolicyNote}${mcpDegradedNote}`;
+                     ${mcpPolicyNote}${mcpDegradedNote}${currentNewsGuidance}`;
+
 
       // Working state for this turn: persisted refs (previous tool
       // activity) merged with pending-tool state. Fresh tool results
@@ -4911,6 +5330,21 @@ class AIService {
         }
       } catch {
         turnWorkingState = persistedWorkingState;
+      }
+      if (newsIntent) {
+        const currentSearch =
+          turnWorkingState?.activeSearch && typeof turnWorkingState.activeSearch === "object"
+            ? turnWorkingState.activeSearch
+            : {};
+        turnWorkingState = {
+          ...(turnWorkingState && typeof turnWorkingState === "object"
+            ? turnWorkingState
+            : {}),
+          activeSearch: {
+            ...currentSearch,
+            ...newsIntent.state,
+          },
+        };
       }
       // Active native tool continuity: the working state's live tool
       // survives budget trimming so "make it slower" keeps playMedia
@@ -5842,9 +6276,11 @@ class AIService {
         })),
       };
 
+      let turnToolResults = [];
       const makeContinuationGeneration = async ({
         assistantMessage,
         toolResults,
+        forceTextOnly = false,
       }) => {
         const continuationMessages = buildProviderContinuationMessages({
           messages,
@@ -5883,12 +6319,14 @@ class AIService {
         } catch {
           remainingRequired = [];
         }
-        const continuationPick = selectContinuationTools(
-          tools,
-          activeContinuationNames,
-          () => toolRegistry.getSchemas(),
-          { mcpSchemas, requiredNames: remainingRequired },
-        );
+        const continuationPick = forceTextOnly
+          ? { tools: [], mandatoryCount: 0 }
+          : selectContinuationTools(
+              tools,
+              activeContinuationNames,
+              () => toolRegistry.getSchemas(),
+              { mcpSchemas, requiredNames: remainingRequired },
+            );
 
         console.log(
           "[AIService] provider continuation payload",
@@ -5907,6 +6345,114 @@ class AIService {
             mandatoryCount: continuationPick.mandatoryCount,
           },
         );
+
+        if (!Array.isArray(continuationPick.tools) || continuationPick.tools.length === 0) {
+          const failedToolResult = (Array.isArray(toolResults) ? toolResults : []).find((result) => {
+            const payload = parseToolResultPayload(result);
+            return payload?.success === false || Boolean(payload?.error);
+          });
+          if (failedToolResult) {
+            console.log("[AIService] continuation safe text-only failure", {
+              tool: failedToolResult?.name || null,
+            });
+            return {
+              stream: createTextStream(buildToolFailureText(toolResults)),
+              provider: response?.provider || null,
+              model: response?.model || null,
+              textOnly: true,
+            };
+          }
+
+          const flatContext = (Array.isArray(toolResults) ? toolResults : [])
+            .map((result) => {
+              let body = "";
+              try {
+                body =
+                  typeof result?.content === "string"
+                    ? result.content
+                    : JSON.stringify(result?.content) || "";
+              } catch {
+                body = "[unserializable tool result]";
+              }
+              if (body.length > 6000) {
+                body = `${body.slice(0, 6000)}\n... [truncated]`;
+              }
+              return `[${result?.name || "tool"}] ${body}`;
+            })
+            .join("\n");
+          let flatPrompt = systemPrompt;
+          try {
+            flatPrompt = this.refreshInventoryPrompt(
+              systemPrompt,
+              this.mcpInventoryBlockForTools([], { metadata: null, failures: [] }),
+            );
+          } catch {}
+
+          let generation;
+          try {
+            generation = await this.llmRouter.generate({
+              messages: [
+                {
+                  role: "user",
+                  content: `${baseMessageContent}\n\nTool results:\n${flatContext}\n\nAnswer the user's request directly using these results. If a result reports failure, state the failure truthfully and do not invent results.`,
+                },
+              ],
+              systemPrompt: flatPrompt,
+              tools: [],
+              stream: true,
+              maxTokens,
+              temperature: imageBase64 ? 0.2 : 0.3,
+              userContext: {
+                userId,
+                isGuest,
+                calendarIntent,
+                requestKey: key,
+                taskMode: imageBase64 ? "multimodal" : "text",
+              },
+              attachments: [],
+              signal: controller.signal,
+            });
+          } catch (error) {
+            console.warn("[AIService] text-only continuation synthesis failed:", error?.message || error);
+            return {
+              stream: createTextStream(buildToolFailureText(toolResults)),
+              provider: response?.provider || null,
+              model: response?.model || null,
+              textOnly: true,
+            };
+          }
+
+          if (!generation?.stream) {
+            return {
+              ...(generation || {}),
+              stream: createTextStream(
+                generation?.text || buildToolFailureText(toolResults),
+              ),
+              textOnly: true,
+            };
+          }
+
+          let emittedText = false;
+          let suppressedToolCalls = false;
+          const filteredStream = async function* textOnlyContinuation() {
+            for await (const chunk of generation.stream) {
+              const hasToolCalls = Array.isArray(chunk?.toolCalls) && chunk.toolCalls.length > 0;
+              if (hasToolCalls) suppressedToolCalls = true;
+              const text = String(chunk?.text || chunk?.chunk || chunk?.displayText || "");
+              if (text) emittedText = true;
+              yield hasToolCalls ? { ...chunk, toolCalls: [] } : chunk;
+            }
+            if (!emittedText && suppressedToolCalls) {
+              yield { text: buildToolFailureText(toolResults) };
+            }
+          };
+
+          return {
+            ...(generation || {}),
+            stream: filteredStream(),
+            textOnly: true,
+          };
+        }
 
         // Continuation visibility invariant (§11): the advertised
         // inventory must match the continuation request.tools — the
@@ -5930,7 +6476,7 @@ class AIService {
         // selectContinuationTools above; anything still unexposed here
         // (unknown/denied name the model produced anyway) is logged
         // loudly instead of failing silently downstream.
-        try {
+        if (!forceTextOnly) {
           const exposure = partitionToolCallsByExposure(
             assistantMessage?.toolCalls || [],
             continuationPick.tools,
@@ -5946,8 +6492,6 @@ class AIService {
               },
             );
           }
-        } catch {
-          // Diagnostics must never break the request path.
         }
 
         return this.llmRouter.generate({
@@ -6018,9 +6562,12 @@ class AIService {
           Array.isArray(followUpCalls) ? followUpCalls : []
         ).slice(0, 4);
         const toolResults = [];
+        const expectedNewsKey = newsIntent
+          ? newsIntentKey(newsIntent.args || {})
+          : "";
         for (const tc of bounded) {
           const fname = tc?.function?.name;
-          if (!fname) continue;
+          if (!fname || !tc?.id) continue;
           let args = {};
           try {
             args =
@@ -6030,25 +6577,70 @@ class AIService {
           } catch {
             args = {};
           }
-          console.log("[AIService] follow-up tool execution", { tool: fname });
           let result = null;
-          try {
-            result = await TaskExecutor.executeTool(
-              fname,
-              args,
-              userId,
-              socket,
-              {
-                signal: controller.signal,
-                conversationId,
-                workspaceId: workspaceContext.workspaceId,
-              },
-            );
-          } catch (execErr) {
-            result = {
-              success: false,
-              error: execErr?.message || "Tool execution failed.",
-            };
+          if (newsIntent) {
+            const duplicate =
+              fname === "getTopNews" &&
+              newsIntentKey(args) === expectedNewsKey;
+            const prior = duplicate
+              ? (turnToolResults || []).find(
+                  (entry) =>
+                    entry?.name === "getTopNews" &&
+                    newsIntentKey(
+                      entry?.content?.region || entry?.content?.topic
+                        ? entry.content
+                        : newsIntent.args || {},
+                    ) === expectedNewsKey,
+                )
+              : null;
+            if (duplicate && prior) {
+              result = prior.content;
+              console.log("[AIService] currentNews.duplicate-reused", {
+                tool: fname,
+              });
+            } else if (duplicate) {
+              result = {
+                success: false,
+                skipped: true,
+                error: "The current-news retrieval was already attempted for this turn.",
+              };
+              console.log("[AIService] currentNews.duplicate-skipped", {
+                tool: fname,
+              });
+            } else {
+              result = {
+                success: false,
+                skipped: true,
+                error: "This current-news request already has its retrieval result.",
+              };
+              console.log("[AIService] currentNews.follow-up-skipped", {
+                tool: fname,
+              });
+            }
+          } else {
+            console.log("[AIService] follow-up tool execution", { tool: fname });
+            try {
+              result = await TaskExecutor.executeTool(
+                fname,
+                args,
+                userId,
+                socket,
+                {
+                  signal: controller.signal,
+                  conversationId,
+                  workspaceId: workspaceContext.workspaceId,
+                  idempotencyKey: toolCallIdempotencyKey(
+                    tc.id,
+                    assistantDraftMessageId,
+                  ),
+                },
+              );
+            } catch (execErr) {
+              result = {
+                success: false,
+                error: execErr?.message || "Tool execution failed.",
+              };
+            }
           }
           if (result?.clientAction && socket)
             socket.emit("ai:client:action", result.clientAction);
@@ -6068,6 +6660,7 @@ class AIService {
         const gen2 = await makeContinuationGeneration({
           assistantMessage: assistantMsg,
           toolResults,
+          forceTextOnly: Boolean(newsIntent),
         });
         const followUp2 = [];
         const text2 = await consumeContinuation(gen2, followUp2, siteOnChunk);
@@ -6081,7 +6674,11 @@ class AIService {
               .filter(Boolean),
           },
         );
-        const flatContext = toolResults
+        const allToolResults = [
+          ...(Array.isArray(turnToolResults) ? turnToolResults : []),
+          ...toolResults,
+        ];
+        const flatContext = allToolResults
           .map((r) => {
             let body = "";
             try {
@@ -6368,6 +6965,7 @@ class AIService {
         // already executed authoritatively; the inline path below
         // reuses the stored results for synthesis. No re-execution.
         const usePlanner =
+          !newsIntent &&
           shouldUsePlanner(toolCalls, finalOutputText) &&
           preflightExecutedById.size === 0;
         if (usePlanner) {
@@ -6421,6 +7019,7 @@ class AIService {
               name: step.tool,
               content: step.result || {},
             }));
+          turnToolResults = plannerToolResults;
 
           // Persist compact working-state refs so the NEXT turn
           // can resolve "that"/"it" against this tool activity.
@@ -6495,6 +7094,7 @@ class AIService {
             const finalGeneration = await makeContinuationGeneration({
               assistantMessage: assistantToolMessage,
               toolResults: plannerToolResults,
+              forceTextOnly: Boolean(newsIntent),
             });
 
             const plannerStreamOnChunk = async (chunkText) => {
@@ -6619,6 +7219,14 @@ class AIService {
                 signal: controller.signal,
                 conversationId,
                 workspaceId: workspaceContext.workspaceId,
+                // One logical action per (turn, provider tool_call). Makes the
+                // substrate's duplicate guard actually engage on the model path:
+                // a stuttered/replayed/recovered identical call replays the prior
+                // result instead of repeating a real side effect.
+                idempotencyKey: toolCallIdempotencyKey(
+                  toolCall.id,
+                  assistantDraftMessageId,
+                ),
               },
             );
             let finalToolResult = toolResult;
@@ -6632,6 +7240,12 @@ class AIService {
                 socket,
                 signal: controller.signal,
                 retryCount: 0,
+                // Recovery re-enters the executor, so it must carry the SAME
+                // scope as the attempt it is recovering. Dropping it here made
+                // every recovered call run with a null workspace, which any
+                // workspace restriction denies outright.
+                workspaceId: workspaceContext.workspaceId,
+                conversationId,
               });
 
               if (recovery?.recovered) {
@@ -6718,6 +7332,7 @@ class AIService {
                 : null;
             })
             .filter(Boolean);
+          turnToolResults = providerToolResults;
 
           // Persist compact working-state refs so the NEXT turn can
           // resolve "it"/"that"/"the second one" against this tool
@@ -6735,6 +7350,7 @@ class AIService {
           const finalGeneration = await makeContinuationGeneration({
             assistantMessage: assistantToolMessage,
             toolResults: providerToolResults,
+            forceTextOnly: Boolean(newsIntent),
           });
 
           const quickStreamOnChunk =
@@ -6998,6 +7614,7 @@ class AIService {
             if (messageCount === 2) {
               const conversationCtrl = require("../controllers/conversationController");
               conversationCtrl.generateConversationTitle(
+                userId,
                 conversationId,
                 text || "",
               );
@@ -7018,6 +7635,7 @@ class AIService {
         if (interruptedTitleSeed.length >= 24) {
           const conversationCtrl = require("../controllers/conversationController");
           conversationCtrl.generateConversationTitle(
+            userId,
             conversationId,
             `${text || ""} ${interruptedTitleSeed}`.trim(),
           );

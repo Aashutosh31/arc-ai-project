@@ -4,14 +4,24 @@
 //
 // Exercises the DURABLE reservation path in idempotencyStore.js against a
 // REAL MongoDB (no model mocking). Uses the same default-mongoose route as
-// production (`server/index.js` connects via `mongoose.connect(MONGO_URI)`;
-// idempotencyStore detects `mongoose.connection.readyState === 1`).
+// production (mongoose's default connection; idempotencyStore detects
+// `mongoose.connection.readyState === 1`).
 //
-// The test DB is DISPOSABLE: every run connects to a fresh
-// `arc_idem_accept_<pid>_<ts>` database and drops it on completion.
+// MONGO TEST SAFETY: every target comes from tests/helpers/disposableMongo.js.
+// That guard requires an explicit disposable target, allowlists the host,
+// generates its own `arc_ai_test_<runId>` database, writes a run-ownership
+// marker, and owns the single dropDatabase() call in this repository. This file
+// never reads MONGO_URI, DATABASE_URL or .env, and no URI is passed through
+// process.argv. (The previous `${MONGO_URI}/${dbName}` concatenation connected
+// to the APPLICATION database and then dropped it.)
 //
-// Require a real MongoDB at MONGO_URI (defaults below). Run:
-//   cd server && node tests/idempotency.mongo.test.js
+// Run (refuses to fall back to anything):
+//   cd server
+//   MONGO_TEST_URI=mongodb://127.0.0.1:27017 \
+//   MONGO_TEST_EXPECTED_HOST=127.0.0.1 \
+//   MONGO_TEST_DISPOSABLE=1 RUN_MONGO_INTEGRATION=1 \
+//   node tests/idempotency.mongo.test.js
+// Without that configuration this suite SKIPs; a partially configured one FAILS.
 //
 // Proofs covered (Phase 1):
 //   1  first request reserves successfully (real findOneAndUpdate upsert)
@@ -37,9 +47,7 @@ const caps = require('../lib/capabilities');
 const IdempotencyRecord = require('../models/IdempotencyRecord');
 const { resolveIdempotencyKey, IDEMPOTENCY_STATUS } = require('../lib/capabilities/idempotencyKey');
 
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27027';
-const DB_NAME = `arc_idem_accept_${process.pid}_${Date.now()}`;
-const URI = `${MONGO_URI}/${DB_NAME}`;
+const mongoSafety = require('./helpers/disposableMongo');
 
 let pass = 0;
 let fail = 0;
@@ -80,20 +88,33 @@ const KEY = (suffix, fields = {}) => resolveIdempotencyKey({
   ...fields,
 });
 
-const DB = async () => mongoose.connection;
-
 const main = async () => {
   console.log('Slice 3 FINAL GATE — real Mongo idempotency acceptance');
-  console.log(`  target: ${URI}`);
-  console.log('-------------------------------------------------------');
 
-  await mongoose.connect(URI, { serverSelectionTimeoutMS: 15000 });
-  const conn = await DB();
-  console.log('  connected to real MongoDB');
+  // Explicit opt-in only. Never silently fall back to the application URI.
+  if (mongoSafety.classifyMongoIntent() !== 'explicit') {
+    console.log('  SKIP  real Mongo acceptance (no disposable Mongo target configured)');
+    console.log('        required environment:');
+    console.log(mongoSafety.describeRequiredEnv());
+    console.log('Result: 0 pass, 0 fail (skipped)');
+    return;
+  }
+
+  // The guard generates the database, verifies the host, writes the ownership
+  // marker, and refuses to proceed on any unsafe configuration.
+  const ctx = await mongoSafety.openDisposableMongo({
+    mongoose,
+    allowCollections: [mongoSafety.ANY_RUN_COLLECTION],
+    connectOptions: { serverSelectionTimeoutMS: 15000 },
+  });
+  console.log(mongoSafety.safeTargetSummary(ctx.plan));
+  console.log(`  runId: ${ctx.runId}`);
+  console.log('-------------------------------------------------------');
+  console.log('  connected to real MongoDB (disposable database verified)');
 
   // Ensure the durable schema (unique index) is really created on this DB.
   await IdempotencyRecord.init();
-  const rawIndexes = await conn.db.collection('idempotencyrecords').indexes();
+  const rawIndexes = await ctx.db.collection('idempotencyrecords').indexes();
 
   // --- 10: unique index/schema actually exists --------------------------
   await test('10. unique index on key exists in real Mongo', async () => {
@@ -115,7 +136,10 @@ const main = async () => {
       updatedAt: Date.now(),
     });
     assert.ok(rec._id, 'doc persisted');
-    await IdempotencyRecord.deleteOne({ key: 'schema-probe-key' });
+    // Even in-test fixture teardown goes through the guard, so every
+    // destructive operation in this suite revalidates ownership first.
+    const removed = await mongoSafety.deleteDisposableDocuments(ctx, 'idempotencyrecords', { key: 'schema-probe-key' });
+    assert.strictEqual(removed.deletedCount, 1, 'probe key removed');
   });
 
   // --- 1: first request reserves synchronously --------------------------
@@ -173,7 +197,7 @@ const main = async () => {
     const doc = await IdempotencyRecord.findOne({ key: id.key }).lean();
     assert.strictEqual(doc.executionId, winners[0].record.executionId);
     assert.strictEqual(doc.status, 'RUNNING');
-    await IdempotencyRecord.deleteOne({ key: id.key });
+    await mongoSafety.deleteDisposableDocuments(ctx, 'idempotencyrecords', { key: id.key });
   });
 
   await test('4b. true concurrent duplicates cannot both pass (fresh key)', async () => {
@@ -185,7 +209,7 @@ const main = async () => {
     ]);
     const winners = [r1, r2].filter((r) => r.reserved === true).length;
     assert.strictEqual(winners, 1);
-    await IdempotencyRecord.deleteOne({ key: id.key });
+    await mongoSafety.deleteDisposableDocuments(ctx, 'idempotencyrecords', { key: id.key });
   });
 
   // --- 6: successful execution settles the persisted record ---------------
@@ -217,8 +241,14 @@ const main = async () => {
     const id = KEY('p8', { executionId: 'cap-p8' });
     await store.reserve({ key: id.key, executionId: 'cap-p8', ...id.scope });
     await store.settle(id.key, { status: 'CANCELLED', executionId: 'cap-p8', durationMs: 3 });
+    // The child reuses THIS run's database and runId; the URI travels through
+    // the environment because argv is world-readable on the host.
     const child = path.join(__dirname, 'idempotency.probe-child.js');
-    const out = execFileSync(process.execPath, [child, URI, id.key], { encoding: 'utf8', timeout: 30000 });
+    const out = execFileSync(process.execPath, [...mongoSafety.buildChildArgs(child, [id.key])], {
+      encoding: 'utf8',
+      timeout: 30000,
+      env: { ...process.env, ...mongoSafety.buildChildEnv(ctx.plan) },
+    });
     const line = out.split('\n').find((l) => l.startsWith('PROBE_JSON'));
     const probe = JSON.parse(line.replace('PROBE_JSON ', ''));
     assert.strictEqual(probe.found, true, 'child process must see the persisted record');
@@ -354,9 +384,11 @@ const main = async () => {
   });
 
   // ---- cleanup -----------------------------------------------------------
-  await conn.dropDatabase();
-  await mongoose.disconnect();
-  console.log('  dropped disposable database and disconnected');
+  // The ONLY dropDatabase() in this repository lives inside the guard, and it
+  // revalidates marker + host + database name + live database + ownership
+  // immediately before dropping. This file must never call it directly.
+  await mongoSafety.dropDisposableDatabase(ctx);
+  console.log('  dropped the owned disposable database and disconnected');
 
   console.log('-------------------------------------------------------');
   console.log(`Result: ${pass} pass, ${fail} fail`);
@@ -364,7 +396,7 @@ const main = async () => {
 };
 
 main().catch(async (e) => {
-  console.error('Fatal:', e);
+  console.error('Fatal:', e && e.message ? e.message : e);
   try { await mongoose.disconnect(); } catch {}
   process.exit(1);
 });

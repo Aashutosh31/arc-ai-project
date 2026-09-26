@@ -3,6 +3,11 @@ const Message = require('../models/Message');
 const LLMRouter = require('../lib/llm/LLMRouter');
 const mongoose = require('mongoose');
 const { getActor, isGuestActor } = require('../lib/actor');
+const {
+  findOwnedConversation,
+  isConversationOwned,
+  updateOwnedConversation,
+} = require('../lib/conversationAccess');
 const WorkspaceRuntimeManager = require('../services/WorkspaceRuntimeManager');
 
 const workspaceRuntime = new WorkspaceRuntimeManager({ logger: console });
@@ -23,19 +28,14 @@ const getRequestContext = (req) => {
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
 
-// Ownership lookup with workspace fallback: a workspace-scoped miss is retried
-// without the workspace filter (still scoped to the actor), so conversations
-// stored before workspace attribution stay reachable instead of 404ing.
-// Cross-actor access still 404s — the workspace filter is not a security
-// boundary, actor scoping is.
-const findOwnedConversation = async (userId, conversationId, workspaceId) => {
-  if (!isValidObjectId(conversationId)) return null;
-  if (workspaceId) {
-    const scoped = await Conversation.findOne({ _id: conversationId, userId, workspaceId });
-    if (scoped) return scoped;
-  }
-  return Conversation.findOne({ _id: conversationId, userId });
-};
+// Ownership lookup lives in server/lib/conversationAccess.js — ONE authoritative
+// resolver shared with the Socket.IO AI path (server/index.js → AIService).
+// The REST layer is the reference consumer, not a second implementation: a
+// workspace-scoped miss is retried without the workspace filter (still scoped
+// to the actor) so conversations stored before workspace attribution stay
+// reachable instead of 404ing. Cross-actor access still misses → 404, because
+// the workspace filter is attribution, not the security boundary; actor scoping
+// is. Malformed ids are indistinguishable from nonexistent ones by design.
 
 const rejectInvalidWorkspace = (res, workspaceId) => {
   if (workspaceId && !isValidObjectId(workspaceId)) {
@@ -309,8 +309,9 @@ exports.deleteConversation = async (req, res) => {
   }
 };
 
-// Add a message to a conversation (used by AIService)
-exports.addMessage = async (conversationId, role, content, metadata = {}, workspaceId = null) => {
+// Add a message to a conversation (used by AIService). Owner-scoped: the
+// conversation update can only land on a conversation the actor owns.
+exports.addMessage = async (userId, conversationId, role, content, metadata = {}, workspaceId = null) => {
   try {
     const message = new Message({
       conversationId,
@@ -330,8 +331,8 @@ exports.addMessage = async (conversationId, role, content, metadata = {}, worksp
 
     await message.save();
 
-    // Update conversation's lastMessage and messageCount
-    await Conversation.findByIdAndUpdate(conversationId, {
+    // Update conversation's lastMessage and messageCount (owner-scoped)
+    await updateOwnedConversation(userId, conversationId, {
       lastMessage: {
         content: content.substring(0, 100),
         role,
@@ -347,15 +348,17 @@ exports.addMessage = async (conversationId, role, content, metadata = {}, worksp
   }
 };
 
-// Generate conversation title using lightweight prompt (non-blocking)
-exports.generateConversationTitle = async (conversationId, firstUserMessage) => {
+// Generate conversation title using lightweight prompt (non-blocking).
+// Owner-scoped: the actor id is bound at request time, so the deferred write
+// can never retitle (or notify about) another actor's conversation.
+exports.generateConversationTitle = async (userId, conversationId, firstUserMessage) => {
   try {
     // Don't block the main response - run async
     setImmediate(async () => {
       try {
-        const conversation = await Conversation.findById(conversationId);
+        const conversation = await Conversation.findOne({ _id: conversationId, userId });
         if (!conversation || conversation.title !== 'New Conversation') {
-          return; // Already has custom title or doesn't exist
+          return; // Already has custom title, not owned, or doesn't exist
         }
 
         // Use lightweight provider route for title generation only
@@ -412,7 +415,7 @@ Return ONLY the title, with no quotes and no punctuation at the end.`;
 
         // Last-resort fallback title if generation fails entirely
         try {
-          const conversation = await Conversation.findById(conversationId);
+          const conversation = await Conversation.findOne({ _id: conversationId, userId });
           if (conversation && conversation.title === 'New Conversation') {
             conversation.title = toFallbackTitle(firstUserMessage);
             await conversation.save();

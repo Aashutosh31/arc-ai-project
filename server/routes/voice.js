@@ -36,6 +36,19 @@ router.post('/transcribe', async (req, res) => {
       });
     }
 
+    // Charge-first, no compensation -- intentionally IDENTICAL to the governed
+    // path in TaskExecutor.executeTool, which also consumes before executing and
+    // never refunds. `creditsRemaining` is decremented and never incremented
+    // anywhere in the codebase, so this route is not an outlier: making it
+    // refund would be inconsistent with every governed capability and would
+    // under-charge work that actually ran (e.g. a transcription that succeeded
+    // but whose response failed to serialize).
+    //
+    // Known, accepted limitation: this charge sits outside an execution
+    // envelope, so it has no executionId, observability, or idempotency, and a
+    // client retry loop can charge repeatedly. Closing that means adding a
+    // credit-compensation primitive and a substrate-wide credit policy -- a
+    // deliberate follow-up, not a Phase 1 fix. Do not special-case it here.
     const creditCharge = await consumeCredits(userId, 1, 'voice transcription');
     if (!creditCharge.success) {
       return res.status(402).json({ error: creditCharge.error || 'Out of credits.', code: 'INSUFFICIENT_CREDITS' });

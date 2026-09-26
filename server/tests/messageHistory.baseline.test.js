@@ -9,8 +9,16 @@
  *                  clamping, ownership gating, sort order, lean usage,
  *                  {messages,total,hasMore} shape, conversation isolation.
  *  Part C (DB, gated): full round-trip persistence -> history retrieval ->
- *                  reload reconstruction. Runs only when MONGO_URI or
- *                  DATABASE_URL is reachable; otherwise SKIP (staging).
+ *                  reload reconstruction. Runs ONLY against an explicitly
+ *                  designated DISPOSABLE Mongo target supplied through
+ *                  tests/helpers/disposableMongo.js; otherwise it SKIPs.
+ *
+ * MONGO TEST SAFETY
+ *   Part C used to read the ambient MONGO_URI / DATABASE_URL and then wrote and
+ *   deleteMany()'d real Message documents. It now goes through the shared
+ *   disposable guard, which requires explicit opt-in, allowlists the host,
+ *   generates its own `arc_ai_test_<runId>` database, and owns the destructive
+ *   cleanup. Parts A and B are pure and always run.
  *
  * A completed assistant message MUST survive reload / conversation switch.
  * If any test here fails on the clean baseline, report it — do NOT silently
@@ -168,6 +176,10 @@ function installFakes({ owned = true, docs = [], total = 0 } = {}) {
   let controller;
   try {
     delete require.cache[require.resolve('../controllers/conversationController')];
+    // Ownership now resolves through the shared resolver (lib/conversationAccess.js),
+    // which holds its own Conversation reference. Purge it alongside the controller
+    // so each installFakes() call really exercises the fakes just injected.
+    delete require.cache[require.resolve('../lib/conversationAccess')];
     controller = require('../controllers/conversationController');
   } catch (err) {
     return { controllerError: err, calls };
@@ -269,25 +281,39 @@ async function runB() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Part C — DB round-trip (gated: requires reachable MONGO_URI)        */
+/* Part C — DB round-trip (gated: explicit disposable Mongo target)    */
 /* ------------------------------------------------------------------ */
+const mongoSafety = require('./helpers/disposableMongo');
+
 async function runC() {
   console.log('\nC. Persistence round-trip (DB-gated)');
-  const uri = process.env.MONGO_URI || process.env.DATABASE_URL;
-  if (!uri || uri.includes('your_mongodb')) {
-    skipTest('persistence round-trip', 'no MONGO_URI — requires staging');
-    skipTest('reload reconstruction', 'no MONGO_URI — requires staging');
-    skipTest('switch-conversation isolation', 'no MONGO_URI — requires staging');
+
+  // Explicit opt-in only. Never fall back to MONGO_URI / DATABASE_URL / .env.
+  if (mongoSafety.classifyMongoIntent() !== 'explicit') {
+    const reason = 'no disposable Mongo target configured';
+    skipTest('persistence round-trip', `${reason} — skipped by the Mongo test safety contract`);
+    skipTest('reload reconstruction', reason);
+    skipTest('switch-conversation isolation', reason);
+    console.log(`        required environment:\n${mongoSafety.describeRequiredEnv()}`);
     return;
   }
+
+  let ctx;
   try {
-    await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
+    ctx = await mongoSafety.openDisposableMongo({
+      allowCollections: [mongoSafety.ANY_RUN_COLLECTION],
+      connectOptions: { serverSelectionTimeoutMS: 5000 },
+    });
   } catch (err) {
-    skipTest('persistence round-trip', `DB unreachable (${err.message}) — requires staging`);
-    skipTest('reload reconstruction', 'DB unreachable — requires staging');
-    skipTest('switch-conversation isolation', 'DB unreachable — requires staging');
+    // Configured but unsafe/unreachable: fail loudly, having changed nothing.
+    for (const label of ['persistence round-trip', 'reload reconstruction', 'switch-conversation isolation']) {
+      skipTest(label, `disposable target refused: ${err.message}`);
+    }
+    process.exitCode = 1;
     return;
   }
+  console.log(mongoSafety.safeTargetSummary(ctx.plan));
+
   // NOTE: reuse the real model captured at the top of this file (Part A).
   // Part B only swapped require.cache entries for the controller; the
   // top-level binding still points at the compiled model. Re-requiring
@@ -328,8 +354,15 @@ async function runC() {
       assert.ok(bMsgs.every((m) => String(m.conversationId) === String(cB)));
     });
   } finally {
-    await RealMessage.deleteMany({ conversationId: { $in: [cA, cB] } });
-    await mongoose.connection.close();
+    // Destructive cleanup goes through the guard, which revalidates the marker,
+    // host, generated database name, live database name and collection set
+    // immediately before dropping. No raw deleteMany() here any more.
+    try {
+      await mongoSafety.dropDisposableDatabase(ctx);
+    } catch (err) {
+      console.error(`  WARNING  disposable cleanup refused, database left in place: ${err.message}`);
+      process.exitCode = 1;
+    }
   }
 }
 

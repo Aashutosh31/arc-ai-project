@@ -217,11 +217,55 @@ const buildProviderContinuationMessages = ({
   }
 
   const baseMessages = [];
-  let seenAssistantToolCallSegment = false;
+  const currentIds = new Set(assistantToolCallIds);
 
-  for (const message of messages || []) {
+  for (let index = 0; index < (Array.isArray(messages) ? messages.length : 0); index += 1) {
+    const message = messages[index];
     if (isAssistantToolCallMessage(message)) {
-      seenAssistantToolCallSegment = true;
+      const calls = Array.isArray(message.toolCalls)
+        ? message.toolCalls
+        : Array.isArray(message.tool_calls)
+          ? message.tool_calls
+          : [];
+      const ids = calls
+        .map((call) => call?.id || call?.toolCallId || call?.tool_call_id)
+        .filter(Boolean);
+      const isCurrent = ids.some((id) => currentIds.has(id));
+      const segment = [
+        {
+          ...message,
+          role: 'assistant',
+          content: extractTextFromContent(message?.content)
+        }
+      ];
+      const resultIds = new Set();
+      let complete = true;
+      for (let next = index + 1; next < (messages?.length || 0); next += 1) {
+        const candidate = messages[next];
+        if ((candidate?.role || '').toLowerCase() !== 'tool') break;
+        const candidateId =
+          candidate?.toolCallId || candidate?.tool_call_id;
+        if (candidateId && ids.includes(candidateId) && !resultIds.has(candidateId)) {
+          resultIds.add(candidateId);
+          segment.push({
+            ...candidate,
+            role: 'tool',
+            content: extractTextFromContent(candidate?.content)
+          });
+        } else {
+          complete = false;
+        }
+      }
+      if (resultIds.size !== ids.length) complete = false;
+      if (!isCurrent && complete && ids.length > 0) {
+        baseMessages.push(...segment);
+      }
+      while (
+        index + 1 < (messages?.length || 0) &&
+        (messages[index + 1]?.role || '').toLowerCase() === 'tool'
+      ) {
+        index += 1;
+      }
       continue;
     }
 
@@ -234,10 +278,6 @@ const buildProviderContinuationMessages = ({
       role: message?.role || 'user',
       content: extractTextFromContent(message?.content)
     });
-  }
-
-  if (!seenAssistantToolCallSegment && assistantToolCalls.length > 0) {
-    // The caller is reconstructing a fresh continuation chain.
   }
 
   const continuation = [

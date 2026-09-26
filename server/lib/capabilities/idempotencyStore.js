@@ -16,9 +16,12 @@
 //
 // Stored fields (Phase D) — nothing sensitive:
 //   key, capabilityId, source, userId, workspaceId, conversationId,
-//   executionId, status, createdAt, updatedAt,
+//   executionId, status, createdAt, updatedAt, expiresAt,
 //   outcome { status, errorType, durationMs }  (normalized terminal metadata)
 //   duplicateCount
+//
+// Bounded growth: a TTL index on expiresAt reaps records once the dedup window
+// closes, so the collection cannot grow without bound.
 //
 // NEVER persisted: tool args, tool outputs, credentials, auth tokens.
 
@@ -64,6 +67,13 @@ const withKeyLock = (key, fn) => {
 
 const now = () => Date.now();
 
+// How long a settled action stays deduplicated. Long enough to cover client
+// retries, reconnects, and a user re-sending the same request hours later.
+// After it lapses the record is TTL-deleted and a repeat is treated as a NEW
+// logical action (the accepted trade-off: bounded storage over eternal
+// dedup). Must be >= the longest plausible single execution.
+const DEDUP_RETENTION_MS = 24 * 60 * 60 * 1000;
+
 const toStoredRecord = ({ key, capabilityId, source, userId, workspaceId, conversationId, executionId }) => ({
   key,
   capabilityId: capabilityId || null,
@@ -77,6 +87,7 @@ const toStoredRecord = ({ key, capabilityId, source, userId, workspaceId, conver
   updatedAt: now(),
   outcome: null,
   duplicateCount: 0,
+  expiresAt: new Date(now() + DEDUP_RETENTION_MS),
 });
 
 // Atomic reserve. Returns:
@@ -167,6 +178,9 @@ const settle = async (key, { status, errorType = null, durationMs = null, execut
           status,
           outcome: outcome.status ? outcome : null,
           updatedAt: now(),
+          // Refresh from COMPLETION, not start: a long-running action must
+          // still get a full dedup window once it finishes.
+          expiresAt: new Date(now() + DEDUP_RETENTION_MS),
         },
       }).lean();
       return { ok: true };
@@ -180,6 +194,7 @@ const settle = async (key, { status, errorType = null, durationMs = null, execut
     cur.status = status;
     cur.outcome = outcome.status ? outcome : null;
     cur.updatedAt = now();
+    cur.expiresAt = new Date(now() + DEDUP_RETENTION_MS);
   }
   return { ok: true };
 };
@@ -213,6 +228,7 @@ const normalizeRecord = (r) => {
     updatedAt: r.updatedAt,
     outcome: r.outcome || null,
     duplicateCount: r.duplicateCount || 0,
+    expiresAt: r.expiresAt || null,
   };
 };
 
@@ -225,6 +241,7 @@ const _reset = () => {
 
 module.exports = {
   IDEMPOTENCY_STATUS,
+  DEDUP_RETENTION_MS,
   reserve,
   settle,
   getRecord,

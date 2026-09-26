@@ -38,8 +38,13 @@ jobs:
       - name: Build client
         run: npm run build
 
+      # Approval card + execution panel, history loader, MCP OAuth UI, and the
+      # voice state machine. These existed as files but CI ran none of them.
+      - name: Client test suite
+        run: npm test
+
   server:
-    name: Server Syntax Check
+    name: Server Test Suite
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -51,7 +56,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # server/package.json declares engines.node >=22; the client is built
+          # on 20 in the job above and is unaffected by this constraint.
+          node-version: 22
           cache: npm
           cache-dependency-path: server/package-lock.json
 
@@ -60,3 +67,16 @@ jobs:
 
       - name: Syntax check backend entrypoint
         run: node --check index.js
+
+      # The Phase 1 governed action substrate suites (authorization, approval,
+      # ownership, governed execution paths, idempotency, MCP, news, Mongo
+      # safety, TTS). These were previously not invoked by anything.
+      - name: Phase 1 governed substrate gate
+        run: npm run test:phase1
+
+      # Every other discovered server suite. Offline by default: the runner
+      # strips MONGO_URI/DATABASE_URL and the disposable MONGO_TEST_* contract,
+      # so CI can never reach a database. Suites needing live providers report
+      # as skipped rather than failing.
+      - name: Full server test suite
+        run: npm test

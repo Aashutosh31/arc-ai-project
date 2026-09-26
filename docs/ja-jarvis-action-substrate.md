@@ -11,7 +11,11 @@ choke point (explicit DENIED and MCP denials block before any side effect);
 slice 4C makes APPROVAL_REQUIRED a real server-authoritative approval
 workflow — pending-approval state, a Socket.IO approval transport to the
 initiating session only, and a fail-closed approval gate whose APPROVED
-decision continues the SAME execution attempt exactly once. Slice 4D ships the
+decision continues the SAME execution attempt exactly once. The approval
+identity includes the INITIATING SOCKET: multiple sockets for one authenticated
+user are supported, but a same-user resolve from a different socket is refused
+(`socket_mismatch`), and a reconnect — a new connection with a new `socket.id` —
+cannot resolve the pre-reconnect approval (it fails closed at its TTL). Slice 4D ships the
 conversation-first frontend approval UI: a pure approval state model, a
 presentational in-flow card, and the client half of the 4C transport, wired
 into the existing dashboard and validated in a real browser. Slice 4E hardens
@@ -283,11 +287,14 @@ substrate facade as `authorizationPolicy`.
 - `DENIED` → execution authorization fails (`allowed: false`). Reached via an
   explicit operator `deny`, guest/workspace restriction, identity mismatch,
   malformed metadata, or MCP denial.
-- `mode: 'enforce'` (future): an alternative that would turn
-  `APPROVAL_REQUIRED` into `allowed: false`. NOT built — 4C implements the
-  interactive gate (allowed with a real approval round-trip) instead, which
-  keeps the approving decision on the same session and never runs two
-  executor attempts.
+- `mode: 'enforce'` → an alternative that turns `APPROVAL_REQUIRED` into
+  `allowed: false`. It exists in the pure engine (`options.mode`) and is
+  covered by tests, but `TaskExecutor` does not request it: it uses the
+  default transitional mode plus the 4C interactive gate, which keeps the
+  approving decision on the same session and never runs two executor attempts.
+  The choice does not weaken enforcement — `TaskExecutor` keys the approval
+  flow off `requiresApproval`, so a required approval runs in **both** modes.
+  `DENIED` is never affected by the mode.
 
 ### Default policy
 
@@ -469,9 +476,26 @@ shipped the state + transport + enforcement only.
   record with **no await between check and store**, so concurrent
   approve/deny/timeout/cancel serialize and exactly ONE wins.
 - Identity binding at creation: `executionId`, authenticated `userId`,
-  `workspaceId` (when applicable), `capabilityId`. `resolve()` re-checks every
-  value it is given against the stored binding; the transport never trusts a
-  client-supplied userId/executionId.
+  `workspaceId` (when applicable), `capabilityId`, **and the initiating
+  socket/session id** (`initiatingSocketId`, the server-minted `socket.id` of
+  the authenticated connection that raised the request). `resolve()` re-checks
+  every value it is given against the stored binding; the transport never trusts
+  a client-supplied userId/executionId/socketId.
+- **Session identity (P0 #2).** `userId` identifies an *account*, not the
+  session that was asked to authorize one consequential action. ARC
+  intentionally supports several concurrent sockets for one user
+  (`global.connectedSockets` in `server/index.js`), so the initiating
+  connection is part of the approval identity: a same-user resolve from a
+  different socket is refused with `socket_mismatch`, exactly like
+  `user_mismatch`, and the record stays `PENDING` for the real initiator.
+  Omitting the socket identity is also a mismatch — never a bypass — and a
+  socket without an id cannot raise an approval at all, so no unbound record
+  can ever exist. The bound id is stored privately (`_initiatingSocketId`, like
+  `_timer`/`_resolve`) and is **not** part of the public snapshot, because the
+  transport acks the whole resolve result and a snapshot field would disclose
+  the initiating socket's id to a different user. `cancel()` is deliberately
+  user-bound only: it has no client-facing event (it is the server's own abort
+  rollback) and can only ever turn a pending gate into a failure.
 - TTL: `DEFAULT_TTL_MS = 30000`, env `APPROVAL_TTL_MS`, mirroring the MCP
   constant `REQUEST_TIMEOUT_MS` (`server/lib/mcp/limits.js`) — one bounded
   interactive round-trip. Lazy expiry on resolve/cancel plus a per-record
@@ -484,8 +508,9 @@ shipped the state + transport + enforcement only.
 
 Runs inside `_executeToolCore` right after the authorization verdict, BEFORE
 credits, clientAction, recovery/retry and any side effect. Fail-closed by
-construction: no authenticated session (`socket.userId` must equal the
-executing user, never a client-asserted identity), a store-write failure, or a
+construction: no bindable authenticated session (`socket.userId` must equal the
+executing user **and** the socket must carry a server-minted `id`, never a
+client-asserted identity), a store-write failure, or a
 failed notification each return the normalized
 `{ success:false, errorType:'execution.not_authorized', authorization:{…,
   approvalId, approvalState, decision, reason }, cancelled? }` and NEVER
@@ -495,9 +520,24 @@ the tool body run exactly once.
 
 Abort/cancel: driven by the execution AbortSignal, not by socket disconnect.
 `_abortWatch` races the decision wait; aborting transitions the PENDING record
-to `CANCELLED`. Transient Socket.IO reconnects do NOT cancel — ARC already
-supports multi-tab (`global.connectedSockets`), and a stale/reconnecting socket
-cannot approve (the record resolves only against the authenticated userId).
+to `CANCELLED`. Transient Socket.IO reconnects do NOT cancel an in-flight
+execution — ARC already supports multi-tab (`global.connectedSockets`) and a
+reconnect is not an abort signal.
+
+**Reconnect semantics (documented, deliberate).** This process runs no
+`connectionStateRecovery`, so a reconnect is a NEW connection with a NEW
+`socket.id`. Because the approval is bound to the connection that was asked,
+the replacement connection can never resolve the pre-reconnect approval: it is
+non-resolvable from the moment the socket is replaced and the request then
+fails closed at its own `APPROVAL_TTL_MS` (default 30s) with
+`approvalState: 'EXPIRED'`. The alternative — a client-carried session token
+that survives reconnect — would be a client-asserted identity and a new
+multi-device/out-of-band approval system (mobile push, approval links), which
+is explicitly out of scope for 4C. The cost is therefore one bounded
+interactive round-trip lost to a mid-prompt reconnect; the benefit is that one
+account can never authorize a consequential action from a session that was not
+asked. A reconnect does not cancel the *execution*; the approval simply can no
+longer be granted.
 
 ### Transport contract
 
@@ -506,10 +546,16 @@ cannot approve (the record resolves only against the authenticated userId).
   executionId, capabilityId, toolName, source, risk, scope, reason,
   expiresAt, state }`.
 - `agent:approval:resolve` (client → server, wired in `server/index.js`):
-  `{ approvalId, decision: 'approve' | 'deny' }`. The handler resolves with
-  `socket.userId` (server-authenticated); optional ack returns the store
-  result. Identity/state checks happen in the store, so a different user,
-  duplicate, stale or expired resolve is rejected exactly once.
+  `{ approvalId, decision: 'approve' | 'deny' }` — that is the whole client
+  contract. The handler resolves with `socket.userId` **and `socket.id`**, both
+  read from the authenticated server socket; `data.socketId` (or any other
+  client-asserted socket identity) is deliberately never read, so a forged
+  payload field can neither bypass nor re-target the binding. The optional ack
+  returns the store result (`{ ok, state, decision?, reason? }`; a refusal also
+  echoes the record, which carries no socket identity). Identity/state checks
+  happen in the store, so a different user, a different socket of the same user,
+  a duplicate, a stale or an expired resolve is rejected exactly once, with
+  `socket_mismatch` as the reason for the cross-socket case.
 
 ### Observable lifecycle + integration
 
@@ -535,6 +581,22 @@ approval; requested event reaches the initiating socket with safe metadata; a
 different-user socket cannot approve; approve → exactly one execution;
 deny → zero executions; too-late response → EXPIRED and zero executions;
 duplicate approve → still exactly one execution.
+
+**P0 #2 addition (same-user cross-socket isolation).** Two concurrent
+connections for ONE authenticated user, plus a reconnect case, are now covered
+on the real transport: the second connection of the same user is refused with
+`socket_mismatch` and the record stays `PENDING` for the real initiator, which
+still resolves it and executes exactly once; a forged `socketId` in the
+payload is ignored from both sides (a sibling claiming the initiator's id is
+still refused, and the initiator is unaffected by its own bogus field); a socket
+with no id can never raise an approval; omitting the socket identity is a
+mismatch, not a bypass; and a reconnect (new `socket.id`) cannot resolve the
+pre-reconnect approval, which then fails closed at its TTL. Suites:
+`server/tests/approvalStore.test.js` (unit, 21),
+`server/tests/taskExecutorApproval.test.js` (29, includes the real-socket
+cross-socket + reconnect cases), and
+`server/tests/approvalSocketBinding.socket.test.js` (10, boots the real
+`server/index.js` with real JWTs over localhost and the real resolve handler).
 
 ## Frontend approval UI (slice 4D)
 
@@ -631,13 +693,22 @@ Slice 4E bolts the remaining hard edges onto the 4B/4C gate:
 
 2. **Seeded guest hard-deny** — `operatorPolicy` now boots with
    `GUEST_DENY_DEFAULTS` (`native:webSearch`, `native:scrapeWebsite`,
-   `native:deepResearchSwarm`, `native:sendEmail`, `native:memorize`,
+   `native:deepResearchSwarm`, `native:sendEmail`,
+   `native:sendWhatsAppMessage`, `native:memorize`,
    `native:storeUserFact`, `native:executeCode`, `native:scheduleMeeting`),
    every id verified against the live native registry. Guests are hard-denied
    these external/consequential natives by default even with **no operator
    configuration**, while the frozen pure-engine `DEFAULT_POLICY` remains
    untouched (empty `guestDenied`). `resetOperatorPolicy` restores the seeded
    base.
+
+   The set is **not** hand-maintained on trust: `tests/authorizationPolicy`
+   derives it from the live registry plus `nativeRiskFor()` and fails if any
+   `consequential`/`high` native is missing (or if the list names an id that no
+   longer exists). A newly registered irreversible tool therefore cannot become
+   guest-executable by being forgotten here. `native:sendWhatsAppMessage` was
+   itself found missing by exactly that check during the Phase 1 closure audit
+   and is now covered.
 
 3. **Approval TOCTOU revalidation** — after an approval resolves to `allowed`,
    `TaskExecutor` re-derives the authoritative authorization verdict *before*
@@ -819,14 +890,93 @@ exactly once, a deny over the wire executes zero times, and a too-late resolve
 finds the record EXPIRED and still zero executions (covered end-to-end by the
 transport test; see Part 12 above).
 
+## Phase 1 closure audit — governed-path regressions
+
+A final closure pass audited "every action flows through one governed
+boundary" against the live code rather than against intent. Four real defects
+were found; each fix is locked by a test with a verified negative control.
+
+### 1. WhatsApp socket send bypassed the governed boundary (HIGH)
+
+`providers/whatsapp/index.js` handled `whatsapp:send` by calling
+`clientManager.sendMessage(...)` directly. That is an alternate execution
+path: **any authenticated socket — including a guest — could send a real
+WhatsApp message with no authorization, no approval, no idempotency, no
+execution envelope and no observability.**
+
+The handler now resolves the shared executor lazily (keeping the
+`TaskExecutor → tools/index → sendWhatsAppMessage → clientManager` require
+graph acyclic at boot) and delegates to
+`executeTool('sendWhatsAppMessage', { recipientName, message }, userId, socket, …)`.
+Client-visible events and payloads are unchanged, so the ambiguity UX
+(`whatsapp:recipient_ambiguous` with `matches`) still works.
+
+`tests/governedExecutionPaths.test.js` proves the handler delegates, and that a
+guest is denied by the real `TaskExecutor` with the tool body never running.
+The negative control matters here: the test stubs `clientManager.sendMessage`,
+because without the stub a reintroduced bypass merely throws "client not
+initialized" and the test would pass **vacuously**.
+
+### 2. `native:sendWhatsAppMessage` missing from the guest hard-deny (HIGH)
+
+`lib/capabilities/risk.js` classifies `sendWhatsAppMessage` as
+`consequential`/`high` — the exact tier the guest deny set exists to cover —
+but the id was absent from `GUEST_DENY_DEFAULTS`, so a guest could reach a
+real external message send through the model path. Added, plus the derived
+completeness test described in slice 4E item 2.
+
+### 3. Idempotency was inert in production (MED)
+
+The guard was fully implemented and unit-proven, but **no production call
+site ever supplied an identity**, so `resolveIdempotencyKey` always returned
+`{ enabled: false }` and every execution passed straight through.
+
+The model dispatch sites now supply one. The identity is
+`<per-turn assistant message id>:<provider tool_call id>`, because a provider
+`tool_call` id is unique only *within* a response — providers commonly number
+them `call_1`, `call_2`, …, so using it alone would make a later turn's
+legitimate repeat collide with an earlier one and silently do nothing. If
+either half is missing the key is `null` and the execution stays in the
+documented pass-through mode: the substrate still never guesses a logical
+identity from tool arguments.
+
+`tests/idempotencyWiring.test.js` covers all three properties — same-turn
+duplicate replays, same id in a different turn still executes, unkeyed stays
+pass-through. The replay envelope is `{ success, replay, duplicateOf, outcome }`
+and deliberately does **not** echo stored tool output.
+
+### 4. Current-news "two 10s waits" (MED)
+
+A GDELT `503` produced the message `…unavailable response (HTTP 503)`, which
+matched `ToolRecoveryManager`'s `TRANSIENT_PATTERNS` (`/unavailable/i`,
+`/503/i`) and was therefore retried **inside the same turn** — issuing a
+byte-identical request that stacks a *second* full `REQUEST_TIMEOUT_MS` (10s)
+behind the first, for a verdict that cannot change.
+
+`getTopNews` now declares its own failures `retryable: false`: every failure
+it returns is either a definitive upstream answer or a request that already
+consumed the full timeout budget. `ToolRecoveryManager` honors an explicit
+`result.retryable === false` **ahead of** the text heuristics, so a tool's
+first-hand declaration outranks pattern-guessing (genuine transport faults
+never reach that path — they throw and are classified on their own merits).
+Recovery is unchanged for every other tool.
+
+`tests/newsMultiTurnScoping.test.js` (8 checks, real `TaskExecutor` + real
+news tool, no live GDELT) covers one fetch per turn, no retry storm on
+failure, truthful failure with no fabricated articles, no scope leakage into
+unrelated requests, per-actor isolation, and stable 4-turn scoping. Both halves
+of the fix are load-bearing: breaking either one reintroduces the double fetch.
+
 ## Intentionally NOT implemented (deferred)
 
 - Retries / recovery orchestration / proactive jobs / new capabilities
 - Durable plan state (the plan-level `Execution` model), compensation
 - Any new timeout or cancellation mechanism
 - Planner integration (a later slice builds on this envelope)
-- Idempotency wiring inside individual native tools / MCP adapters /
-  AIService / planner / frontend — a single substrate mechanism only
+- Idempotency wiring inside individual native tools / MCP adapters / the
+  frontend — a single substrate mechanism only. The **model** call sites in
+  `AIService` are now wired (see the closure audit above); the tool-internal
+  and adapter-level wiring is still deferred.
 - Risk-aware fail-closed policy for high-risk capabilities during store
   outages (deliberate architectural decision, not part of this slice —
   fail-open is uniform today)
@@ -849,3 +999,193 @@ In ad-hoc `node -e` harnesses that `require('abort-controller')` **after**
 `TaskExecutor`, the tool registry logs
 `Failed to load tool ...sendWhatsAppMessage.js: AbortController is not defined`.
 Reproduced identically on pristine HEAD; real test suites do not trigger it.
+---
+
+# Mongo test safety contract (Phase 1 hardening)
+
+## Why this section exists — the incident
+
+A Mongo integration test built its target by **string concatenation**:
+
+```js
+// server/tests/idempotency.mongo.test.js (before)
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27027';
+const DB_NAME  = `arc_idem_accept_${process.pid}_${Date.now()}`;
+const URI      = `${MONGO_URI}/${DB_NAME}`;      // <-- the bug
+await mongoose.connect(URI);
+...
+await conn.dropDatabase();                        // <-- wiped the app database
+```
+
+When the ambient `MONGO_URI` already carried a database path — the normal
+shape for an Atlas connection string — the resulting URI had **two** path
+segments (`.../jarvis_production_db/arc_idem_accept_1234_...`). The Mongo
+driver uses the **first** path segment, so the test connected to the
+**application database**, wrote test documents into it, and then called
+`dropDatabase()` on it. The application database was wiped.
+
+Nothing about that failure was visible at the call site: the variable was named
+`URI`, the name looked disposable, and the ambient variable was "just a
+default".
+
+**Lesson (test infrastructure):** a test that writes to a database must never
+*choose* that database by appending a string to a URI it did not build itself.
+Disposable-ness has to be a property the test can be *checked* against, not a
+name it invented. The cost of proving it (host allowlist + marker + revalidation)
+is trivial; the cost of guessing wrong is the whole database.
+
+## The shared guard
+
+`server/tests/helpers/disposableMongo.js` is the single safety abstraction.
+Every Mongo-writing test and script goes through it. It exposes:
+
+| Function | Purpose |
+|---|---|
+| `planDisposableRun(opts)` | Pure pre-connect gate. Throws `DisposableMongoSafetyError` on any unsafe or incomplete configuration. **No connection is attempted.** |
+| `openDisposableMongo(opts)` | Connects to a freshly generated disposable database and writes the run-ownership marker. Refuses to reuse a database that already holds collections. |
+| `attachDisposableMongo(opts)` | Read-only attach for a second process in the same run; requires a matching ownership marker. |
+| `dropDisposableDatabase(ctx)` | The **only** `dropDatabase()` in the repository, after revalidating everything. |
+| `deleteDisposableDocuments(ctx, collection, filter)` | Scoped deletes. A non-empty filter is mandatory. |
+| `assertCleanupAllowed(ctx)` | Revalidates marker + host + database + live database + collection set. |
+| `validateDisposableConfig` / `evaluateOwnership` / `evaluateDisposableDbName` | Pure predicates, used by the safety suite. |
+| `buildChildEnv(plan)` / `buildChildArgs(key)` | Secret-free child-process plumbing (env, never argv). |
+| `safeTargetSummary(plan)` | The only sanctioned log shape. |
+
+## Required environment (all four, or the run does not happen)
+
+```
+MONGO_TEST_URI=mongodb://<host>        # a DISPOSABLE host, host-only path
+MONGO_TEST_EXPECTED_HOST=<exact-host>  # every host in the URI must match
+MONGO_TEST_DISPOSABLE=1
+RUN_MONGO_INTEGRATION=1
+```
+
+Optional, for multi-invocation workflows: `MONGO_TEST_RUN_ID`,
+`MONGO_TEST_DB_NAME` (reuse a run's database), and for the measurement script
+`MONGO_MEASURE_ALLOW_DESTRUCTIVE=1`.
+
+**There is no fallback.** `MONGO_URI`, `DATABASE_URL` and application `.env`
+files are never read as a connection source. The guard reads the ambient URI for
+one purpose only — discovering the application database name so it can refuse
+it — and never logs it.
+
+Intent is classified so failures are honest:
+
+| State | Behavior |
+|---|---|
+| Nothing configured | `SKIP` with the required variables printed. |
+| `MONGO_TEST_URI` or `RUN_MONGO_INTEGRATION` set but configuration unsafe | `FAIL` (exit 1). The operator asked to run; the target is wrong. |
+| `NODE_ENV=production` | Always refused, before anything else. |
+
+## Database naming
+
+* Generated name: `arc_ai_test_<runId>`, matching `^arc_ai_test_[a-z0-9][a-z0-9_-]{7,}$`.
+* Selected with the driver's `dbName` option — **never** by appending to the URI:
+
+  ```js
+  mongoose.connect(uri, { dbName: generatedDisposableDb });
+  ```
+
+  The URI is passed through verbatim, so `mongodb+srv` hosts, credentials,
+  replica sets, TLS and query options are preserved — and nothing in the path or
+  query string can redirect the connection.
+* The database is re-read from the live connection (`connection.db.databaseName`)
+  and must equal the generated name exactly.
+* Refused: `test`, `admin`, `local`, `config`, `prod`, `production`, `staging`,
+  `development`, `dev` (and other conventional names), the application database
+  name, and any name without the `arc_ai_test_` prefix.
+* A `MONGO_TEST_URI` that itself names a non-disposable database is refused, so
+  an operator who pastes the application URI into `MONGO_TEST_URI` gets a
+  failure instead of the incident.
+
+## Host allowlist
+
+The host is parsed from the URI and compared against `MONGO_TEST_EXPECTED_HOST`
+**before connecting**. Every host in the URI must match (a replica-set URI with
+one rogue member is refused). `host:port` may be declared for precision.
+Mismatches fail with `host=<host> does not match MONGO_TEST_EXPECTED_HOST=...`.
+
+## Marker ownership
+
+On connect the guard writes one document into `__disposableMongoRun`:
+
+```js
+{ _id: 'ownership', kind: 'disposable-mongo-run',
+  runId, host, database, disposable: true, createdAt }
+```
+
+Before **any** destructive cleanup the guard re-reads that marker and re-checks
+`runId`, `host`, `database`, the `disposable` flag, the live database name, and
+the collection set. A failure means: disconnect, **do not drop**, **do not
+delete**, fail closed.
+
+The database is also required to be **empty at connect**, so "collections this
+run created" is a sound ownership proof even for tests whose reachable models
+cannot be enumerated in advance (`ANY_RUN_COLLECTION`). A database that already
+held data is refused at connect — which is precisely what would have stopped the
+incident, since the application database is never empty.
+
+## Guarded cleanup
+
+```js
+try {
+  /* ...test writes... */
+} finally {
+  await mongoSafety.dropDisposableDatabase(ctx);   // revalidates, then drops
+}
+```
+
+No test or script may call `conn.dropDatabase()` or a raw `deleteMany()`; both
+are enforced by a repository lint inside `disposableMongoSafety.test.js` (cases
+18–20), which fails if a new call site appears outside the guard.
+
+## Secret hygiene
+
+* Full URIs are never logged. The only sanctioned shape is:
+
+  ```
+  host=<host>
+  database=<arc_ai_test_runid>
+  disposable=true
+  ```
+
+  No username, password, port or query parameters. Error messages report the
+  host only; the parser reduces credentials to a boolean and discards them.
+* Mongo URIs are **never** passed through `process.argv` (visible to every
+  process on the host). The restart-probe child receives the target through the
+  environment, plus the parent's `runId` and database name so it reuses the
+  parent's database instead of creating one.
+
+## Tests and scripts protected
+
+| Surface | Before | After |
+|---|---|---|
+| `tests/idempotency.mongo.test.js` | ambient `MONGO_URI` default, URI concatenation, direct `dropDatabase()` | guard-generated database, guarded cleanup, SKIP/FAIL per intent, env-based child |
+| `tests/idempotency.probe-child.js` | URI in `argv[2]` | read-only `attachDisposableMongo`, key-only argv |
+| `tests/messageHistory.baseline.test.js` | ambient `MONGO_URI`/`DATABASE_URL`, real `Message` writes + `deleteMany` | Parts A/B untouched and always run; Part C gated on the disposable contract, guarded cleanup |
+| `scripts/measureMessageHistory.js` | ambient `MONGO_URI`/`DATABASE_URL`, unscoped `deleteMany` on any conversation id | explicitly designated target, read-only default, `MONGO_MEASURE_ALLOW_DESTRUCTIVE=1` for writes, cleanup scoped to the run's own probe conversation |
+| `scripts/clearStaleGoogleCalendarTokens.js` | unchanged — authenticated production maintenance, dry-run by default | intentionally not disposable-gated (it exists to repair the application database) |
+
+Safe invocation for the measurement script:
+
+```bash
+cd server
+export MONGO_TEST_URI=mongodb://127.0.0.1:27017
+export MONGO_TEST_EXPECTED_HOST=127.0.0.1
+export MONGO_TEST_DISPOSABLE=1 RUN_MONGO_INTEGRATION=1
+export MONGO_MEASURE_ALLOW_DESTRUCTIVE=1
+node scripts/measureMessageHistory.js --seed 500     # prints runId + database
+export MONGO_TEST_RUN_ID=<runId> MONGO_TEST_DB_NAME=<db>
+node scripts/measureMessageHistory.js --measure <conversationId>
+node scripts/measureMessageHistory.js --cleanup <conversationId>
+```
+
+## Safety suite
+
+`cd server && node tests/disposableMongoSafety.test.js` — 20 pure assertions, no
+connection, no Atlas, safe to run anywhere. Cases 1–17 cover the contract
+(missing/ambient-only configuration, missing marker, wrong host, `test`/
+production-like/application database names, invalid prefix, valid generation,
+missing/mismatched marker, mismatched database/host, valid ownership, query-string
+containment, credential redaction, argv secrecy). Cases 18–20 enforce the
+contract structurally across `server/tests` and `server/scripts`.

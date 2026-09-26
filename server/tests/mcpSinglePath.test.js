@@ -173,7 +173,9 @@ const main = async () => {
     const entries = (indexSrc.match(/AIService\.processQuery/g) || []).length;
     assert.ok(entries >= 1, 'chat must enter through processQuery');
     const aiSrc = fs.readFileSync(require.resolve('../services/AIService'), 'utf8');
-    assert.ok(/status: 'executing tools'/.test(aiSrc), 'inline MCP runs must surface agent status');
+    // Quote-style agnostic: the invariant is that an inline MCP run surfaces an
+    // agent status, not which quote style the emitter happens to use.
+    assert.ok(/status:\s*['"]executing tools['"]/.test(aiSrc), 'inline MCP runs must surface agent status');
   });
 
   console.log(`\n${passed.length + failed.length} tests, ${passed.length} passed, ${failed.length} failed`);

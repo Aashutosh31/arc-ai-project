@@ -112,7 +112,14 @@ const approvalPolicy = (capabilityId, reason = 'approve-first') => ({
   workspaceRestricted: [],
 });
 
-const fakeSocket = (uid) => ({
+// P0 #2: a real Socket.IO connection always has a server-minted `id`. The
+// deterministic `sock-<uid>` shape lets tests name the expected binding, and
+// `opts.id` lets one test model a SECOND socket of the same user.
+const socketIdFor = (uid) => `sock-${uid}`;
+const SOCK_U4C = socketIdFor('u-4c');
+
+const fakeSocket = (uid, opts = {}) => ({
+  id: opts.id || socketIdFor(uid),
   userId: uid,
   emitted: [],
   emit(event, payload) {
@@ -197,7 +204,7 @@ const main = async () => {
       const reqEvent = sock.emitted.find((e) => e.event === 'agent:approval:requested');
       assert.ok(reqEvent, 'requested event emitted on the initiating socket');
       assert.strictEqual(reqEvent.payload.approvalId, approval.approvalId);
-      const out = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' });
+      const out = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
       assert.strictEqual(out.ok, true);
       const r = await p;
       assert.strictEqual(r.success, true, 'approved execution succeeds');
@@ -222,7 +229,7 @@ const main = async () => {
       assert.strictEqual(approval.executionId, reqEvent.payload.executionId,
         'approval + requested event carry the same executing envelope');
       assert.ok(String(approval.executionId).startsWith('cap-'));
-      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' });
+      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
       const r = await p;
       assert.strictEqual(r.success, true);
     } finally { restore(); caps.operatorPolicy.resetOperatorPolicy(); }
@@ -237,7 +244,7 @@ const main = async () => {
     try {
       const p = TaskExecutor.executeTool('getTime', {}, 'u-4c', sock, PLAIN_OPTS);
       const approval = await waitForApproval();
-      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'deny', userId: 'u-4c' });
+      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'deny', userId: 'u-4c', socketId: SOCK_U4C });
       const r = await p;
       assert.strictEqual(r.success, false);
       assert.strictEqual(r.errorType, 'execution.not_authorized');
@@ -263,7 +270,7 @@ const main = async () => {
       assert.strictEqual(r.authorization.approvalState, 'EXPIRED');
       assert.strictEqual(toolCalls, 0, 'expired approval never executes');
       // a late approve after expiry is rejected
-      const late = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' });
+      const late = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
       assert.strictEqual(late.ok, false);
       assert.strictEqual(approvalStore.read(approval.approvalId).state, 'EXPIRED');
     } finally { restore(); caps.operatorPolicy.resetOperatorPolicy(); }
@@ -301,7 +308,7 @@ const main = async () => {
       const approval = await waitForApproval();
       assert.strictEqual(creditMock.log.length, 0, 'credit boundary untouched while awaiting approval');
       assert.strictEqual(toolCalls, 0);
-      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' });
+      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
       const r = await p;
       assert.strictEqual(r.success, true);
       assert.strictEqual(toolCalls, 1, 'exactly one execution');
@@ -319,9 +326,9 @@ const main = async () => {
     try {
       const p = TaskExecutor.executeTool('getTime', {}, 'u-4c', sock, PLAIN_OPTS);
       const approval = await waitForApproval();
-      const first = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' });
-      const second = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' });
-      const third = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'deny', userId: 'u-4c' });
+      const first = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
+      const second = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
+      const third = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'deny', userId: 'u-4c', socketId: SOCK_U4C });
       assert.strictEqual(first.ok, true);
       assert.strictEqual(second.ok, false, 'second approve rejected');
       assert.strictEqual(third.ok, false, 'approve-then-deny rejected');
@@ -342,7 +349,7 @@ const main = async () => {
       const approval = await waitForApproval();
       const outs = await Promise.all(
         Array.from({ length: 8 }, () =>
-          approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' }))
+          approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' , socketId: SOCK_U4C, }))
       );
       const winners = outs.filter((o) => o.ok === true);
       assert.strictEqual(winners.length, 1, 'exactly one approve wins the CAS');
@@ -362,12 +369,12 @@ const main = async () => {
     try {
       const p = TaskExecutor.executeTool('getTime', {}, 'u-4c', sock, PLAIN_OPTS);
       const approval = await waitForApproval();
-      const evil = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-evil' });
+      const evil = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-evil', socketId: SOCK_U4C });
       assert.strictEqual(evil.ok, false);
       assert.strictEqual(evil.reason, 'user_mismatch');
       assert.strictEqual(approvalStore.read(approval.approvalId).state, 'PENDING', 'still pending for the real user');
       assert.strictEqual(toolCalls, 0);
-      const right = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' });
+      const right = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
       assert.strictEqual(right.ok, true);
       const r = await p;
       assert.strictEqual(r.success, true);
@@ -386,11 +393,13 @@ const main = async () => {
       const approval = await waitForApproval();
       const wrongWs = approvalStore.resolve({
         approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', workspaceId: 'ws-other',
+        socketId: SOCK_U4C,
       });
       assert.strictEqual(wrongWs.ok, false);
       assert.strictEqual(wrongWs.reason, 'workspace_mismatch');
       const right = approvalStore.resolve({
         approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', workspaceId: approval.workspaceId,
+        socketId: SOCK_U4C,
       });
       assert.strictEqual(right.ok, true);
       const r = await p;
@@ -409,7 +418,7 @@ const main = async () => {
       const approval = await waitForApproval();
       await tick(50);
       assert.strictEqual(approvalStore.read(approval.approvalId).state, 'EXPIRED', 'TTL fired on its own');
-      const stale = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' });
+      const stale = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
       assert.strictEqual(stale.ok, false);
       assert.strictEqual(stale.reason, 'expired');
       const r = await p;
@@ -461,7 +470,7 @@ const main = async () => {
       const p = TaskExecutor.executeTool('getTime', {}, 'u-4c', sock, PLAIN_OPTS);
       const approval = await waitForApproval();
       assert.strictEqual(toolCalls, 0);
-      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' });
+      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
       const r = await p;
       assert.strictEqual(r.success, true);
       assert.strictEqual(toolCalls, 1);
@@ -545,7 +554,7 @@ const main = async () => {
       const approval = await waitForApproval();
       await tick(30); // let both preflights settle
       assert.strictEqual(approvalStore.list().length, 1, 'one logical action -> exactly one approval');
-      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' });
+      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
       const [ra, rb] = await Promise.all([a, b]);
       const winners = [ra, rb].filter((r) => r && !r.replay);
       const replays = [ra, rb].filter((r) => r && r.replay);
@@ -564,7 +573,7 @@ const main = async () => {
     try {
       const p1 = TaskExecutor.executeTool('getTime', {}, 'u-4c', sock, { ...PLAIN_OPTS, idempotencyKey: 'k-31b', requestId: 'r1' });
       const approval = await waitForApproval();
-      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' });
+      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
       const r1 = await p1;
       assert.strictEqual(r1.success, true);
       assert.strictEqual(toolCalls, 1);
@@ -608,7 +617,7 @@ const main = async () => {
     try {
       const p1 = TaskExecutor.executeTool('getTime', {}, 'u-4c', sock, { ...PLAIN_OPTS, idempotencyKey: 'k-31d', requestId: 'r1' });
       const approval = await waitForApproval();
-      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'deny', userId: 'u-4c' });
+      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'deny', userId: 'u-4c', socketId: SOCK_U4C });
       const r1 = await p1;
       assert.strictEqual(r1.success, false);
       assert.strictEqual(r1.errorType, 'execution.not_authorized');
@@ -630,7 +639,7 @@ const main = async () => {
       try {
         const p = TaskExecutor.executeTool('getTime', {}, 'u-4c', sock, PLAIN_OPTS);
         const approval = await waitForApproval();
-        approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' });
+        approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
         const r = await p;
         assert.strictEqual(r.success, true);
       } finally { restore(); caps.operatorPolicy.resetOperatorPolicy(); }
@@ -656,7 +665,7 @@ const main = async () => {
       try {
         const p = TaskExecutor.executeTool('getTime', {}, 'u-4c', sock, PLAIN_OPTS);
         const approval = await waitForApproval();
-        approvalStore.resolve({ approvalId: approval.approvalId, decision: 'deny', userId: 'u-4c' });
+        approvalStore.resolve({ approvalId: approval.approvalId, decision: 'deny', userId: 'u-4c', socketId: SOCK_U4C });
         const r = await p;
         assert.strictEqual(r.success, false);
       } finally { restore(); caps.operatorPolicy.resetOperatorPolicy(); }
@@ -689,7 +698,7 @@ const main = async () => {
       );
       assert.ok(!JSON.stringify(payload).match(/arg|secret|credential|token|password|auth|result|output/i),
         'never leaks args/credentials/auth data/outputs');
-      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c' });
+      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
       await p;
     } finally { restore(); caps.operatorPolicy.resetOperatorPolicy(); }
   });
@@ -698,26 +707,9 @@ const main = async () => {
   await test('Socket.IO transport: requested reaches the client, resolve approves exactly once', async () => {
     resetEverything();
     const restore = installNativeCounter('getTime');
-    const httpServer = http.createServer();
-    const io = new Server(httpServer);
-    io.use((socket, next) => {
-      socket.userId = String(socket.handshake.query.uid || 'u-4c');
-      next();
-    });
-    let socketsByUser = {};
-    io.on('connection', (socket) => {
-      socketsByUser[socket.userId] = socket;
-      socket.on('agent:approval:resolve', async (data, ack) => {
-        const out = approvalStore.resolve({
-          approvalId: data && data.approvalId,
-          decision: data && data.decision,
-          userId: socket.userId,
-        });
-        if (typeof ack === 'function') ack(out);
-      });
-    });
-    await new Promise((r) => httpServer.listen(0, r));
-    const port = httpServer.address().port;
+    const wire = await startApprovalWire();
+    const { socketsByUser } = wire;
+    const port = wire.port;
     caps.operatorPolicy.setOperatorPolicy(approvalPolicy('native:getTime'));
 
     const clientA = await openRawClient(port, 'u-4c');
@@ -725,9 +717,9 @@ const main = async () => {
     try {
       let attempts = 0;
       while ((!socketsByUser['u-4c'] || !socketsByUser['u-evil']) && attempts++ < 100) await tick(10);
-      const serverSocket = socketsByUser['u-4c'];
+      const serverSocket = socketsByUser['u-4c'] && socketsByUser['u-4c'][0];
       assert.ok(serverSocket, 'u-4c server socket captured');
-      assert.ok(socketsByUser['u-evil'], 'u-evil server socket captured');
+      assert.ok(socketsByUser['u-evil'] && socketsByUser['u-evil'][0], 'u-evil server socket captured');
 
       const p = TaskExecutor.executeTool('getTime', {}, 'u-4c', serverSocket, PLAIN_OPTS);
       const req = await clientA.waitForEvent('agent:approval:requested', 2000);
@@ -785,9 +777,208 @@ const main = async () => {
       caps.operatorPolicy.resetOperatorPolicy();
       clientA.close();
       clientB.close();
-      socketsByUser = {};
-      io.close();
-      await new Promise((r) => httpServer.close(r));
+      await wire.close();
+    }
+  });
+
+  // ---- P0 #2: same-user cross-socket approval isolation ----------------------
+  await test('same user on a different socket cannot resolve the approval', async () => {
+    resetEverything();
+    const restore = installNativeCounter('getTime');
+    const initiating = fakeSocket('u-4c');
+    const sibling = fakeSocket('u-4c', { id: 'sock-u-4c-second-tab' });
+    caps.operatorPolicy.setOperatorPolicy(approvalPolicy('native:getTime'));
+    try {
+      const p = TaskExecutor.executeTool('getTime', {}, 'u-4c', initiating, PLAIN_OPTS);
+      const approval = await waitForApproval();
+      assert.strictEqual(sibling.userId, initiating.userId, 'precondition: same authenticated user');
+      assert.notStrictEqual(sibling.id, initiating.id, 'precondition: different connections');
+      assert.ok(sibling.emitted.length === 0, 'sibling socket is never asked to approve');
+
+      const crossSocket = approvalStore.resolve({
+        approvalId: approval.approvalId,
+        decision: 'approve',
+        userId: 'u-4c',
+        socketId: sibling.id,
+      });
+      assert.strictEqual(crossSocket.ok, false, 'same-user cross-socket resolve refused');
+      assert.strictEqual(crossSocket.reason, 'socket_mismatch', 'repo-convention reason');
+      assert.strictEqual(approvalStore.read(approval.approvalId).state, 'PENDING',
+        'refused resolve leaves the approval pending for the real initiator');
+
+      // The initiating socket still resolves it, and the tool runs exactly once.
+      const owner = approvalStore.resolve({
+        approvalId: approval.approvalId,
+        decision: 'approve',
+        userId: 'u-4c',
+        socketId: initiating.id,
+      });
+      assert.strictEqual(owner.ok, true, 'initiating socket still resolves');
+      const r = await p;
+      assert.strictEqual(r.success, true);
+      assert.strictEqual(toolCalls, 1, 'exactly one execution after the cross-socket attempt');
+    } finally { restore(); caps.operatorPolicy.resetOperatorPolicy(); }
+  });
+
+  await test('omitting the socket identity is refused, never a bypass', async () => {
+    resetEverything();
+    const restore = installNativeCounter('getTime');
+    const sock = fakeSocket('u-4c');
+    caps.operatorPolicy.setOperatorPolicy(approvalPolicy('native:getTime'));
+    try {
+      const p = TaskExecutor.executeTool('getTime', {}, 'u-4c', sock, PLAIN_OPTS);
+      const approval = await waitForApproval();
+      for (const opts of [{}, { socketId: null }, { socketId: '' }, { socketId: '   ' }, { socketId: undefined }]) {
+        const out = approvalStore.resolve({
+          approvalId: approval.approvalId,
+          decision: 'approve',
+          userId: 'u-4c',
+          ...opts,
+        });
+        assert.strictEqual(out.ok, false, `refused for ${JSON.stringify(opts)}`);
+        assert.strictEqual(out.reason, 'socket_mismatch', 'absent socket identity is a mismatch');
+      }
+      assert.strictEqual(approvalStore.read(approval.approvalId).state, 'PENDING');
+      approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4c', socketId: SOCK_U4C });
+      await p;
+      assert.strictEqual(toolCalls, 1);
+    } finally { restore(); caps.operatorPolicy.resetOperatorPolicy(); }
+  });
+
+  await test('a socket with no id cannot even raise an approval (fail-closed)', async () => {
+    resetEverything();
+    const restore = installNativeCounter('getTime');
+    const idless = fakeSocket('u-4c');
+    delete idless.id;
+    caps.operatorPolicy.setOperatorPolicy(approvalPolicy('native:getTime'));
+    try {
+      const r = await TaskExecutor.executeTool('getTime', {}, 'u-4c', idless, PLAIN_OPTS);
+      assert.strictEqual(r.success, false, 'no bindable session -> no approval');
+      assert.strictEqual(r.errorType, 'execution.not_authorized');
+      assert.match(r.authorization.reason, /no-session/);
+      assert.strictEqual(toolCalls, 0, 'never executes without a bindable session');
+      assert.strictEqual(approvalStore.list().length, 0, 'no unbound approval record is left behind');
+    } finally { restore(); caps.operatorPolicy.resetOperatorPolicy(); }
+  });
+
+  // Real transport: two concurrent connections for the SAME authenticated user.
+  await test('Socket.IO: second socket of the same user is rejected over the wire', async () => {
+    resetEverything();
+    const restore = installNativeCounter('getTime');
+    const wire = await startApprovalWire();
+    const { socketsByUser, port } = wire;
+    caps.operatorPolicy.setOperatorPolicy(approvalPolicy('native:getTime'));
+
+    const tabA = await openRawClient(port, 'u-4c');
+    const tabB = await openRawClient(port, 'u-4c');
+    try {
+      const list = await waitForSockets(socketsByUser, 'u-4c', 2);
+      assert.strictEqual(list.length, 2, 'two live connections for one user');
+      assert.notStrictEqual(list[0].id, list[1].id, 'each connection has its own server socket id');
+      const serverSocket = list[0];
+
+      const p = TaskExecutor.executeTool('getTime', {}, 'u-4c', serverSocket, PLAIN_OPTS);
+      const req = await tabA.waitForEvent('agent:approval:requested', 2000);
+      const payload = req && req[1];
+      assert.ok(payload && payload.approvalId, 'initiating tab receives the request');
+      assert.strictEqual(toolCalls, 0, 'nothing executed before approval');
+      assert.ok(
+        !(await tabB.waitForEvent('agent:approval:requested', 250).catch(() => undefined)),
+        'sibling tab is never asked to approve'
+      );
+
+      // Tab B, same user, tries to approve -> socket_mismatch, no execution.
+      const bAck = await ask(tabB, { approvalId: payload.approvalId, decision: 'approve' });
+      assert.strictEqual(bAck.ok, false, 'same-user cross-socket wire approve refused');
+      assert.strictEqual(bAck.reason, 'socket_mismatch');
+      assert.strictEqual(approvalStore.read(payload.approvalId).state, 'PENDING');
+      assert.strictEqual(toolCalls, 0, 'cross-socket attempt never executes');
+
+      // A client-supplied socketId cannot bypass the binding: claiming the
+      // initiator's id from the sibling socket is still refused.
+      const forged = await ask(tabB, {
+        approvalId: payload.approvalId,
+        decision: 'approve',
+        socketId: list[0].id,
+      });
+      assert.strictEqual(forged.ok, false, 'forged payload socketId is ignored, not honoured');
+      assert.strictEqual(forged.reason, 'socket_mismatch');
+      assert.strictEqual(toolCalls, 0);
+
+      // Tab A approves; its own forged socketId field is likewise ignored.
+      const aAck = await ask(tabA, {
+        approvalId: payload.approvalId,
+        decision: 'approve',
+        socketId: 'attacker-controlled-value',
+      });
+      assert.strictEqual(aAck.ok, true, 'initiating tab resolves regardless of payload socketId');
+      const r = await p;
+      assert.strictEqual(r.success, true, 'legitimate flow still executes');
+      assert.strictEqual(toolCalls, 1, 'exactly one execution');
+
+      // Duplicate from the sibling socket cannot re-open a settled record.
+      const dup = await ask(tabB, { approvalId: payload.approvalId, decision: 'approve' });
+      assert.strictEqual(dup.ok, false);
+      assert.strictEqual(dup.reason, 'socket_mismatch', 'socket check precedes the terminal-state check');
+      assert.strictEqual(toolCalls, 1, 'still exactly one execution');
+    } finally {
+      restore();
+      caps.operatorPolicy.resetOperatorPolicy();
+      tabA.close();
+      tabB.close();
+      await wire.close();
+    }
+  });
+
+  await test('Socket.IO: a reconnecting tab cannot resolve its pre-reconnect approval', async () => {
+    resetEverything();
+    const restore = installNativeCounter('getTime');
+    const wire = await startApprovalWire();
+    const { socketsByUser, port } = wire;
+    caps.operatorPolicy.setOperatorPolicy(approvalPolicy('native:getTime'));
+
+    const before = await openRawClient(port, 'u-4c');
+    let after = null;
+    try {
+      const list = await waitForSockets(socketsByUser, 'u-4c', 1);
+      const serverSocket = list[0];
+      const oldSocketId = serverSocket.id;
+
+      const p = TaskExecutor.executeTool('getTime', {}, 'u-4c', serverSocket,
+        { ...PLAIN_OPTS, approvalTtlMs: 1500 });
+      const req = await before.waitForEvent('agent:approval:requested', 2000);
+      const payload = req && req[1];
+      assert.ok(payload && payload.approvalId);
+
+      // Documented reconnect semantics: the connection is replaced, so the new
+      // socket id can never be the one that was asked.
+      before.close();
+      for (let i = 0; i < 100 && (socketsByUser['u-4c'] || []).length > 0; i += 1) await tick(10);
+      assert.strictEqual((socketsByUser['u-4c'] || []).length, 0, 'replaced connection is deregistered');
+      after = await openRawClient(port, 'u-4c');
+      const list2 = await waitForSockets(socketsByUser, 'u-4c', 1);
+      const newSocketId = list2[list2.length - 1].id;
+      assert.notStrictEqual(newSocketId, oldSocketId, 'reconnect mints a new socket id');
+      assert.strictEqual(approvalStore.read(payload.approvalId).state, 'PENDING',
+        'the approval is still pending when the replacement tab looks at it');
+
+      const reconnectAck = await ask(after, { approvalId: payload.approvalId, decision: 'approve' });
+      assert.strictEqual(reconnectAck.ok, false, 'post-reconnect socket cannot resolve the old approval');
+      assert.strictEqual(reconnectAck.reason, 'socket_mismatch');
+      assert.strictEqual(toolCalls, 0, 'no side effect from the rejected reconnect attempt');
+
+      // Fails closed: the request dies at its own TTL instead of executing.
+      const r = await p;
+      assert.strictEqual(r.success, false, 'a mid-prompt reconnect never executes the tool');
+      assert.strictEqual(r.errorType, 'execution.not_authorized');
+      assert.strictEqual(r.authorization.approvalState, 'EXPIRED');
+      assert.strictEqual(toolCalls, 0, 'still no side effect after the TTL');
+    } finally {
+      restore();
+      caps.operatorPolicy.resetOperatorPolicy();
+      before.close();
+      if (after) after.close();
+      await wire.close();
     }
   });
 
@@ -795,11 +986,72 @@ const main = async () => {
   if (fail > 0) process.exitCode = 1;
 };
 
+// ---- Socket.IO approval server replica (real transport, real store) ----------
+// A faithful copy of the `agent:approval:resolve` wiring in server/index.js:
+// identity comes from the AUTHENTICATED server socket only, never from the
+// payload. Multiple connections per uid are tracked in a list because P0 #2 is
+// precisely about two sockets of the SAME user.
+const startApprovalWire = async () => {
+  const httpServer = http.createServer();
+  const io = new Server(httpServer);
+  io.use((socket, next) => {
+    socket.userId = String(socket.handshake.query.uid || 'u-4c');
+    next();
+  });
+  const socketsByUser = {};
+  io.on('connection', (socket) => {
+    (socketsByUser[socket.userId] = socketsByUser[socket.userId] || []).push(socket);
+    socket.on('disconnect', () => {
+      const list = socketsByUser[socket.userId];
+      if (!list) return;
+      const i = list.indexOf(socket);
+      if (i !== -1) list.splice(i, 1);
+    });
+    socket.on('agent:approval:resolve', async (data, ack) => {
+      const out = approvalStore.resolve({
+        approvalId: data && data.approvalId,
+        decision: data && data.decision,
+        userId: socket.userId,
+        // P0 #2: the authenticated server socket id, never `data.socketId`.
+        socketId: socket.id,
+      });
+      if (typeof ack === 'function') ack(out);
+    });
+  });
+  await new Promise((r) => httpServer.listen(0, r));
+  return {
+    io,
+    httpServer,
+    port: httpServer.address().port,
+    socketsByUser,
+    close: async () => {
+      for (const list of Object.values(socketsByUser)) list.length = 0;
+      io.close();
+      await new Promise((r) => httpServer.close(r));
+    },
+  };
+};
+
+const waitForSockets = async (socketsByUser, uid, n = 1) => {
+  for (let attempts = 0; attempts < 100; attempts += 1) {
+    if ((socketsByUser[uid] || []).length >= n) return socketsByUser[uid];
+    await tick(10);
+  }
+  throw new Error(`server socket(s) for ${uid} never arrived`);
+};
+
+const ask = (client, payload) =>
+  new Promise((resolve) => {
+    client.send('agent:approval:resolve', payload, (...args) => resolve(args[0]));
+  });
+
 // ---- minimal raw engine.io/socket.io v4 WebSocket client (Node >= 22) ------
 const openRawClient = async (port, uid) => {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/socket.io/?EIO=4&transport=websocket&uid=${encodeURIComponent(uid)}`);
   const events = [];
   const waiters = [];
+  const acks = new Map();
+  let ackSeq = 0;
   let connectedResolve;
   let connectedReject;
   const connected = new Promise((res, rej) => { connectedResolve = res; connectedReject = rej; });
@@ -824,6 +1076,19 @@ const openRawClient = async (port, uid) => {
           connectedResolve();
           continue;
         }
+        if (inner.startsWith('3')) {
+          // ACK packet: '3<ackId>[args...]'. Lets a test assert the exact
+          // server-side reason (e.g. socket_mismatch) that a real client sees.
+          const rest = inner.slice(1);
+          const bracket = rest.indexOf('[');
+          if (bracket === -1) continue;
+          const ackId = rest.slice(0, bracket);
+          let args = [];
+          try { args = JSON.parse(rest.slice(bracket)); } catch { continue; }
+          const pendingAck = acks.get(ackId);
+          if (pendingAck) { acks.delete(ackId); pendingAck(...args); }
+          continue;
+        }
         if (inner.startsWith('2')) {
           let parsed;
           try { parsed = JSON.parse(inner.slice(1)); } catch { continue; }
@@ -843,8 +1108,17 @@ const openRawClient = async (port, uid) => {
   return {
     connected,
     events,
-    send(event, payload) {
-      try { ws.send(`42${JSON.stringify([event, payload])}`); } catch { /* closing */ }
+    send(event, payload, ack) {
+      try {
+        if (typeof ack === 'function') {
+          ackSeq += 1;
+          const ackId = String(ackSeq);
+          acks.set(ackId, ack);
+          ws.send(`42${ackId}${JSON.stringify([event, payload])}`);
+          return;
+        }
+        ws.send(`42${JSON.stringify([event, payload])}`);
+      } catch { /* closing */ }
     },
     async flushSend(ms = 100) {
       await new Promise((r) => setTimeout(r, ms));

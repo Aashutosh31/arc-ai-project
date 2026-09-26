@@ -1,5 +1,13 @@
 const clientManager = require('./clientManager');
 
+// Lazy reference: this provider is loaded by server/index, while TaskExecutor
+// pulls in tools/index -> sendWhatsAppMessage -> clientManager. Resolving the
+// executor only at call time keeps the require graph acyclic regardless of
+// boot order and guarantees every WhatsApp side effect enters the single
+// governed TaskExecutor boundary (authorization, approval, idempotency,
+// execution envelope, cancellation, observability).
+const getTaskExecutor = () => require('../../services/TaskExecutor');
+
 const init = (io) => {
     if (!io) return;
 
@@ -81,9 +89,22 @@ const init = (io) => {
         socket.on('whatsapp:send', async (data, cb) => {
             try {
                 const userId = socket.userId;
+                if (!userId) throw new Error('Missing authenticated user for WhatsApp send');
                 const { recipientName, message } = data || {};
                 if (!recipientName || !message) throw new Error('Missing recipientName or message');
-                const result = await clientManager.sendMessage(userId, recipientName, message);
+
+                // Governed side effect: route through TaskExecutor so the
+                // capability is authorization-checked, approval-gated when
+                // required, idempotency-guarded, and observable exactly like
+                // the model-invoked sendWhatsAppMessage tool. Direct
+                // clientManager.sendMessage would bypass all of that.
+                const result = await getTaskExecutor().executeTool(
+                    'sendWhatsAppMessage',
+                    { recipientName, message },
+                    userId,
+                    socket,
+                    { source: 'whatsapp_socket' }
+                );
 
                 if (!result?.success) {
                     const eventName = result?.status === 'ambiguous' ? 'whatsapp:recipient_ambiguous' : 'whatsapp:recipient_not_found';

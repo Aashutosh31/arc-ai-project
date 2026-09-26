@@ -173,7 +173,8 @@ class TaskPlanner {
             socket,
             signal,
             retryCount: step.retryCount || 0,
-            workspaceId: exec.workspaceId
+            workspaceId: exec.workspaceId,
+            conversationId: options.conversationId || null
           });
 
           if (recovery?.classification?.type === 'blocked' || recovery?.blocked) {
@@ -291,7 +292,8 @@ class TaskPlanner {
           socket,
           signal,
           retryCount: step.retryCount || 0,
-          workspaceId: exec.workspaceId
+          workspaceId: exec.workspaceId,
+          conversationId: options.conversationId || null
         });
 
         if (isCancelled()) {

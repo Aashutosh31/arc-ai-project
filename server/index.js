@@ -14,6 +14,7 @@ const memoryRoutes = require('./routes/memory.js');
 const workspaceRoutes = require('./routes/workspaces.js');
 const voiceRoutes = require('./routes/voice.js');
 const AIService = require('./services/AIService.js'); 
+const { resolveSocketConversation } = require('./lib/conversationAccess');
 const operatorPolicySource = require('./lib/capabilities/operatorPolicySource');
 
 const app = express();
@@ -140,6 +141,16 @@ io.on('connection', (socket) => {
     // approval record; approvalId/executionId/workspaceId/capabilityId were
     // bound server-side at request time and can never be re-targeted from the
     // client. Exactly one terminal decision ever wins (approvalStore CAS).
+    //
+    // P0 #2 — same-user cross-socket isolation: the record also binds to the
+    // INITIATING connection, so `socket.id` is passed from THIS authenticated
+    // server socket. A sibling socket of the same user (a second tab) is
+    // refused with `socket_mismatch`; one account may not authorize a
+    // consequential action raised by a different session. `data.socketId` (or
+    // any other client-supplied socket identity) is deliberately NOT read, so
+    // a forged payload field cannot re-target or bypass the binding. The ack is
+    // the 4D contract and stays uniform; the reason is repo-convention
+    // `socket_mismatch`.
     socket.on('agent:approval:resolve', async (data, ack) => {
         let result;
         try {
@@ -148,6 +159,7 @@ io.on('connection', (socket) => {
                 approvalId: data && data.approvalId,
                 decision: data && data.decision,
                 userId: socket.userId,
+                socketId: socket.id,
             });
         } catch (err) {
             console.error('[Approval] resolve error:', err?.message || err);
@@ -218,6 +230,37 @@ io.on('connection', (socket) => {
         const userId = socket.userId;
         socket.isInterrupted = false; 
 
+        // P0 conversation ownership boundary (slice 4F). The client asserts
+        // conversationId; the AUTHENTICATED socket actor is the authority.
+        // Resolved through the ONE shared resolver (lib/conversationAccess.js)
+        // that the REST conversation controller also uses, so both transports
+        // enforce identical ownership semantics. Malformed, nonexistent,
+        // cross-actor and wrong-workspace ids are all denied identically —
+        // nothing here reveals whether another user's conversation exists.
+        // Runs BEFORE the preemption abort so a forged turn can never cancel
+        // the caller's own in-flight generation.
+        const access = await resolveSocketConversation({
+            socket,
+            conversationId,
+            workspaceId: socket.activeWorkspaceId || null,
+        });
+        if (!access.ok) {
+            console.warn(`[Conversation:Access] denied turn for user ${userId}: ${access.code}.`);
+            // Existing safe rejection channel: no credits charged, no provider
+            // call, no message/working-state write. The terminal TTS chunk
+            // closes the client stream exactly like the credit-failure path.
+            if (socket) {
+                socket.emit('bot_error', access.error);
+                socket.emit('ai:tts:response:chunk', {
+                    chunk: '',
+                    displayText: '',
+                    isFinal: true,
+                });
+            }
+            return;
+        }
+        const ownedConversationId = access.conversationId;
+
         // T2 marker: the finalized transcript was accepted and generation
         // about to start (STT loop closed → LLM path in processQuery).
         try { console.log('[VoiceLatency] stt.final.accepted at=%d', Date.now()); } catch { /* telemetry must never break */ }
@@ -249,7 +292,9 @@ io.on('connection', (socket) => {
         console.log(`🧠 Processing command from user ${userId} (workspace: ${effectiveWorkspaceId}): "${command}"`);
         // `language` is the per-turn STT auto-detected language (Sarvam), if any.
         // It only shapes the server TTS voice for THIS reply — never stored.
-        await AIService.processQuery(userId, command, socket, image, document, conversationId, effectiveWorkspaceId, language);
+        // `ownedConversationId` was verified against socket.userId above, so no
+        // downstream query can address a conversation this actor does not own.
+        await AIService.processQuery(userId, command, socket, image, document, ownedConversationId, effectiveWorkspaceId, language);
     });
 
     socket.on('disconnect', () => {

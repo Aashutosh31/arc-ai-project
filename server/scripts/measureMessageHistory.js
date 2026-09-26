@@ -1,6 +1,24 @@
 /* Stage 1 staging tooling — message history measurement + seed.
  *
- * Requires a reachable MongoDB:  MONGO_URI=mongodb://... node scripts/measureMessageHistory.js <cmd>
+ * MONGO TEST SAFETY
+ *   This script no longer reads MONGO_URI or DATABASE_URL. Its target must be
+ *   designated explicitly through tests/helpers/disposableMongo.js, and it can
+ *   only ever reach a generated `arc_ai_test_<runId>` database on an
+ *   allowlisted host. The default command is read-only, writes require an
+ *   explicit opt-in, and cleanup is scoped to this run's own data.
+ *
+ * Safe invocation (all writes opt in, none of them can reach the app database):
+ *   export MONGO_TEST_URI=mongodb://127.0.0.1:27017
+ *   export MONGO_TEST_EXPECTED_HOST=127.0.0.1
+ *   export MONGO_TEST_DISPOSABLE=1
+ *   export RUN_MONGO_INTEGRATION=1
+ *   export MONGO_MEASURE_ALLOW_DESTRUCTIVE=1
+ *   node scripts/measureMessageHistory.js --seed 500      # prints runId + db
+ *   export MONGO_TEST_RUN_ID=<runId> MONGO_TEST_DB_NAME=<db>
+ *   node scripts/measureMessageHistory.js --measure <conversationId>
+ *   node scripts/measureMessageHistory.js --cleanup <conversationId>
+ *
+ *   --measure needs no opt-in: it only reads.
  *
  *   node scripts/measureMessageHistory.js --seed 500
  *     Creates scratch conversation (userId 'staging_probe') with N messages
@@ -24,11 +42,20 @@
 
 const mongoose = require('mongoose');
 
+const mongoSafety = require('../tests/helpers/disposableMongo');
+
+const PROBE_OWNER = 'staging_probe';
+
 const usage = () => {
   console.log('Usage:');
-  console.log('  --seed <20|100|500>          create scratch conversation');
-  console.log('  --measure <conversationId>   measure legacy vs cursor + integrity');
-  console.log('  --cleanup <conversationId>   delete scratch data');
+  console.log('  --seed <20|100|500>          create a scratch conversation in a NEW disposable database');
+  console.log('  --measure <conversationId>   measure legacy vs cursor + integrity (read-only)');
+  console.log('  --cleanup <conversationId>   delete this run\'s scratch data');
+  console.log('');
+  console.log('Required environment (no MONGO_URI / DATABASE_URL fallback exists):');
+  console.log(mongoSafety.describeRequiredEnv());
+  console.log('  MONGO_MEASURE_ALLOW_DESTRUCTIVE=1   required by --seed and --cleanup');
+  console.log('  MONGO_TEST_RUN_ID / MONGO_TEST_DB_NAME   reuse the database across invocations');
   process.exit(1);
 };
 
@@ -36,9 +63,10 @@ const arg = process.argv[2];
 const val = process.argv[3];
 if (!['--seed', '--measure', '--cleanup'].includes(arg)) usage();
 
-const uri = process.env.MONGO_URI || process.env.DATABASE_URL;
-if (!uri || uri.includes('your_mongodb')) {
-  console.error('Missing MONGO_URI (or DATABASE_URL). Staging measurement requires a reachable MongoDB.');
+// Read-only is the default. Anything that writes or deletes must be opted into.
+const destructive = arg !== '--measure';
+if (destructive && process.env.MONGO_MEASURE_ALLOW_DESTRUCTIVE !== '1') {
+  console.error(`Refusing ${arg}: it mutates a database. Set MONGO_MEASURE_ALLOW_DESTRUCTIVE=1 to opt in.`);
   process.exit(2);
 }
 
@@ -148,21 +176,46 @@ async function measure(conversationId) {
   console.log('STAGE 1 MEASUREMENT OK');
 }
 
-async function cleanup(conversationId) {
+async function cleanup(ctx, conversationId) {
   const oid = new mongoose.Types.ObjectId(conversationId);
-  const dm = await Message.deleteMany({ conversationId: oid });
-  const dc = await Conversation.deleteMany({ _id: oid, userId: 'staging_probe' });
+  // Only this run's own scratch conversation may be removed. The previous
+  // version deleted every message for the id with no ownership check at all.
+  const conv = await Conversation.findOne({ _id: oid, userId: PROBE_OWNER }).lean();
+  if (!conv) {
+    throw new Error(`no scratch conversation ${conversationId} owned by "${PROBE_OWNER}" — refusing to delete anything`);
+  }
+  const dm = await mongoSafety.deleteDisposableDocuments(ctx, 'messages', { conversationId: oid });
+  const dc = await mongoSafety.deleteDisposableDocuments(ctx, 'conversations', { _id: oid, userId: PROBE_OWNER });
   console.log(`deleted ${dm.deletedCount} messages, ${dc.deletedCount} conversations`);
 }
 
 (async () => {
-  await mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 });
+  // --seed creates a fresh, marker-owned disposable database. Every other
+  // command attaches to the database named by MONGO_TEST_RUN_ID /
+  // MONGO_TEST_DB_NAME, and the guard refuses unless that database's ownership
+  // marker matches this run.
+  const ctx = arg === '--seed'
+    ? await mongoSafety.openDisposableMongo({
+      allowCollections: [mongoSafety.ANY_RUN_COLLECTION],
+      connectOptions: { serverSelectionTimeoutMS: 8000 },
+    })
+    : await mongoSafety.attachDisposableMongo({
+      allowCollections: [mongoSafety.ANY_RUN_COLLECTION],
+      connectOptions: { serverSelectionTimeoutMS: 8000 },
+    });
+  console.log(mongoSafety.safeTargetSummary(ctx.plan));
+  console.log(`runId: ${ctx.runId}`);
   try {
-    if (arg === '--seed') await seed(val);
-    else if (arg === '--measure') await measure(val);
-    else await cleanup(val);
+    if (arg === '--seed') {
+      console.log(`re-run with MONGO_TEST_RUN_ID=${ctx.runId} MONGO_TEST_DB_NAME=${ctx.dbName}`);
+      await seed(val);
+    } else if (arg === '--measure') {
+      await measure(val);
+    } else {
+      await cleanup(ctx, val);
+    }
   } finally {
-    await mongoose.connection.close();
+    await mongoSafety.closeDisposableMongo(ctx);
   }
 })().catch((err) => {
   console.error(`failed: ${err.message}`);

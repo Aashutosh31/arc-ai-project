@@ -8,9 +8,12 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test": "npm run test:approvals && npm run test:execution-panel && npm run test:history && npm run test:mcp-oauth-ui && npm run test:voice-state && npm run test:voice",
+    "test:approvals": "node tests/approvalUiState.test.mjs && node tests/approvalCardSource.test.mjs",
+    "test:execution-panel": "node tests/executionPanel.test.mjs",
     "test:history": "node tests/historyLoader.test.mjs",
     "test:mcp-oauth-ui": "node tests/mcpOAuthUiState.test.mjs",
-    "test:approvals": "node tests/approvalUiState.test.mjs && node tests/approvalCardSource.test.mjs",
+    "test:voice-state": "node tests/voiceClarify.test.mjs && node tests/voiceOwnership.test.mjs && node tests/voiceSttClient.test.mjs",
     "test:voice": "node tests/voiceRuntime.test.mjs && node scripts/testVoiceMachine.js"
   },
   "dependencies": {

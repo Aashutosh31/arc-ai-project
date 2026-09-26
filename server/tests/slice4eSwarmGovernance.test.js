@@ -213,6 +213,8 @@ const resetEverything = () => {
 // ---- helpers -----------------------------------------------------------------
 
 const fakeSocket = (uid, opts = {}) => ({
+  // P0 #2: real connections always carry a server-minted socket id.
+  id: opts.id || `sock-${uid}`,
   userId: uid,
   emitted: [],
   isInterrupted: Boolean(opts.isInterrupted),
@@ -438,7 +440,7 @@ await test('nested approval follows the 4C gate: same session, single record, ap
   const pending = approvalStore.list().filter((a) => a.capabilityId === 'native:webSearch');
   assert.strictEqual(pending.length, 1, 'exactly one approval record for the nested request');
   assert.strictEqual(calls.web, 0, 'no nested execution before approval');
-  const out = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-swarm' });
+  const out = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-swarm', socketId: 'sock-u-swarm' });
   assert.strictEqual(out.ok, true);
   const r = await p;
   assert.strictEqual(calls.web, 1, 'approved nested webSearch executes exactly once');
@@ -457,7 +459,7 @@ await test('denying the nested approval blocks the inner tool via the documented
     'single nested approval record; no unrelated approval state');
   assert.strictEqual(pending.filter((a) => a.capabilityId === 'native:scrapeWebsite').length, 0,
     'no recursive/unrelated approval requested');
-  const out = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'deny', userId: 'u-swarm' });
+  const out = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'deny', userId: 'u-swarm', socketId: 'sock-u-swarm' });
   assert.strictEqual(out.ok, true);
   const r = await p;
   assert.strictEqual(calls.web, 0, 'denied nested webSearch never executes');
@@ -486,7 +488,7 @@ await test('nested approval TOCTOU: authority revoked while pending blocks befor
 
   caps.operatorPolicy.setOperatorPolicy(denyPolicy('native:webSearch'));
 
-  const out = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-swarm' });
+  const out = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-swarm', socketId: 'sock-u-swarm' });
   assert.strictEqual(out.ok, true);
   const r = await p;
   assert.strictEqual(calls.web, 0, 'TOCTOU: revoked-after-approval nested webSearch must not execute');

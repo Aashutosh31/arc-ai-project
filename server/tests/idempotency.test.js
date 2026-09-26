@@ -618,6 +618,61 @@ const main = async () => {
     }
   });
 
+  // ---- retention / bounded growth ----
+  // Without a TTL the durable IdempotencyRecord collection grows without bound:
+  // every logical action ever executed stays forever. A TTL on `updatedAt`
+  // would NOT work -- that field is Mixed (numeric ms in the fallback), and the
+  // TTL monitor ignores non-Date values -- so the schema carries a dedicated
+  // expiresAt Date.
+  await test('durable record declares a TTL index so the collection is bounded', () => {
+    const Model = require('../models/IdempotencyRecord');
+    const indexes = Model.schema.indexes();
+    const ttl = indexes.find(([spec]) => spec.expiresAt === 1);
+    assert.ok(ttl, 'expected an index on expiresAt');
+    assert.strictEqual(ttl[1].expireAfterSeconds, 0, 'TTL must expire AT expiresAt');
+    const uniq = indexes.find(([spec]) => spec.key === 1);
+    assert.ok(uniq && uniq[1].unique === true, 'unique key index must survive');
+  });
+
+  await test('reserved record carries a future expiresAt inside the dedup window', async () => {
+    store._reset();
+    const before = Date.now();
+    const r = await store.reserve({ key: 'ttl-probe-1', capabilityId: 'getTime' });
+    assert.strictEqual(r.reserved, true);
+    const rec = await store.getRecord('ttl-probe-1');
+    assert.ok(rec.expiresAt, 'record must carry expiresAt');
+    const at = rec.expiresAt instanceof Date ? rec.expiresAt.getTime() : new Date(rec.expiresAt).getTime();
+    assert.ok(Number.isFinite(at), 'expiresAt must be a resolvable instant');
+    assert.ok(at > before, 'expiresAt must be in the future');
+    assert.ok(
+      at <= before + store.DEDUP_RETENTION_MS + 1000,
+      'expiresAt must not exceed the retention window',
+    );
+  });
+
+  await test('settling refreshes the window from completion, not from start', async () => {
+    store._reset();
+    await store.reserve({ key: 'ttl-probe-2', capabilityId: 'getTime' });
+    const atReserve = new Date((await store.getRecord('ttl-probe-2')).expiresAt).getTime();
+    await new Promise((r) => setTimeout(r, 25));
+    await store.settle('ttl-probe-2', { status: 'SUCCEEDED' });
+    const atSettle = new Date((await store.getRecord('ttl-probe-2')).expiresAt).getTime();
+    assert.ok(
+      atSettle > atReserve,
+      'a long-running action must earn a full window once it completes',
+    );
+  });
+
+  await test('dedup still holds within the retention window', async () => {
+    store._reset();
+    const a = await store.reserve({ key: 'ttl-probe-3', capabilityId: 'getTime' });
+    assert.strictEqual(a.reserved, true);
+    await store.settle('ttl-probe-3', { status: 'SUCCEEDED' });
+    const b = await store.reserve({ key: 'ttl-probe-3', capabilityId: 'getTime' });
+    assert.strictEqual(b.reserved, false, 'must still deduplicate');
+    assert.strictEqual(b.duplicate, true);
+  });
+
   console.log('==========================================================');
   console.log(`Result: ${pass} pass, ${fail} fail`);
   if (fail > 0) process.exitCode = 1;

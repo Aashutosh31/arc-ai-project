@@ -138,6 +138,14 @@ const SEMANTIC_MAX = 320;
 const FIRST_TARGET_MIN = 40;
 const FIRST_TARGET_MAX = 150;
 
+// A complete sentence shorter than this many words is never synthesized on its
+// own: a one- or two-word audio segment is an audible stutter and wastes a TTS
+// round-trip. It is held and merged with the next sentence, and flush() speaks
+// it if the turn actually ended there.
+const FIRST_SOLO_MIN_WORDS = 3;
+
+const countWords = (text) => String(text || '').trim().split(/\s+/).filter(Boolean).length;
+
 // Strong terminal punctuation across supported scripts (Latin + Devanagari
 // danda/double-danda + Arabic question mark). Units must END with one of
 // these (plus optional closing quotes) to be first-chunk eligible.
@@ -243,12 +251,18 @@ class SemanticTtsBuffer {
   // Fast path: first complete sentence available. Rule ordering for a live
   // LLM stream (the buffered/flush path shares this code but only sees whole
   // multi-sentence responses):
-  //   1. Single complete sentence in the buffer -> emit it NOW. Streams often
-  //      deliver a short answer as fragment deltas ("Yes," / " I can hear
-  //      you!"); requiring a second unit had stalled these until flush().
-  //      We only ever stop a sentence at a strong terminal, so this is provably
-  //      a finished utterance and cannot be silently partial.
-  //   2. Multiple units: short (< FIRST_TARGET_MIN) complete openers merge
+  //   1. Single complete sentence, long enough to speak on its own -> emit it
+  //      NOW. Streams often deliver a short answer as fragment deltas
+  //      ("Yes," / " I can hear you!"); requiring a second unit had stalled
+  //      these until flush(). We only ever stop a sentence at a strong
+  //      terminal, so this is provably a finished utterance and cannot be
+  //      silently partial.
+  //   2. Single complete sentence that is TOO SHORT to speak alone -> hold it
+  //      and merge forward. Synthesizing a one- or two-word segment on its own
+  //      is an audible stutter (the WAV/worklet race this class of guard
+  //      exists to prevent). flush() still speaks it if the turn really ended,
+  //      so a short final answer is never lost — it is only spoken once.
+  //   3. Multiple units: short (< FIRST_TARGET_MIN) complete openers merge
   //      forward ONLY when the next sentence is already complete and the pair
   //      stays bounded; otherwise the known-complete opener is emitted right
   //      away (a growing next sentence must not delay the first speech).
@@ -258,6 +272,7 @@ class SemanticTtsBuffer {
     const [first, second, ...rest] = units;
     if (!STRONG_TERMINAL_RE.test(first)) return null;
     if (units.length === 1) {
+      if (first.length < FIRST_TARGET_MIN) return null;
       this.buffer = '';
       this.emittedFirst = true;
       return first;
@@ -273,9 +288,13 @@ class SemanticTtsBuffer {
       this.emittedFirst = true;
       return merged;
     }
-    // Short opener without a mergeable partner: speak the known-complete
-    // first unit now; the streaming second unit stays buffered as steady
-    // state and will join the next chunk.
+    // Short opener whose next sentence has not completed yet. Speaking a lonely
+    // one- or two-word opener is an audible stutter, so below
+    // FIRST_SOLO_MIN_WORDS the opener is held in the buffer and merged forward
+    // as soon as the next sentence lands (flush() still speaks it if the turn
+    // really ended). Anything longer is already speakable, and it goes out now
+    // so a growing next sentence cannot delay the first audio.
+    if (countWords(first) < FIRST_SOLO_MIN_WORDS) return null;
     this.buffer = [second, ...rest].join(' ');
     this.emittedFirst = true;
     return first;
@@ -332,5 +351,6 @@ module.exports = {
   SEMANTIC_MAX,
   FIRST_TARGET_MIN,
   FIRST_TARGET_MAX,
+  FIRST_SOLO_MIN_WORDS,
   STRONG_TERMINAL_RE,
 };

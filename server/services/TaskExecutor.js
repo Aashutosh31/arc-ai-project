@@ -374,12 +374,20 @@ class TaskExecutor {
 
         // Part 3/10 — approval can only be requested for an authenticated
         // initiating session, and the record binds to the socket-authenticated
-        // identity (never a client-asserted userId).
+        // identity (never a client-asserted userId). P0 #2: the record also
+        // binds to the initiating CONNECTION (`socket.id`, minted by the
+        // Socket.IO handshake), so a sibling socket of the same user cannot
+        // resolve it. A socket without an id cannot establish a binding and
+        // fails closed here.
+        const socketId = socket && typeof socket.id === 'string' && socket.id.trim() !== ''
+            ? socket.id
+            : null;
         const hasSession =
             socket &&
             typeof socket.emit === 'function' &&
             socket.userId !== undefined &&
-            String(socket.userId) === String(userId);
+            String(socket.userId) === String(userId) &&
+            socketId !== null;
 
         if (!hasSession) {
             return {
@@ -398,6 +406,7 @@ class TaskExecutor {
                 userId,
                 workspaceId,
                 capabilityId: metadata.capabilityId,
+                initiatingSocketId: socketId,
                 source: metadata.source,
                 toolName,
                 risk: metadata.risk,

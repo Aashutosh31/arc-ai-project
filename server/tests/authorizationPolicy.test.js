@@ -127,7 +127,7 @@ await test('reversible action is auto-allowed by default', () => {
   assert.strictEqual(v.reason, REASON.AUTO_REVERSIBLE);
 });
 
-await test('consequential action requires approval (verdict only in 4A)', () => {
+await test('consequential action requires approval (allowed=false under enforce)', () => {
   const v = authorizeCapability(nativeCap('sendEmail', 'consequential', 'high'), ctx());
   assert.strictEqual(v.requiresApproval, true);
   assert.strictEqual(v.state, VERDICT_STATE.APPROVAL_REQUIRED);
@@ -234,6 +234,34 @@ await test('specified native classifications match implementations', () => {
     assert.ok(cap, `native tool ${name} missing from discovery`);
     assert.strictEqual(`${cap.name}:${cap.scope}`, `${name}:${scope}`);
     assert.strictEqual(`${cap.name}:${cap.risk}`, `${name}:${risk}`);
+  }
+});
+
+await test('every consequential/high native is guest-denied by the seeded operator base', () => {
+  // Derived, not hardcoded: walk the LIVE registry and the LIVE
+  // classification so a newly registered irreversible tool cannot silently
+  // become guest-executable by being omitted from GUEST_DENY_DEFAULTS.
+  const { GUEST_DENY_DEFAULTS } = require('../lib/capabilities/operatorPolicy');
+  const native = caps.discoverNative();
+  const highBlast = native.filter((c) => c.scope === 'consequential' && c.risk === 'high');
+  assert.ok(
+    highBlast.length >= 3,
+    `expected >= 3 consequential/high natives, got ${highBlast.length}`,
+  );
+  const missing = highBlast.filter((c) => !GUEST_DENY_DEFAULTS.includes(c.id)).map((c) => c.id);
+  assert.deepStrictEqual(missing, [], `guest-executable high-blast natives: ${missing.join(', ')}`);
+
+  // And the deny set must be live-registry ids only (no stale/unknown entries).
+  const liveIds = new Set(native.map((c) => c.id));
+  const unknown = GUEST_DENY_DEFAULTS.filter((id) => !liveIds.has(id));
+  assert.deepStrictEqual(unknown, [], `stale guest-deny ids: ${unknown.join(', ')}`);
+
+  // End-to-end: a guest is denied at the engine for every high-blast native.
+  const guest = ctx({ isGuest: true });
+  for (const cap of highBlast) {
+    const v = authorizeCapability(cap, guest, { policy: require('../lib/capabilities/operatorPolicy').SEEDED_BASE });
+    assert.strictEqual(v.allowed, false, `guest allowed ${cap.id}`);
+    assert.strictEqual(v.reason, REASON.GUEST_DENIED, `guest ${cap.id} reason ${v.reason}`);
   }
 });
 

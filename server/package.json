@@ -9,6 +9,10 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "test": "node tests/runAll.js",
+    "test:phase1": "node tests/runAll.js --group phase1",
+    "test:mongo": "node tests/runAll.js --mongo",
+    "test:live": "node tests/runAll.js --include-live",
     "test:voice": "node tests/voiceRuntime.test.js",
     "test:tts": "node tests/ttsService.test.js",
     "test:sarvam": "node tests/sarvamLanguage.test.js && node tests/sarvamAudio.test.js && node tests/sarvamStt.test.js && node tests/sarvamTts.test.js && node tests/sttServiceSarvam.test.js",

@@ -3,6 +3,7 @@ const { searchWorkspace, buildMemoryContext } = require('./workspaceSearchServic
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const UserFact = require('../models/UserFact');
+const { isConversationOwned, ownedConversationFilter } = require('../lib/conversationAccess');
 
 /**
  * WorkspaceContextManager
@@ -20,7 +21,9 @@ class WorkspaceContextManager {
   async inferActiveProject(userId, conversationId = null, workspaceId = null) {
     try {
       if (conversationId) {
-        const query = { _id: conversationId };
+        // Owner-scoped: a client-asserted conversationId can never surface
+        // another actor's project title.
+        const query = ownedConversationFilter(userId, conversationId);
         if (workspaceId) query.workspaceId = workspaceId;
         const conv = await Conversation.findOne(query).select('title').lean();
         if (conv && conv.title && conv.title !== 'New Conversation') return conv.title;
@@ -40,6 +43,10 @@ class WorkspaceContextManager {
   async getShortTermContext(userId, conversationId, workspaceId = null, limit = 6) {
     if (!conversationId) return [];
     try {
+      // Message rows carry no owner, so ownership is proven against the
+      // Conversation first: a foreign id yields NO snippets, which is what
+      // keeps another actor's turns out of the RAG/short-term context.
+      if (!(await isConversationOwned(userId, conversationId))) return [];
       const msgQuery = { conversationId };
       if (workspaceId) msgQuery.workspaceId = workspaceId;
       const messages = await Message.find(msgQuery).sort({ createdAt: -1 }).limit(limit).lean();

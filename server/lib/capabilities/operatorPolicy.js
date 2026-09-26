@@ -27,11 +27,17 @@ const { DEFAULT_POLICY } = require('./authorizationPolicy');
 // deployment is conservative. Ids verified against the live native registry
 // (server/lib/capabilities/discover.js: "native:<schema function name>").
 // The frozen DEFAULT_POLICY is untouched — this base is separate.
+//
+// Every consequential/high native MUST appear here. tests/authorizationPolicy
+// .test.js derives the set from the live registry + nativeRiskFor() and fails
+// if this list drifts, so a newly registered high-blast-radius tool cannot
+// silently become guest-executable.
 const GUEST_DENY_DEFAULTS = Object.freeze([
   'native:webSearch',
   'native:scrapeWebsite',
   'native:deepResearchSwarm',
   'native:sendEmail',
+  'native:sendWhatsAppMessage',
   'native:memorize',
   'native:storeUserFact',
   'native:executeCode',

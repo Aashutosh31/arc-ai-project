@@ -164,6 +164,10 @@ function installController({ docsByConv = {}, ownedConvs = new Set() } = {}) {
   require.cache[messageModelPath] = { id: messageModelPath, filename: messageModelPath, loaded: true, exports: FakeMessage };
   require.cache[conversationModelPath] = { id: conversationModelPath, filename: conversationModelPath, loaded: true, exports: FakeConversation };
   delete require.cache[require.resolve('../controllers/conversationController')];
+  // The controller resolves ownership through the shared resolver, which
+  // holds its own reference to the Conversation model. Purge it too, so the
+  // fakes injected above are the ones the ownership query actually uses.
+  delete require.cache[require.resolve('../lib/conversationAccess')];
   return { controller: require('../controllers/conversationController'), calls };
 }
 

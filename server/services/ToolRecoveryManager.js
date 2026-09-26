@@ -125,6 +125,17 @@ class ToolRecoveryManager {
       return { type: 'validation', shouldRetry: false, shouldFallback: false, shouldReplan: true, strategy: 'replan', reason: text };
     }
 
+    // A tool that DECLARES its own failure non-retryable outranks the text
+    // heuristics below. This exists because a definitive verdict (e.g. a
+    // non-2xx upstream response) still reads as "503"/"unavailable" and would
+    // otherwise be retried byte-identically inside the same turn — for a
+    // bounded-cost retrieval that only stacks a second full timeout. The
+    // declaration is the tool's first-hand knowledge; the pattern list is a
+    // fallback for tools that say nothing.
+    if (result && result.retryable === false) {
+      return { type: 'declared_terminal', shouldRetry: false, shouldFallback: false, shouldReplan: false, strategy: 'none', reason: text };
+    }
+
     if (matchesAny(text, TRANSIENT_PATTERNS)) {
       return { type: 'transient', shouldRetry: true, shouldFallback: true, shouldReplan: false, strategy: 'retry', reason: text };
     }
@@ -143,7 +154,7 @@ class ToolRecoveryManager {
     return { type: 'unknown', shouldRetry: false, shouldFallback: false, shouldReplan: true, strategy: 'replan', reason: text };
   }
 
-  async recoverToolResult({ toolName, args = {}, result = null, error = null, userId, socket = null, signal = null, retryCount = 0, workspaceId = null }) {
+  async recoverToolResult({ toolName, args = {}, result = null, error = null, userId, socket = null, signal = null, retryCount = 0, workspaceId = null, conversationId = null }) {
     const classification = this.classifyFailure({ toolName, args, result, error });
     console.log('[ToolRecoveryManager] decision', {
       toolName,
@@ -184,7 +195,7 @@ class ToolRecoveryManager {
         });
       }
 
-      const retryResult = await TaskExecutor.executeTool(toolName, args, userId, socket, { signal, skipCreditCharge: true, workspaceId });
+      const retryResult = await TaskExecutor.executeTool(toolName, args, userId, socket, { signal, skipCreditCharge: true, workspaceId, conversationId });
       if (retryResult?.success) {
         console.log('[ToolRecoveryManager] retry success', {
           toolName,
@@ -222,7 +233,7 @@ class ToolRecoveryManager {
           { ...args, url: candidateUrl },
           userId,
           socket,
-          { signal, skipCreditCharge: true, workspaceId }
+          { signal, skipCreditCharge: true, workspaceId, conversationId }
         );
 
         if (scrapeResult?.success) {
@@ -255,7 +266,7 @@ class ToolRecoveryManager {
           { query: searchQuery },
           userId,
           socket,
-          { signal, skipCreditCharge: true, workspaceId }
+          { signal, skipCreditCharge: true, workspaceId, conversationId }
         );
 
         if (searchResult?.success) {

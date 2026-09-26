@@ -92,7 +92,9 @@ const denyPolicy = (capabilityId, reason = 'operator-revoked') => ({
   workspaceRestricted: [],
 });
 
-const fakeSocket = (uid) => ({
+const fakeSocket = (uid, opts = {}) => ({
+  // P0 #2: real connections always carry a server-minted socket id.
+  id: opts.id || `sock-${uid}`,
   userId: uid,
   emitted: [],
   emit(event, payload) {
@@ -361,7 +363,7 @@ await test('TOCTOU: authority revoked while approval pending blocks before side 
     // The operator revokes authority WHILE the human decision is pending.
     caps.operatorPolicy.setOperatorPolicy(denyPolicy('native:getTime'));
 
-    const out = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4e' });
+    const out = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4e', socketId: 'sock-u-4e' });
     assert.strictEqual(out.ok, true);
     const r = await p;
     assert.strictEqual(r.success, false, 'revoked-after-approval must not execute');
@@ -382,7 +384,7 @@ await test('approval still continues normally when authority is unchanged', asyn
     const p = TaskExecutor.executeTool('getTime', {}, 'u-4e', sock, PLAIN_OPTS);
     const approval = await waitForApproval((a) => a.capabilityId === 'native:getTime');
     assert.strictEqual(toolCalls, 0);
-    const out = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4e' });
+    const out = approvalStore.resolve({ approvalId: approval.approvalId, decision: 'approve', userId: 'u-4e', socketId: 'sock-u-4e' });
     assert.strictEqual(out.ok, true);
     const r = await p;
     assert.strictEqual(r.success, true, 'unchanged authority still executes after approval');

@@ -47,12 +47,28 @@ const idempotencyRecordSchema = new mongoose.Schema(
     duplicateCount: { type: Number, default: 0 },
     createdAt: { type: mongoose.Schema.Types.Mixed, default: 0 },
     updatedAt: { type: mongoose.Schema.Types.Mixed, default: 0 },
+    // Retention deadline for the dedup window. A dedicated Date field rather
+    // than a TTL on `updatedAt`, which is Mixed (numeric ms in the in-memory
+    // fallback) and would therefore be ignored by the TTL monitor.
+    // null = never expires (only legacy pre-TTL records are in this state).
+    expiresAt: { type: Date, default: null },
   },
   {
     versionKey: false,
   }
 );
 
+// The atomic reservation boundary. Dropped by the TTL monitor once the dedup
+// window closes, so the collection cannot grow without bound.
 idempotencyRecordSchema.index({ key: 1 }, { unique: true });
+idempotencyRecordSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+// OPERATIONAL NOTE (legacy data): records written before this TTL existed have
+// expiresAt = null, which the TTL monitor does not reap. A one-time backfill
+// (`updateMany({ expiresAt: null }, { $set: { expiresAt: <now + retention> } })`,
+// or an outright delete, which is safe because losing a dedup record only means
+// a repeat is treated as a new action) is required once on any deployment that
+// already accumulated records. Not automated here on purpose: it is a
+// production write and belongs to an operator, not to a schema migration.
 
 module.exports = mongoose.model('IdempotencyRecord', idempotencyRecordSchema);
