@@ -32,4 +32,11 @@ export default defineConfig([
       'react-refresh/only-export-components': 'off',
     },
   },
+  {
+    // Node-context files: build/test configs run under Node, not the browser.
+    files: ['vite.config.js', 'playwright.config.js', 'tests/**/*.{js,mjs}'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
 ])
