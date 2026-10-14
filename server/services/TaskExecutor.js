@@ -9,7 +9,7 @@ const {
     capabilityTypes,
     observability
 } = require('../lib/capabilities');
-const approvalStore = require('../lib/capabilities/approvalStore');
+const { getStore: getApprovalStore } = require('../lib/capabilities/redisApprovalStore');
 const idempotency = require('../lib/capabilities/idempotency');
 
 // Slice 4B: normalized failure type for an execution-time authorization
@@ -401,7 +401,8 @@ class TaskExecutor {
 
         let approval;
         try {
-            approval = approvalStore.create({
+            const store = await getApprovalStore();
+            approval = await store.create({
                 executionId: envelope.executionId,
                 userId,
                 workspaceId,
@@ -428,7 +429,8 @@ class TaskExecutor {
         // Notify ONLY the initiating session, with safe preview metadata.
         // Never args, credentials, auth data, or tool outputs.
         try {
-            socket.emit(approvalStore.EVENTS.APPROVAL_REQUESTED, {
+            const store = await getApprovalStore();
+            socket.emit(store.EVENTS.APPROVAL_REQUESTED, {
                 approvalId: approval.approvalId,
                 executionId: approval.executionId,
                 capabilityId: approval.capabilityId,
@@ -441,7 +443,8 @@ class TaskExecutor {
                 state: approval.state,
             });
         } catch (error) {
-            approvalStore.cancel({ approvalId: approval.approvalId, userId });
+            const store = await getApprovalStore();
+            await store.cancel({ approvalId: approval.approvalId, userId });
             console.error('[TaskExecutor] Approval notification failed for', toolName, ':', error?.message || error);
             return {
                 allowed: false,
@@ -455,27 +458,28 @@ class TaskExecutor {
         // WAIT for the terminal decision. The abort watch resolves first when
         // the execution is interrupted; otherwise the store's own TTL timer or
         // a resolve event terminates the wait exactly once.
+        const store = await getApprovalStore();
         const outcome = await Promise.race([
-            approvalStore.waitForDecision(approval.approvalId),
+            store.waitForDecision(approval.approvalId),
             this._abortWatch(executionOptions && executionOptions.signal),
         ]);
 
         if (outcome.aborted === true) {
-            approvalStore.cancel({ approvalId: approval.approvalId, userId });
-            const after = approvalStore.read(approval.approvalId);
+            await store.cancel({ approvalId: approval.approvalId, userId });
+            const after = await store.read(approval.approvalId);
             return {
                 allowed: false,
                 result: this._approvalFailure({
                     toolName, metadata,
                     approvalId: approval.approvalId,
-                    approvalState: after ? after.state : approvalStore.STATES.CANCELLED,
+                    approvalState: after ? after.state : store.STATES.CANCELLED,
                     cancelled: true,
                     reason: 'request cancelled while awaiting approval',
                 }),
             };
         }
 
-        if (outcome.state === approvalStore.STATES.APPROVED) {
+        if (outcome.state === store.STATES.APPROVED) {
             return { allowed: true, approvalId: approval.approvalId };
         }
 
@@ -526,3 +530,9 @@ class TaskExecutor {
 }
 
 module.exports = new TaskExecutor();
+
+// The authoritative credit cost per tool. Exposed so the pure precondition
+// table (lib/capabilities/preconditions.js) can be drift-guarded by a test
+// against this single source of truth instead of duplicating the numbers.
+module.exports.creditCostFor = (toolName) => TOOL_CREDIT_COSTS[toolName] || 1;
+module.exports.CREDIT_COSTS = Object.freeze({ ...TOOL_CREDIT_COSTS });

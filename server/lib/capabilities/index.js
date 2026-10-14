@@ -7,6 +7,7 @@
 //
 //   capabilityTypes      normalized contract + validation
 //   risk                 pure scope/risk classification metadata
+//   preconditions        pure execution-context precondition metadata
 //   discoverNative()     native capabilities from the live native registry
 //   discoverMcp(opts)    MCP capabilities from the live MCP source
 //   discoverAll(opts)    combined capability array
@@ -18,6 +19,7 @@
 
 const capabilityTypes = require('./capabilityTypes');
 const risk = require('./risk');
+const preconditions = require('./preconditions');
 const discover = require('./discover');
 const authorizationPolicy = require('./authorizationPolicy');
 const operatorPolicy = require('./operatorPolicy');
@@ -28,11 +30,15 @@ const observability = require('./observability');
 const idempotency = require('./idempotency');
 const idempotencyKey = require('./idempotencyKey');
 const idempotencyStore = require('./idempotencyStore');
-const approvalStore = require('./approvalStore');
+const { getStore: getApprovalStore, ...approvalStore } = require('./redisApprovalStore');
 
 module.exports = {
   capabilityTypes,
   risk,
+  // Pure execution-context precondition metadata. Enforces nothing; lets a
+  // planner skip a dispatch whose failure is already knowable. TaskExecutor
+  // stays the authority.
+  preconditions,
   ...discover,
   CapabilityRegistry,
   buildCapabilityRegistry,
@@ -51,5 +57,7 @@ module.exports = {
   idempotencyKey,
   idempotencyStore,
   // Slice 4C: server-authoritative approval state + transport contract.
-  approvalStore,
+  // Exports both in-memory (approvalStore) and Redis-backed (getApprovalStore) stores
+  ...approvalStore,
+  getApprovalStore,
 };

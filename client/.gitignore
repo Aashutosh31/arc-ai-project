@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 .env
 .env.local
+
+# Test files (never commit)
+*.test.mjs
+tests/

@@ -5,6 +5,7 @@ const http = require('http');
 const { Server } = require('socket.io'); 
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const cookieParser = require('cookie-parser');
 
 const authRoutes = require('./routes/auth.js');
 const googleAuthRoutes = require('./routes/googleAuth.js');
@@ -16,6 +17,53 @@ const voiceRoutes = require('./routes/voice.js');
 const AIService = require('./services/AIService.js'); 
 const { resolveSocketConversation } = require('./lib/conversationAccess');
 const operatorPolicySource = require('./lib/capabilities/operatorPolicySource');
+
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Startup validation for critical environment variables
+const requiredEnvVars = [
+    'JWT_SECRET',
+    'MONGO_URI',
+    'GEMINI_API_KEY',
+    'GROQ_API_KEY',
+];
+if (isProduction) {
+    requiredEnvVars.push('FRONTEND_URL');
+}
+
+// Validate MCP OAuth pre-registered client configurations
+// Format: MCP_<SLUG>_OAUTH_CLIENT_ID and MCP_<SLUG>_OAUTH_CLIENT_SECRET
+const mcpOAuthClientIds = Object.keys(process.env).filter(k => k.startsWith('MCP_') && k.endsWith('_OAUTH_CLIENT_ID'));
+const mcpOAuthClientSecrets = Object.keys(process.env).filter(k => k.startsWith('MCP_') && k.endsWith('_OAUTH_CLIENT_SECRET'));
+if (mcpOAuthClientIds.length !== mcpOAuthClientSecrets.length) {
+    console.error('❌ MCP OAuth configuration mismatch: each MCP_*_OAUTH_CLIENT_ID must have a corresponding MCP_*_OAUTH_CLIENT_SECRET');
+    process.exit(1);
+}
+for (const clientIdKey of mcpOAuthClientIds) {
+    const slug = clientIdKey.replace('MCP_', '').replace('_OAUTH_CLIENT_ID', '');
+    const secretKey = `MCP_${slug}_OAUTH_CLIENT_SECRET`;
+    if (!process.env[secretKey]) {
+        console.error(`❌ Missing MCP OAuth secret for ${slug}: ${secretKey}`);
+        process.exit(1);
+    }
+    if (!process.env[clientIdKey]) {
+        console.error(`❌ Missing MCP OAuth client ID for ${slug}: ${clientIdKey}`);
+        process.exit(1);
+    }
+}
+if (mcpOAuthClientIds.length > 0) {
+    console.log(`🟢 MCP OAuth pre-registered clients configured: ${mcpOAuthClientIds.map(k => k.replace('MCP_', '').replace('_OAUTH_CLIENT_ID', '')).join(', ')}`);
+}
+
+const missingEnvVars = requiredEnvVars.filter(v => !process.env[v]);
+if (missingEnvVars.length > 0) {
+    console.error(`❌ Missing required environment variables: ${missingEnvVars.join(', ')}`);
+    process.exit(1);
+}
+if (process.env.JWT_SECRET && process.env.JWT_SECRET.length < 32) {
+    console.error('❌ JWT_SECRET must be at least 32 characters');
+    process.exit(1);
+}
 
 const app = express();
 const server = http.createServer(app); 
@@ -46,6 +94,8 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     credentials: true
 }));
+
+app.use(cookieParser());
 
 // 8mb allows short base64 voice clips for /api/voice/transcribe; other
 // endpoints send small JSON payloads and are unaffected.
@@ -86,6 +136,11 @@ const io = new Server(server, {
     }
 });
 
+// Apply cookie-parser to socket.io handshake
+io.use((socket, next) => {
+    cookieParser()(socket.handshake, {}, next);
+});
+
 // Initialize WhatsApp provider sockets (if present)
 try {
     const whatsappProvider = require('./providers/whatsapp');
@@ -98,7 +153,19 @@ try {
 }
 
 io.use((socket, next) => {
-    const token = socket.handshake.auth.token;
+    // Try to get token from auth object (backwards compatibility)
+    let token = socket.handshake.auth.token;
+    
+    // If not in auth, try to get from cookies
+    if (!token && socket.handshake.headers.cookie) {
+        const cookies = socket.handshake.headers.cookie.split(';').reduce((acc, cookie) => {
+            const [key, value] = cookie.trim().split('=');
+            acc[key] = value;
+            return acc;
+        }, {});
+        token = cookies.token;
+    }
+    
     if (!token) return next(new Error('Authentication error'));
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -154,8 +221,9 @@ io.on('connection', (socket) => {
     socket.on('agent:approval:resolve', async (data, ack) => {
         let result;
         try {
-            const approvalStore = require('./lib/capabilities/approvalStore');
-            result = approvalStore.resolve({
+            const { getStore: getApprovalStore } = require('./lib/capabilities/redisApprovalStore');
+            const approvalStore = await getApprovalStore();
+            result = await approvalStore.resolve({
                 approvalId: data && data.approvalId,
                 decision: data && data.decision,
                 userId: socket.userId,
@@ -321,6 +389,7 @@ app.use('/api/memory', memoryRoutes);
 app.use('/api/workspaces', workspaceRoutes);
 app.use('/api/voice', voiceRoutes);
 app.use('/api/mcp', require('./routes/mcp.js'));
+app.use('/api/debug', require('./routes/debug.js'));
 
 server.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));
 

@@ -113,6 +113,10 @@ export const useSocket = () => {
   // 'server'  = server-generated audio queue; browser speech is suppressed
   // for the response so the two voices never overlap.
   const ttsModeRef = useRef('browser');
+  // Identity of the response whose TTS mode is currently armed. Used to tell a
+  // repeat announcement for the SAME response apart from a genuinely new one,
+  // so a duplicate can never re-open a second voice.
+  const ttsResponseIdRef = useRef(null);
   const speechCharCountRef = useRef(0);
   const suppressSpeechRef = useRef(false);
   const SPEECH_THRESHOLD = 1800;
@@ -141,11 +145,39 @@ export const useSocket = () => {
 
     // Server TTS mode announcement per response. A new response always
     // starts from a clean slate: drop stale audio and reset the mode.
+    //
+    // This is the ONE new-response boundary for a response, and the server
+    // announces it exactly once per response (createTtsModeAnnouncer).
+    //
+    // It is a HARD boundary, so anything still audible from a PREVIOUS
+    // response must be stopped here — the worklet in particular was left
+    // running, which is how a new response could be voiced on top of the old
+    // one.
+    //
+    // `responseId` is what makes that safe. Without it a repeat announcement
+    // for the response we are ALREADY playing is indistinguishable from a new
+    // response, so the client must either reset (and re-admit the legacy WAV
+    // path on top of the live worklet — the same sentence in two voices) or
+    // never reset (and leave a stale voice speaking into the next response).
+    // With it, a repeat is ignored and a genuinely new response still resets.
     socket.on('ai:tts:mode', (data) => {
+      const responseId = data?.responseId;
+      // Older servers send no responseId: fall back to the original
+      // treat-every-arrival-as-new-response behaviour.
+      if (responseId && responseId === ttsResponseIdRef.current) {
+        if (import.meta.env.DEV) {
+          console.warn('[voice] ignoring duplicate ai:tts:mode for response', { responseId });
+        }
+        return;
+      }
+      ttsResponseIdRef.current = responseId || null;
       resetAudio();
       cancelDrainWatch();
       voiceOwnershipRef.current.reset();
       markVoiceSpeaking(false);
+      try { getSharedVoiceEngine()?.cancelStream?.(); } catch { /* ignore */ }
+      try { stopSpeech?.(); } catch { /* ignore */ }
+      voiceStreamRef.current = { streamId: null };
       ttsModeRef.current = data?.mode === 'server' ? 'server' : 'browser';
     });
 
@@ -184,7 +216,12 @@ export const useSocket = () => {
       // completed turns keep playing (previously every turn after the first
       // was dropped as stale). A drain-watch from an older stream is over.
       cancelDrainWatch();
-      voiceOwnershipRef.current.reset();
+      // Stream-aware, NOT an unconditional reset(): this only clears stale
+      // state when no stream is live. A second `voice:tts:start` inside the
+      // same response used to wipe `legacyLive` — the bit that tells
+      // onWorkletChunk() a WAV element is already playing and must be
+      // preempted — which re-opened the legacy voice on top of the worklet.
+      voiceOwnershipRef.current.beginStream();
       try { getSharedVoiceEngine()?.startStream?.(data?.streamId || null); } catch { /* ignore */ }
       try { getSharedVoiceTelemetry().markLlmFirstSentence(); } catch { /* ignore */ }
     });
@@ -230,6 +267,9 @@ export const useSocket = () => {
       // mic while ARC is still audibly talking.
       const endedStream = data?.streamId || null;
       try { getSharedVoiceEngine()?.endStream(endedStream); } catch { /* ignore */ }
+      // The response is over: the next `voice:tts:start` must be treated as a
+      // fresh response so it may legitimately clear stale state again.
+      voiceOwnershipRef.current.endStream();
       try { getSharedVoiceTelemetry().markTtsEnd(); } catch { /* ignore */ }
       if (import.meta?.env?.DEV) {
         try { getSharedVoiceTelemetry().log(); } catch { /* ignore */ }

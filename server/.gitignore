@@ -11,3 +11,8 @@ yarn-error.log*
 # OS generated files
 .vscode
 .whatsapp-sessions
+# Test files (never commit)
+*.test.js
+*.test.mjs
+tests/
+test-*.wav

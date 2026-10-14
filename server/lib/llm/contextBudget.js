@@ -10,11 +10,17 @@
 // Budgets (tokens) for the current Groq on-demand environment (8000 TPM):
 //   SAFE_TOTAL 7000 = INPUT (~5400-5800, derived) + OUTPUT (1200/1600).
 const { GROUP_PRIORITY, CAPABILITY_GROUPS } = require('./toolSelection');
+const {
+    estimateTokens,
+    estimateMessagesTokens,
+    estimateToolsTokens
+} = require('./tokenizer');
 
 const SAFE_TOTAL_BUDGET_TOKENS = 7000;
 const OUTPUT_BUDGET_DEFAULT = 1200;
 const OUTPUT_BUDGET_EXTENDED = 1600;
 
+// CHARS_PER_TOKEN kept for backward compatibility with budget constants
 const CHARS_PER_TOKEN = 4;
 const MESSAGE_OVERHEAD_TOKENS = 8;
 
@@ -50,24 +56,12 @@ const STOPWORDS = new Set(
   'the,a,an,and,or,but,for,with,from,that,this,these,those,what,when,where,which,who,whom,how,why,does,do,did,are,is,was,were,be,been,being,have,has,had,will,would,should,could,can,may,might,must,shall,not,no,yes,if,then,than,too,very,just,about,into,over,after,before,between,under,again,once,here,there,their,they,them,his,her,its,our,your,you,me,my,we,please,tell,explain,simple,terms'.split(',')
 );
 
+// Keep estTokensForChars for backward compatibility with budget calculations
 const estTokensForChars = (chars) => Math.max(0, Math.ceil(Number(chars || 0) / CHARS_PER_TOKEN));
 
-const estMessagesTokens = (messages) => {
-  if (!Array.isArray(messages)) return 0;
-  let total = 0;
-  for (const m of messages) {
-    total += MESSAGE_OVERHEAD_TOKENS + estTokensForChars(String(m?.content || '').length);
-  }
-  return total;
-};
-
-const estToolsTokens = (schemas) => {
-  try {
-    return estTokensForChars(JSON.stringify(schemas || []).length);
-  } catch {
-    return 0;
-  }
-};
+// Use tokenizer-based estimation for actual token counting
+const estMessagesTokens = (messages) => estimateMessagesTokens(messages);
+const estToolsTokens = (schemas) => estimateToolsTokens(schemas);
 
 const queryWords = (query) => {
   const words = String(query || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3 && !STOPWORDS.has(w));

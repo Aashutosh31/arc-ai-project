@@ -5,9 +5,12 @@ ENV NODE_ENV=production
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 # Default path - entrypoint will detect the real binary and override if necessary
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-ENV PUPPETEER_ARGS="--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage --disable-gpu --disable-extensions"
+ENV PUPPETEER_ARGS="--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage --disable-gpu --disable-extensions --memory-pressure-off --max_old_space_size=512"
 
 WORKDIR /app
+
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -m appuser
 
 # Install minimal dependencies required to run Chromium in a Debian slim image
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -44,16 +47,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy package manifests and install dependencies
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci --only=production && npm cache clean --force
 
 # Copy app source
 COPY . ./
+
+# Change ownership to non-root user
+RUN chown -R appuser:appuser /app
 
 EXPOSE 5000
 
 # Entry point will detect actual Chromium binary and set env vars for Puppeteer
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh || true
+
+# Run as non-root user
+USER appuser
 
 ENTRYPOINT ["sh","/app/docker-entrypoint.sh"]
 CMD ["node","index.js"]

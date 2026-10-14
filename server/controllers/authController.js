@@ -6,10 +6,23 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { buildGoogleAppAuthUrl } = require('../services/googleCalendarService');
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 // Helper to generate JWT token
 const generateToken = (id, extraClaims = {}) => {
     return jwt.sign({ id, ...extraClaims }, process.env.JWT_SECRET, {
         expiresIn: '30d', // Token validity
+    });
+};
+
+// Helper to set httpOnly cookie
+const setTokenCookie = (res, token) => {
+    res.cookie('token', token, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        path: '/'
     });
 };
 
@@ -85,11 +98,12 @@ const registerUser = async (req, res) => {
         });
 
         if (user) {
+            const token = generateToken(user._id, { role: 'user' });
+            setTokenCookie(res, token);
             res.status(201).json({
                 _id: user.id,
                 username: user.username,
                 email: user.email,
-                token: generateToken(user._id, { role: 'user' }),
                 authType: 'user',
                 authProvider: user.authProvider || 'local',
                 googleLinked: Boolean(user.googleIdentity?.googleId),
@@ -125,11 +139,12 @@ const loginUser = async (req, res) => {
             user.lastLoginAt = new Date();
             await user.save();
 
+            const token = generateToken(user._id, { role: 'user' });
+            setTokenCookie(res, token);
             res.json({
                 _id: user.id,
                 username: user.username,
                 email: user.email,
-                token: generateToken(user._id, { role: 'user' }),
                 authType: 'user',
                 authProvider: user.authProvider || 'local',
                 googleLinked: Boolean(user.googleIdentity?.googleId),
@@ -151,7 +166,10 @@ const loginUser = async (req, res) => {
 const guestUser = async (req, res) => {
     try {
         const guest = await createGuestSession();
-        res.status(201).json(guest);
+        setTokenCookie(res, guest.token);
+        // Don't send token in response body
+        const { token, ...guestWithoutToken } = guest;
+        res.status(201).json(guestWithoutToken);
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Failed to create guest session' });
@@ -178,11 +196,22 @@ const getGoogleLinkUrl = async (req, res) => {
     }
 };
 
+const logout = async (req, res) => {
+    res.clearCookie('token', {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
+        path: '/'
+    });
+    res.json({ success: true, message: 'Logged out successfully' });
+};
+
 module.exports = {
     registerUser,
     loginUser,
     getMe,
     guestUser,
     getGoogleAuthUrl,
-    getGoogleLinkUrl
+    getGoogleLinkUrl,
+    logout
 };

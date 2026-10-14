@@ -4,6 +4,18 @@ import { useWorkspace } from './WorkspaceContext';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
+// Helper for authenticated fetch requests
+const authFetch = async (url, options = {}) => {
+  return fetch(url, {
+    ...options,
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+  });
+};
+
 const ConversationContext = createContext();
 
 export const useConversation = () => {
@@ -24,10 +36,6 @@ export const ConversationProvider = ({ children }) => {
   const activeConversationIdRef = React.useRef(null);
   const isFirstMessageSendingRef = React.useRef(false);
 
-  const getAuthHeaders = () => ({
-    Authorization: `Bearer ${localStorage.getItem('token')}`
-  });
-
   const getWorkspaceParam = useCallback((workspaceId = activeWorkspaceId) => {
     if (!workspaceId) return '';
     return `workspaceId=${encodeURIComponent(workspaceId)}`;
@@ -39,9 +47,7 @@ export const ConversationProvider = ({ children }) => {
     setConversationError(null);
     try {
       const workspaceQuery = getWorkspaceParam();
-      const response = await fetch(`${API_URL}/api/conversations${workspaceQuery ? `?${workspaceQuery}` : ''}`, {
-        headers: getAuthHeaders()
-      });
+      const response = await authFetch(`${API_URL}/api/conversations${workspaceQuery ? `?${workspaceQuery}` : ''}`);
       if (!response.ok) throw new Error('Failed to fetch conversations');
       const data = await response.json();
       setConversations(Array.isArray(data) ? data : []);
@@ -60,12 +66,8 @@ export const ConversationProvider = ({ children }) => {
   // Create new conversation
   const createNewConversation = useCallback(async (title = 'New Conversation') => {
     try {
-      const response = await fetch(`${API_URL}/api/conversations`, {
+      const response = await authFetch(`${API_URL}/api/conversations`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
         body: JSON.stringify({ title, workspaceId: activeWorkspaceId })
       });
       if (!response.ok) throw new Error('Failed to create conversation');
@@ -109,12 +111,8 @@ export const ConversationProvider = ({ children }) => {
   // Update conversation (title, pinned status)
   const updateConversation = useCallback(async (conversationId, updates) => {
     try {
-      const response = await fetch(`${API_URL}/api/conversations/${conversationId}`, {
+      const response = await authFetch(`${API_URL}/api/conversations/${conversationId}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
         body: JSON.stringify({ ...updates, workspaceId: activeWorkspaceId })
       });
       if (!response.ok) throw new Error('Failed to update conversation');
@@ -138,8 +136,7 @@ export const ConversationProvider = ({ children }) => {
 
     const controller = options.signal ? null : new AbortController();
     const signal = options.signal || controller?.signal;
-    const response = await fetch(`${API_URL}/api/search?q=${encodeURIComponent(normalizedQuery)}&limit=${Number(options.limit || 10)}${activeWorkspaceId ? `&workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ''}`, {
-      headers: getAuthHeaders(),
+    const response = await authFetch(`${API_URL}/api/search?q=${encodeURIComponent(normalizedQuery)}&limit=${Number(options.limit || 10)}${activeWorkspaceId ? `&workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ''}`, {
       signal
     });
 
@@ -148,21 +145,15 @@ export const ConversationProvider = ({ children }) => {
   }, [activeWorkspaceId]);
 
   const fetchMemoryDashboard = useCallback(async () => {
-    const response = await fetch(`${API_URL}/api/memory${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ''}`, {
-      headers: getAuthHeaders()
-    });
+    const response = await authFetch(`${API_URL}/api/memory${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ''}`);
 
     if (!response.ok) throw new Error('Failed to load memory dashboard');
     return response.json();
   }, [activeWorkspaceId]);
 
   const updateMemoryPreferences = useCallback(async (memoryLearningEnabled) => {
-    const response = await fetch(`${API_URL}/api/memory/preferences`, {
+    const response = await authFetch(`${API_URL}/api/memory/preferences`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders()
-      },
       body: JSON.stringify({ memoryLearningEnabled, workspaceId: activeWorkspaceId })
     });
 
@@ -171,12 +162,8 @@ export const ConversationProvider = ({ children }) => {
   }, [activeWorkspaceId]);
 
   const updateMemoryFact = useCallback(async (memoryId, updates) => {
-    const response = await fetch(`${API_URL}/api/memory/facts/${memoryId}`, {
+    const response = await authFetch(`${API_URL}/api/memory/facts/${memoryId}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders()
-      },
       body: JSON.stringify({ ...updates, workspaceId: activeWorkspaceId })
     });
 
@@ -185,9 +172,8 @@ export const ConversationProvider = ({ children }) => {
   }, [activeWorkspaceId]);
 
   const deleteMemoryFact = useCallback(async (memoryId) => {
-    const response = await fetch(`${API_URL}/api/memory/facts/${memoryId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders()
+    const response = await authFetch(`${API_URL}/api/memory/facts/${memoryId}`, {
+      method: 'DELETE'
     });
 
     if (!response.ok) throw new Error('Failed to delete memory fact');
@@ -195,12 +181,8 @@ export const ConversationProvider = ({ children }) => {
   }, [activeWorkspaceId]);
 
   const updateSemanticMemory = useCallback(async (memoryId, updates) => {
-    const response = await fetch(`${API_URL}/api/memory/semantic/${memoryId}`, {
+    const response = await authFetch(`${API_URL}/api/memory/semantic/${memoryId}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders()
-      },
       body: JSON.stringify({ ...updates, workspaceId: activeWorkspaceId })
     });
 
@@ -209,9 +191,8 @@ export const ConversationProvider = ({ children }) => {
   }, [activeWorkspaceId]);
 
   const deleteSemanticMemory = useCallback(async (memoryId) => {
-    const response = await fetch(`${API_URL}/api/memory/semantic/${memoryId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders()
+    const response = await authFetch(`${API_URL}/api/memory/semantic/${memoryId}`, {
+      method: 'DELETE'
     });
 
     if (!response.ok) throw new Error('Failed to delete semantic memory');
@@ -221,9 +202,8 @@ export const ConversationProvider = ({ children }) => {
   // Delete conversation
   const deleteConversation = useCallback(async (conversationId) => {
     try {
-      const response = await fetch(`${API_URL}/api/conversations/${conversationId}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders()
+      const response = await authFetch(`${API_URL}/api/conversations/${conversationId}`, {
+        method: 'DELETE'
       });
       if (!response.ok) throw new Error('Failed to delete conversation');
       setConversations((prev) => {
@@ -269,9 +249,9 @@ export const ConversationProvider = ({ children }) => {
 
     // Single request: the server falls back to the unfiltered ownership lookup
     // when the workspace-scoped lookup misses, so no client second-fetch is needed.
-    const response = await fetch(
+    const response = await authFetch(
       `${API_URL}/api/conversations/${conversationId}/messages?${params.toString()}`,
-      { headers: getAuthHeaders(), ...(options.signal ? { signal: options.signal } : {}) }
+      { ...(options.signal ? { signal: options.signal } : {}) }
     );
 
     if (!response.ok) {

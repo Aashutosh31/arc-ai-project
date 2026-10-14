@@ -640,10 +640,9 @@ const AuthPage = ({ isRegister }) => {
     if (isRegister) data.username = username;
 
     try {
-      const res = await axios.post(`${API_URL}/api/auth/${endpoint}`, data);
-      const { token, _id, authType, authProvider, googleLinked, creditsRemaining, username: returnedUsername } = res.data;
+      const res = await axios.post(`${API_URL}/api/auth/${endpoint}`, data, { withCredentials: true });
+      const { _id, authType, authProvider, googleLinked, creditsRemaining, username: returnedUsername } = res.data;
       
-      localStorage.setItem('token', token);
       localStorage.setItem('userId', _id);
       localStorage.setItem('authType', authType || 'user');
       localStorage.setItem('authProvider', authProvider || 'local');
@@ -671,10 +670,9 @@ const AuthPage = ({ isRegister }) => {
     setLoading(true);
 
     try {
-      const res = await axios.post(`${API_URL}/api/auth/guest`);
-      const { token, _id, authType, creditsRemaining, username } = res.data;
+      const res = await axios.post(`${API_URL}/api/auth/guest`, {}, { withCredentials: true });
+      const { _id, authType, creditsRemaining, username } = res.data;
 
-      localStorage.setItem('token', token);
       localStorage.setItem('userId', _id);
       localStorage.setItem('authType', authType || 'guest');
       localStorage.setItem('authProvider', 'guest');
@@ -694,11 +692,9 @@ const AuthPage = ({ isRegister }) => {
   const persistAuthSession = (authPayload) => {
     const responsePayload = authPayload?.payload || authPayload;
     const user = responsePayload?.user || responsePayload;
-    const token = responsePayload?.token || user?.token;
 
-    if (!token || !user?._id) return;
+    if (!user?._id) return;
 
-    localStorage.setItem('token', token);
     localStorage.setItem('userId', user._id);
     localStorage.setItem('authType', user.authType || 'user');
     localStorage.setItem('authProvider', user.authProvider || 'google');

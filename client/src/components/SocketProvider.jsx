@@ -5,6 +5,18 @@ import { SocketContext } from '../contexts/SocketContext'; // Import the Context
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
+// Helper for authenticated fetch requests
+const authFetch = async (url, options = {}) => {
+  return fetch(url, {
+    ...options,
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+  });
+};
+
 export const SocketProvider = ({ children }) => {
     const [socket, setSocket] = useState(null);
     const [isConnected, setIsConnected] = useState(false);
@@ -24,7 +36,6 @@ export const SocketProvider = ({ children }) => {
         let activeSocket = null;
 
         const bootstrapSession = async () => {
-            let token = localStorage.getItem('token');
             let userId = localStorage.getItem('userId');
             let authType = localStorage.getItem('authType') || 'user';
             let authProvider = localStorage.getItem('authProvider') || 'local';
@@ -32,31 +43,28 @@ export const SocketProvider = ({ children }) => {
             let creditsRemaining = Number(localStorage.getItem('creditsRemaining') || 0);
             let googleLinked = localStorage.getItem('googleLinked') === 'true';
 
-            // A cached guest token can outlive its server-side session (TTL expiry,
-            // DB reset). The socket handshake never checks the DB, so a stale token
-            // still connects while every REST call 401s. Validate once at bootstrap
-            // and mint a fresh guest session when the cached one is rejected.
-            // Non-guest credentials are left untouched (existing login flow owns them).
-            if (token && userId && authType === 'guest') {
+            // Validate existing session by calling /api/auth/me (uses httpOnly cookie)
+            if (userId && authType === 'guest') {
                 try {
-                    const meResponse = await fetch(`${API_URL}/api/auth/me`, {
-                        headers: { Authorization: `Bearer ${token}` }
-                    });
+                    const meResponse = await authFetch(`${API_URL}/api/auth/me`);
                     if (!meResponse.ok) throw new Error(`stale guest session (HTTP ${meResponse.status})`);
+                    const meData = await meResponse.json();
+                    userId = meData.id || meData._id || userId;
+                    username = meData.username || username;
+                    creditsRemaining = Number(meData.creditsRemaining ?? creditsRemaining);
+                    googleLinked = Boolean(meData.googleLinked);
                 } catch (validationError) {
                     console.warn('Cached guest session invalid, creating a fresh one:', validationError?.message || validationError);
-                    for (const key of ['token', 'userId', 'authType', 'authProvider', 'username', 'creditsRemaining', 'googleLinked']) {
+                    for (const key of ['userId', 'authType', 'authProvider', 'username', 'creditsRemaining', 'googleLinked']) {
                         localStorage.removeItem(key);
                     }
-                    token = null;
                     userId = null;
                 }
             }
 
-            if (!token || !userId) {
-                const guestResponse = await fetch(`${API_URL}/api/auth/guest`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
+            if (!userId) {
+                const guestResponse = await authFetch(`${API_URL}/api/auth/guest`, {
+                    method: 'POST'
                 });
 
                 if (!guestResponse.ok) {
@@ -64,7 +72,6 @@ export const SocketProvider = ({ children }) => {
                 }
 
                 const guestData = await guestResponse.json();
-                token = guestData.token;
                 userId = guestData._id;
                 authType = guestData.authType || 'guest';
                 authProvider = guestData.authProvider || 'guest';
@@ -72,7 +79,6 @@ export const SocketProvider = ({ children }) => {
                 creditsRemaining = Number(guestData.creditsRemaining || 0);
                 googleLinked = Boolean(guestData.googleLinked);
 
-                localStorage.setItem('token', token);
                 localStorage.setItem('userId', userId);
                 localStorage.setItem('authType', authType);
                 localStorage.setItem('authProvider', authProvider);
@@ -85,7 +91,7 @@ export const SocketProvider = ({ children }) => {
 
             setAuthInfo({
                 ready: true,
-                token,
+                token: null, // Token is in httpOnly cookie, not accessible from JS
                 userId,
                 authType,
                 authProvider,
@@ -106,11 +112,16 @@ export const SocketProvider = ({ children }) => {
     }, []); 
 
     useEffect(() => {
-        if (!authInfo.ready || !authInfo.token || !authInfo.userId) return;
+        if (!authInfo.ready || !authInfo.userId) return;
 
+        // For socket auth, we need a token. Since we can't read httpOnly cookies from JS,
+        // we'll use a workaround: the socket.io server can also read cookies if we configure it.
+        // For now, we'll use a separate short-lived token or rely on the session cookie.
+        // The socket.io handshake will include cookies if we use polling transport.
         const newSocket = io(API_URL, {
-            auth: { token: authInfo.token, userId: authInfo.userId },
-            transports: ['websocket'],
+            auth: { userId: authInfo.userId },
+            transports: ['websocket', 'polling'],
+            withCredentials: true
         });
 
         newSocket.on('connect', () => {
@@ -126,7 +137,7 @@ export const SocketProvider = ({ children }) => {
         setSocket(newSocket);
 
         return () => newSocket.close();
-    }, [authInfo.ready, authInfo.token, authInfo.userId]);
+    }, [authInfo.ready, authInfo.userId]);
 
     return (
         <SocketContext.Provider value={{ socket, isConnected, authInfo, setAuthInfo }}>

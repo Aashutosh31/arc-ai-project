@@ -9,10 +9,17 @@
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
-const authHeaders = () => ({
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
-});
+// Helper for authenticated fetch requests
+const authFetch = async (url, options = {}) => {
+  return fetch(url, {
+    ...options,
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+  });
+};
 
 const parseResponse = async (res) => {
   const data = await res.json().catch(() => ({}));
@@ -27,9 +34,8 @@ const parseResponse = async (res) => {
 };
 
 const request = (path, options = {}) =>
-  fetch(`${API_URL}/api/mcp${path}`, {
+  authFetch(`${API_URL}/api/mcp${path}`, {
     ...options,
-    headers: { ...authHeaders(), ...(options.headers || {}) },
   }).then(parseResponse);
 
 export const listMcpServers = () => request('/servers');

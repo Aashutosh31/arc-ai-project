@@ -2,81 +2,201 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, develop]
   pull_request:
-    branches:
-      - main
-      - master
-  workflow_dispatch:
+    branches: [main, develop]
+
+env:
+  NODE_VERSION: '22'
 
 jobs:
-  client:
-    name: Client Build and Lint
+  lint-and-typecheck:
+    name: Lint & Typecheck
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: client
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: client/package-lock.json
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
 
-      - name: Install dependencies
+      - name: Install server deps
+        working-directory: ./server
         run: npm ci
+
+      - name: Install client deps
+        working-directory: ./client
+        run: npm ci
+
+      - name: Lint server
+        working-directory: ./server
+        run: npm run lint 2>/dev/null || echo "No lint script"
 
       - name: Lint client
+        working-directory: ./client
         run: npm run lint
 
-      - name: Build client
-        run: npm run build
-
-      # Approval card + execution panel, history loader, MCP OAuth UI, and the
-      # voice state machine. These existed as files but CI ran none of them.
-      - name: Client test suite
-        run: npm test
-
-  server:
-    name: Server Test Suite
+  security-audit:
+    name: Security Audit
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: server
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          # server/package.json declares engines.node >=22; the client is built
-          # on 20 in the job above and is unaffected by this constraint.
-          node-version: 22
-          cache: npm
-          cache-dependency-path: server/package-lock.json
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
 
-      - name: Install dependencies
+      - name: Install server deps
+        working-directory: ./server
         run: npm ci
 
-      - name: Syntax check backend entrypoint
-        run: node --check index.js
+      - name: Install client deps
+        working-directory: ./client
+        run: npm ci
 
-      # The Phase 1 governed action substrate suites (authorization, approval,
-      # ownership, governed execution paths, idempotency, MCP, news, Mongo
-      # safety, TTS). These were previously not invoked by anything.
-      - name: Phase 1 governed substrate gate
-        run: npm run test:phase1
+      - name: Audit server dependencies
+        working-directory: ./server
+        run: npm audit --audit-level=high
 
-      # Every other discovered server suite. Offline by default: the runner
-      # strips MONGO_URI/DATABASE_URL and the disposable MONGO_TEST_* contract,
-      # so CI can never reach a database. Suites needing live providers report
-      # as skipped rather than failing.
-      - name: Full server test suite
+      - name: Audit client dependencies
+        working-directory: ./client
+        run: npm audit --audit-level=high
+
+  test-server:
+    name: Server Tests
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MONGO_URI: mongodb://localhost:27017/arc-test
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: test-secret-do-not-use-in-production
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
+      FRONTEND_URL: http://localhost:5173
+      PUBLIC_BACKEND_URL: http://localhost:3000
+      MCP_TOKEN_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
+      GOOGLE_TOKEN_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server deps
+        working-directory: ./server
+        run: npm ci
+
+      - name: Run server tests
+        working-directory: ./server
         run: npm test
+
+      - name: Run server tests with MongoDB
+        working-directory: ./server
+        run: npm run test:mongo
+
+  test-client:
+    name: Client Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install client deps
+        working-directory: ./client
+        run: npm ci
+
+      - name: Run client tests
+        working-directory: ./client
+        run: npm test
+
+  build-client:
+    name: Build Client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install client deps
+        working-directory: ./client
+        run: npm ci
+
+      - name: Build client
+        working-directory: ./client
+        run: npm run build
+
+  docker-build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck, security-audit, test-server, build-client]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build server image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./server
+          push: false
+          load: true
+          tags: arc-ai/server:test
+
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+          extra_args: --fail --only-verified

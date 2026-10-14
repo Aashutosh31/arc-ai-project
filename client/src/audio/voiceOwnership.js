@@ -19,9 +19,19 @@
 //     not mute-only; subsequent legacy segments are dropped outright.
 //   - reset() returns the machine to the "no owner" state for a new
 //     response / mode announcement / interrupt / disconnect.
+//
+// Stream lifecycle (added for the duplicate-voice fix): a NEW STREAM is not
+// necessarily a NEW RESPONSE. `voice:tts:start` used to reset() unconditionally,
+// which cleared `legacyLive` — the exact bit `onWorkletChunk()` needs to
+// preempt an already-playing WAV element. A second stream inside one response
+// therefore re-opened the legacy path while the worklet was still speaking.
+// beginStream() resets only when no stream is live, so ownership survives a
+// within-response stream change while a genuine new response still starts
+// clean.
 export const createVoiceOwnership = () => {
   let workletSeen = false;
   let legacyLive = false;
+  let streamLive = false;
 
   return {
     // Legacy WAV arrival: may it open/continue? True while the worklet has
@@ -47,9 +57,36 @@ export const createVoiceOwnership = () => {
     workletOwns() {
       return workletSeen;
     },
+    // A `voice:tts:start` arrived.
+    //   continuation === false -> first stream of this response; stale state
+    //                             was cleared here so the response starts
+    //                             with no owner.
+    //   continuation === true  -> another stream inside the SAME response
+    //                             (a superseding session). Ownership is
+    //                             deliberately PRESERVED: clearing it would
+    //                             re-admit the legacy WAV path on top of the
+    //                             voice already playing.
+    beginStream() {
+      const continuation = streamLive;
+      if (!continuation) {
+        workletSeen = false;
+        legacyLive = false;
+      }
+      streamLive = true;
+      return { continuation, first: !continuation };
+    },
+    // The stream finished (or was cancelled). The response itself is over, so
+    // the next beginStream() must be treated as a fresh response again.
+    endStream() {
+      streamLive = false;
+    },
+    isStreamLive() {
+      return streamLive;
+    },
     reset() {
       workletSeen = false;
       legacyLive = false;
+      streamLive = false;
     },
   };
 };

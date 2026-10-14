@@ -1,0 +1,30 @@
+module.exports = {
+  ignores: ['node_modules/', 'dist/', 'tests/**', '*.test.js', '*.test.mjs', '.whatsapp-sessions/**'],
+  languageOptions: {
+    ecmaVersion: 2022,
+    sourceType: 'commonjs',
+    globals: {
+      console: 'readonly',
+      process: 'readonly',
+      Buffer: 'readonly',
+      __dirname: 'readonly',
+      __filename: 'readonly',
+      module: 'readonly',
+      require: 'readonly',
+      exports: 'readonly',
+      global: 'readonly',
+      setTimeout: 'readonly',
+      clearTimeout: 'readonly',
+      setInterval: 'readonly',
+      clearInterval: 'readonly',
+    },
+  },
+  rules: {
+    'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    'no-console': 'warn',
+    'prefer-const': 'error',
+    'no-var': 'error',
+    'eqeqeq': ['error', 'always'],
+    'curly': ['error', 'all'],
+  },
+};

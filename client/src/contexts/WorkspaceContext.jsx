@@ -4,6 +4,18 @@ import { SocketContext } from './SocketContext';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 const ACTIVE_WORKSPACE_STORAGE_KEY = 'arc.activeWorkspaceId';
 
+// Helper for authenticated fetch requests
+const authFetch = async (url, options = {}) => {
+  return fetch(url, {
+    ...options,
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+  });
+};
+
 const WorkspaceContext = createContext(null);
 
 const normalizeWorkspace = (workspace) => {
@@ -30,13 +42,8 @@ export const WorkspaceProvider = ({ children }) => {
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const activeWorkspaceIdRef = useRef(null);
 
-  const authToken = authInfo?.token || localStorage.getItem('token');
   const userId = authInfo?.userId || localStorage.getItem('userId');
-  const authReady = Boolean(authInfo?.ready || (authToken && userId));
-
-  const getAuthHeaders = useCallback(() => ({
-    Authorization: `Bearer ${authToken || localStorage.getItem('token')}`
-  }), [authToken]);
+  const authReady = Boolean(authInfo?.ready || userId);
 
   const syncActiveWorkspace = useCallback((workspace, { bumpRevision = true } = {}) => {
     const normalized = normalizeWorkspace(workspace);
@@ -63,13 +70,11 @@ export const WorkspaceProvider = ({ children }) => {
 
   const fetchWorkspaceById = useCallback(async (workspaceId) => {
     if (!workspaceId) return null;
-    const response = await fetch(`${API_URL}/api/workspaces/${workspaceId}`, {
-      headers: getAuthHeaders()
-    });
+    const response = await authFetch(`${API_URL}/api/workspaces/${workspaceId}`);
     if (!response.ok) return null;
     const data = await response.json();
     return normalizeWorkspace(data?.workspace || null);
-  }, [getAuthHeaders]);
+  }, []);
 
   const refreshWorkspaces = useCallback(async ({ preferredWorkspaceId = null } = {}) => {
     if (!authReady) return null;
@@ -78,14 +83,10 @@ export const WorkspaceProvider = ({ children }) => {
     setWorkspaceError('');
 
     try {
-      const ensureResponse = await fetch(`${API_URL}/api/workspaces/active${preferredWorkspaceId ? `?workspaceId=${encodeURIComponent(preferredWorkspaceId)}` : ''}`, {
-        headers: getAuthHeaders()
-      });
+      const ensureResponse = await authFetch(`${API_URL}/api/workspaces/active${preferredWorkspaceId ? `?workspaceId=${encodeURIComponent(preferredWorkspaceId)}` : ''}`);
       const ensuredWorkspace = ensureResponse.ok ? normalizeWorkspace((await ensureResponse.json())?.workspace || null) : null;
 
-      const listResponse = await fetch(`${API_URL}/api/workspaces`, {
-        headers: getAuthHeaders()
-      });
+      const listResponse = await authFetch(`${API_URL}/api/workspaces`);
       const listData = listResponse.ok ? await listResponse.json() : { workspaces: [] };
       const nextWorkspaces = Array.isArray(listData?.workspaces) ? listData.workspaces.map(normalizeWorkspace).filter(Boolean) : [];
 
@@ -114,15 +115,11 @@ export const WorkspaceProvider = ({ children }) => {
     } finally {
       setLoadingWorkspaces(false);
     }
-  }, [authReady, getAuthHeaders]);
+  }, [authReady]);
 
   const createWorkspace = useCallback(async ({ name, description = '', visibility = 'private' }) => {
-    const response = await fetch(`${API_URL}/api/workspaces`, {
+    const response = await authFetch(`${API_URL}/api/workspaces`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders()
-      },
       body: JSON.stringify({ name, description, visibility })
     });
 
@@ -139,15 +136,11 @@ export const WorkspaceProvider = ({ children }) => {
       }
     }
     return workspace;
-  }, [getAuthHeaders, socket, syncActiveWorkspace]);
+  }, [socket, syncActiveWorkspace]);
 
   const renameWorkspace = useCallback(async (workspaceId, updates = {}) => {
-    const response = await fetch(`${API_URL}/api/workspaces/${workspaceId}`, {
+    const response = await authFetch(`${API_URL}/api/workspaces/${workspaceId}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders()
-      },
       body: JSON.stringify(updates)
     });
 
@@ -159,12 +152,11 @@ export const WorkspaceProvider = ({ children }) => {
     const workspace = normalizeWorkspace(data?.workspace || null);
     if (workspace?._id) syncActiveWorkspace(workspace, { bumpRevision: false });
     return workspace;
-  }, [getAuthHeaders, syncActiveWorkspace]);
+  }, [syncActiveWorkspace]);
 
   const deleteWorkspace = useCallback(async (workspaceId) => {
-    const response = await fetch(`${API_URL}/api/workspaces/${workspaceId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders()
+    const response = await authFetch(`${API_URL}/api/workspaces/${workspaceId}`, {
+      method: 'DELETE'
     });
 
     if (!response.ok) {
@@ -185,7 +177,7 @@ export const WorkspaceProvider = ({ children }) => {
     }
 
     return true;
-  }, [getAuthHeaders, socket, syncActiveWorkspace, workspaces]);
+  }, [socket, syncActiveWorkspace, workspaces]);
 
   const switchWorkspace = useCallback(async (workspaceId) => {
     if (!workspaceId || workspaceId === activeWorkspaceIdRef.current) return activeWorkspaceIdRef.current;

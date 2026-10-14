@@ -1,0 +1,41 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/server"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    groups:
+      dev-dependencies:
+        patterns: ["*"]
+        dependency-type: "development"
+      production-dependencies:
+        patterns: ["*"]
+        dependency-type: "production"
+    commit-message:
+      prefix: "deps(server):"
+
+  - package-ecosystem: "npm"
+    directory: "/client"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    groups:
+      dev-dependencies:
+        patterns: ["*"]
+        dependency-type: "development"
+      production-dependencies:
+        patterns: ["*"]
+        dependency-type: "production"
+    commit-message:
+      prefix: "deps(client):"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "deps(actions):"

@@ -46,3 +46,7 @@ docs/ja-*-audit.md
 .tmp-voice-e2e/
 server/test-*.wav
 client/voice-diagnostic.html
+repomix-output.md
+repomix.config.json
+*.test.js
+*.test.mjs

@@ -25,7 +25,17 @@ module.exports = {
         try {
             // Step 1: Search for the closest matching article
             const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(args.query)}&utf8=&format=json&origin=*`;
-            const searchRes = await fetch(searchUrl);
+            // Wikipedia's API policy requires a descriptive User-Agent; requests
+            // without one are rejected with HTTP 403.
+            const searchRes = await fetch(searchUrl, {
+                headers: { 'User-Agent': 'ARC-Bot/1.0 (webSearch capability)' },
+            });
+            if (!searchRes.ok) {
+                return {
+                    success: false,
+                    error: `Wikipedia search failed with HTTP ${searchRes.status}`
+                };
+            }
             const searchData = await searchRes.json();
             
             if (!searchData.query || searchData.query.search.length === 0) {

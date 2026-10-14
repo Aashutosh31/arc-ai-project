@@ -2,6 +2,18 @@ const express = require('express');
 const { protect } = require('../middleware/authMiddleware');
 const { buildAuthUrl, isGoogleConnected, handleGoogleOAuthCallback } = require('../services/googleCalendarService');
 
+const isProduction = process.env.NODE_ENV === 'production';
+
+const setTokenCookie = (res, token) => {
+    res.cookie('token', token, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        path: '/'
+    });
+};
+
 const router = express.Router();
 
 const handleCallbackRequest = async (req, res) => {
@@ -36,8 +48,20 @@ const handleCallbackRequest = async (req, res) => {
         }
 
         if (result.kind === 'auth') {
-            const payload = JSON.stringify(result).replace(/</g, '\\u003c');
-            const frontendOrigin = JSON.stringify((process.env.FRONTEND_URL || '').split(',').map((origin) => origin.trim()).filter(Boolean)[0] || '*');
+            // Set httpOnly cookie with the token
+            setTokenCookie(res, result.token);
+            
+            // Send only user data in postMessage (no token)
+            const payload = JSON.stringify({
+                kind: 'auth',
+                user: result.user
+            }).replace(/</g, '\\u003c');
+            const frontendUrls = (process.env.FRONTEND_URL || '').split(',').map((origin) => origin.trim()).filter(Boolean);
+            if (frontendUrls.length === 0) {
+                console.error('[Google OAuth] FRONTEND_URL not configured; cannot complete auth callback');
+                return res.status(500).send('Server configuration error: FRONTEND_URL not set');
+            }
+            const frontendOrigin = JSON.stringify(frontendUrls[0]);
 
             return res.status(200).send(`
                 <html>

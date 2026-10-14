@@ -215,6 +215,18 @@ const DashboardPageContent = () => {
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
   const showWhatsAppDebug = import.meta.env.DEV && typeof localStorage !== 'undefined' && localStorage.getItem('arc_whatsapp_debug') === 'true';
 
+  // Helper for authenticated fetch requests
+  const authFetch = async (url, options = {}) => {
+    return fetch(url, {
+      ...options,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers || {})
+      }
+    });
+  };
+
   useEffect(() => {
     if (isDesktopWide || isDesktopCompact) { setSidebarCollapsed(false); setSidebarDrawerOpen(false); }
   }, [isDesktopWide, isDesktopCompact]);
@@ -241,46 +253,41 @@ const DashboardPageContent = () => {
 
   useEffect(() => {
     const load = async () => {
-      const token = authInfo?.token || localStorage.getItem('token');
-      if (!authInfo?.ready || !token) return;
+      if (!authInfo?.ready) return;
       try {
         const wsId = activeWorkspace?._id || null;
-        const r = await fetch(`${apiUrl}/api/memory${wsId ? `?workspaceId=${wsId}` : ''}`, { headers: { Authorization: `Bearer ${token}` } });
+        const r = await authFetch(`${apiUrl}/api/memory${wsId ? `?workspaceId=${wsId}` : ''}`);
         if (r.ok) { const d = await r.json(); setMemoryLearningEnabled(Boolean(d?.preferences?.memoryLearningEnabled)); }
       } catch { /* ignore */ }
     };
     load();
-  }, [authInfo?.ready, authInfo?.token, apiUrl, activeWorkspace?._id]);
+  }, [authInfo?.ready, apiUrl, activeWorkspace?._id]);
 
   useEffect(() => {
     const load = async () => {
-      const token = authInfo?.token || localStorage.getItem('token');
-      if (!authInfo?.ready || !token || authInfo?.authType === 'guest') { setGoogleConnected(false); return; }
+      if (!authInfo?.ready || authInfo?.authType === 'guest') { setGoogleConnected(false); return; }
       try {
-        const r = await fetch(`${apiUrl}/api/google/status`, { headers: { Authorization: `Bearer ${token}` } });
+        const r = await authFetch(`${apiUrl}/api/google/status`);
         if (r.ok) { const d = await r.json(); setGoogleConnected(Boolean(d.connected)); }
       } catch { /* ignore */ }
     };
     load();
-  }, [authInfo?.ready, authInfo?.token, authInfo?.authType, apiUrl]);
+  }, [authInfo?.ready, authInfo?.authType, apiUrl]);
 
   const handleNewChat = async () => { try { await createNewConversation(); setSidebarDrawerOpen(false); } catch (e) { console.error(e); } };
 
-  const handleSignOut = () => {
-    ['token', 'userId', 'authType', 'authProvider', 'username', 'creditsRemaining', 'googleLinked'].forEach(k => localStorage.removeItem(k));
+  const handleSignOut = async () => {
+    await authFetch(`${apiUrl}/api/auth/logout`, { method: 'POST' });
+    ['userId', 'authType', 'authProvider', 'username', 'creditsRemaining', 'googleLinked'].forEach(k => localStorage.removeItem(k));
     window.location.href = '/';
   };
 
   const handleToggleMemoryLearning = () => {
     setMemoryLearningEnabled(p => !p);
-    const token = authInfo?.token || localStorage.getItem('token');
-    if (token) {
-      fetch(`${apiUrl}/api/memory/preferences`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ memoryLearningEnabled: !memoryLearningEnabled, workspaceId: activeWorkspace?._id || null })
-      }).catch(() => {});
-    }
+    authFetch(`${apiUrl}/api/memory/preferences`, {
+      method: 'PATCH',
+      body: JSON.stringify({ memoryLearningEnabled: !memoryLearningEnabled, workspaceId: activeWorkspace?._id || null })
+    }).catch(() => {});
   };
 
   const openSettings = (section = 'account') => { setSettingsView(section); setSidebarDrawerOpen(false); };
@@ -292,12 +299,11 @@ const DashboardPageContent = () => {
 
   const handleProceedAsTestUser = async () => {
     setShowTestUserModal(false);
-    const token = authInfo?.token || localStorage.getItem('token');
-    if (!token) { setGoogleNote('Please sign in first.'); return; }
+    if (!authInfo?.ready) { setGoogleNote('Please sign in first.'); return; }
     try {
       setGoogleBusy(true);
       setGoogleNote('');
-      const r = await fetch(`${apiUrl}/api/google/auth-url`, { headers: { Authorization: `Bearer ${token}` } });
+      const r = await authFetch(`${apiUrl}/api/google/auth-url`);
       const d = await r.json();
       if (!r.ok || !d.url) throw new Error(d.message || 'Failed to start Google connection.');
       window.open(d.url, '_blank', 'noopener,noreferrer,width=520,height=700');
@@ -307,11 +313,10 @@ const DashboardPageContent = () => {
   };
 
   const handleGoogleLinkAccount = async () => {
-    const token = authInfo?.token || localStorage.getItem('token');
-    if (!token || authInfo?.authType === 'guest') { setGoogleNote('Sign in to link Google.'); return; }
+    if (!authInfo?.ready || authInfo?.authType === 'guest') { setGoogleNote('Sign in to link Google.'); return; }
     try {
       setGoogleBusy(true);
-      const r = await fetch(`${apiUrl}/api/auth/google/link-url`, { headers: { Authorization: `Bearer ${token}` } });
+      const r = await authFetch(`${apiUrl}/api/auth/google/link-url`);
       const d = await r.json();
       if (!r.ok || !d.url) throw new Error(d.message || 'Failed to start Google link flow.');
       const popup = window.open(d.url, 'arc-ai-google-link', 'width=520,height=720');

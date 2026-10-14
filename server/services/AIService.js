@@ -6,7 +6,7 @@ const Message = require("../models/Message");
 const TaskExecutor = require("./TaskExecutor");
 const toolRegistry = require("../tools/index");
 const pdfExtract = require("pdf-extraction"); // 🚀 The modern, working package!
-const { consumeCredits, isGuestActorId } = require("./creditService");
+const { consumeCredits, isGuestActorId, getActorRecord } = require("./creditService");
 const {
   isConversationOwned,
   ownedConversationFilter,
@@ -15,6 +15,9 @@ const {
 const { decisionEngine, decisionPolicy } = require("./decision");
 const LLMRouter = require("../lib/llm/LLMRouter");
 const StreamingRuntime = require("../lib/llm/StreamingRuntime");
+const brain = require("../lib/brain");
+const { createLlmReasoner, createHybridReasoner } = require("../lib/brain/reasonerLlm");
+const { discoverNative, preconditions: capabilityPreconditions } = require("../lib/capabilities");
 const {
   buildMemoryContext,
   searchWorkspace,
@@ -72,6 +75,7 @@ const {
 const WorkspaceRuntimeManager = require("./WorkspaceRuntimeManager");
 const WorkspaceLogger = require("../lib/WorkspaceLogger");
 const ttsService = require("./ttsService");
+const { createTtsModeAnnouncer } = require("../lib/capabilities/ttsModeAnnouncer");
 
 // This is the single, deliberately cheap gate in front of MCP discovery.
 // Discovery may reconnect servers and materialize a large schema inventory, so
@@ -361,6 +365,45 @@ const parseNewsIntent = (text, activeSearch) => {
       ...(nextRegion ? { region: nextRegion } : {}),
       ...(nextTopic ? { topic: nextTopic } : {}),
     },
+  };
+};
+
+// Stable logical identity for ONE Brain research step.
+//
+// A Brain replan is only a replan if it runs a DIFFERENT strategy. Giving every
+// step of a turn a key derived from (turn, capability, args) means a replayed
+// turn or a retried request replays the prior outcome instead of repeating a
+// real side effect, while a genuine second strategy on a second capability
+// still executes.
+const brainStepIdempotencyKey = (turnKey, capability, args = {}) => {
+  const turn = String(turnKey || "");
+  const name = String(capability || "");
+  if (!turn || !name) return null;
+  let argShape;
+  try {
+    argShape = JSON.stringify(args ?? {});
+  } catch {
+    argShape = "";
+  }
+  return `brain:${turn}:${name}:${argShape.slice(0, 240)}`;
+};
+
+// Result METADATA only. The Brain's observability and its state commit need to
+// know what ran and whether it worked; they never need the payload, and keeping
+// payloads out of the state is what stops a whole article body from becoming
+// "conversation context".
+const brainResultMeta = (result) => {
+  if (!result || typeof result !== "object") return null;
+  const payload =
+    result.result && typeof result.result === "object" ? result.result : result;
+  const list =
+    (Array.isArray(payload?.results) && payload.results) ||
+    (Array.isArray(payload?.articles) && payload.articles) ||
+    (Array.isArray(payload?.items) && payload.items) ||
+    [];
+  return {
+    resultCount: list.length,
+    hasPayload: list.length > 0,
   };
 };
 
@@ -3875,6 +3918,498 @@ class AIService {
     return parseNewsIntent(text, activeSearch);
   }
 
+  // ---- ARC Brain: the decision layer -------------------------------------
+  //
+  // Everything the assistant does about WHICH capability to use is decided
+  // here, before any tool is exposed. The Brain cannot execute; it returns a
+  // plan, and execution still goes through TaskExecutor.
+  //
+  // ARC_BRAIN=off restores the previous keyword gate without a deploy. The
+  // default is on, because the keyword gate is the bug.
+  brainEnabled() {
+    return String(process.env.ARC_BRAIN ?? "on").toLowerCase() !== "off";
+  }
+
+  getBrain() {
+    if (!this.__brain) {
+      this.__brain = brain.getBrainRuntime();
+      // ARC_BRAIN_REASONER=hybrid|llm puts a semantic reasoner in front of the
+      // deterministic one. It is OFF by default on purpose: the deterministic
+      // reasoner is what the regression suites pin, and a decision layer that
+      // silently changes behaviour when a provider is reachable is not one you
+      // can test. The provider seam is host-side; the Brain still never sees a
+      // provider SDK.
+      const mode = String(process.env.ARC_BRAIN_REASONER ?? "off").toLowerCase();
+      if (mode === "llm" || mode === "hybrid") {
+        try {
+          // The Brain is handed a FUNCTION, never a provider: the host owns the
+          // router, the Brain owns the decision.
+          const complete = async ({ system, user, maxTokens }) => {
+            const response = await this.llmRouter.generate({
+              messages: [
+                { role: "system", content: system },
+                { role: "user", content: user },
+              ],
+              maxTokens,
+              temperature: 0,
+            });
+            return { text: response?.text || response?.content || '' };
+          };
+          this.__brain.setReasoner(
+            createLlmReasoner({ complete }),
+          );
+          if (mode === "hybrid") {
+            this.__brain.setReasoner(
+              createHybridReasoner({
+                llm: createLlmReasoner({ complete }),
+                deterministic: brain.createDeterministicReasoner(),
+              }),
+            );
+          }
+        } catch (error) {
+          console.warn("[Brain] reasoner injection failed; staying deterministic", {
+            reason: String(error?.message || error).slice(0, 80),
+          });
+        }
+      }
+    }
+    return this.__brain;
+  }
+
+  /**
+   * The native capability inventory the planner reasons over. Cached briefly:
+   * the registry is stable within a turn, and rebuilding it per turn is wasted
+   * work on the hot path.
+   */
+  getBrainCapabilities() {
+    const now = Date.now();
+    if (this.__brainCaps && now - this.__brainCapsAt < 60_000) {
+      return this.__brainCaps;
+    }
+    try {
+      this.__brainCaps = discoverNative() || [];
+    } catch {
+      this.__brainCaps = [];
+    }
+    this.__brainCapsAt = now;
+    return this.__brainCaps;
+  }
+
+  /**
+   * The execution-context facts the capability precondition table needs,
+   * resolved from the real actor record.
+   *
+   * A missing or guest actor is DEFINITIVELY not an authenticated actor. A
+   * non-guest id that resolves to no User document is also definitive. An
+   * infrastructure failure resolves to `null` (unknown) rather than `false`,
+   * because refusing on a database error would hide capabilities that work.
+   *
+   * Read-only. This never mutates and never authorizes; TaskExecutor re-checks
+   * every one of these facts authoritatively at execution.
+   */
+  async getBrainExecutionFacts({ userId, signal } = {}) {
+    if (!userId || isGuestActorId(userId)) {
+      return { authenticatedActor: false, creditBalance: null };
+    }
+    try {
+      const record = await getActorRecord(userId);
+      if (!record) {
+        return { authenticatedActor: false, creditBalance: null };
+      }
+      const balance = Number(record.creditsRemaining);
+      return {
+        authenticatedActor: true,
+        creditBalance: Number.isFinite(balance) ? balance : null,
+      };
+    } catch {
+      if (signal?.aborted) return { authenticatedActor: null, creditBalance: null };
+      return { authenticatedActor: null, creditBalance: null };
+    }
+  }
+
+  /**
+   * The planner's view of the inventory for one execution context: the stable
+   * native inventory annotated with each capability's precondition verdict.
+   *
+   * The raw inventory stays cached (it is context-free); the precondition
+   * projection is per-actor and therefore recomputed per call.
+   */
+  getBrainCapabilitiesForContext(facts = {}) {
+    const inventory = this.getBrainCapabilities();
+    return (inventory || []).map((cap) => capabilityPreconditions.withPreconditionStatus(cap, facts));
+  }
+
+  /**
+   * Decide a turn. Returns the Brain's interpretation/plan plus a newsIntent in
+   * the EXACT shape the downstream code already consumes ({ args, state }).
+   *
+   * The one rule that changes production behaviour: a news request must be
+   * EVIDENCED in the user's own message. Conversation state can no longer
+   * manufacture one. That is what stops the Paperclip loop, and it is why the
+   * correction turn can never be pulled back into news.
+   */
+  async brainDecideTurn({ text, actorKey, workingState, userId, signal }) {
+    if (!this.brainEnabled()) {
+      return { enabled: false, newsIntent: this.resolveNewsIntent(text, workingState?.activeSearch) };
+    }
+    let brainTurn = null;
+    let brainRelation = null;
+    try {
+      // understand() + plan() only. `think()` would also run the research loop,
+      // which is not what this call site wants: nothing is being executed here,
+      // so a research turn would burn its attempt budget on no-op calls and
+      // then poison the conversational state with a synthetic failure.
+      const runtime = this.getBrain();
+      const { interpretation, relation } = await runtime.understand({
+        userText: text,
+        actorKey,
+      });
+      // Resolve the execution-context facts first so the plan can refuse a
+      // capability this actor could never run (e.g. deepResearchSwarm for a
+      // guest) instead of spending a research step discovering it.
+      const executionFacts = await this.getBrainExecutionFacts({ userId, signal });
+      const plan = runtime.plan({
+        brainTurnId: null,
+        interpretation,
+        capabilities: this.getBrainCapabilitiesForContext(executionFacts),
+      });
+      if (plan.refused && plan.refused.length) {
+        // Visible, not silent: a refused capability is reported, never hidden.
+        console.info("[Brain] capability refused by execution-context precondition", {
+          refused: plan.refused.map((r) => `${r.capability}:${r.reason}`),
+        });
+      }
+      brainTurn = { interpretation, plan, outcome: null, executionFacts };
+      brainRelation = relation;
+
+      // Record the DECISION as conversational context, without an outcome. The
+      // next turn's "in India" is a refinement only if the Brain knows the
+      // previous turn was a news request. No outcome is committed here, because
+      // nothing has executed yet and a synthetic outcome would be a lie.
+      try {
+        runtime.conversationState.commit(actorKey, interpretation, {
+          relation: relation.relation,
+          outcome: null,
+          capabilities: this.brainPlannedToolNames(brainTurn),
+        });
+      } catch (error) {
+        console.warn("[Brain] state commit failed", {
+          reason: String(error?.message || error).slice(0, 80),
+        });
+      }
+    } catch (error) {
+      // A Brain failure must not break the turn. Fall back to the legacy gate.
+      console.warn("[Brain] decision failed, falling back", {
+        reason: String(error?.message || error).slice(0, 120),
+      });
+      return { enabled: true, degraded: true, newsIntent: this.resolveNewsIntent(text, workingState?.activeSearch) };
+    }
+
+    const newsIntent = this.brainNewsIntent(brainTurn, text, brainRelation, workingState);
+    const i = brainTurn.interpretation;
+    console.log("[Brain] decision", JSON.stringify({
+      taskType: i.taskType,
+      mode: i.preferredResearchMode,
+      topic: i.topic || null,
+      relation: i.conversationRelation,
+      confidence: Number(Number(i.confidence).toFixed(2)),
+      planned: this.brainPlannedToolNames(brainTurn),
+      newsIntent: Boolean(newsIntent),
+    }));
+    return { enabled: true, brainTurn, newsIntent };
+  }
+
+  /**
+   * News is granted on EXPLICIT demand, or on a bare scope refinement of a
+   * still-live news request. It is never granted to a message that asks for
+   * something new.
+   *
+   *   "what's the latest news about X"  -> explicit
+   *   "in India" / "what about the US?" -> refinement of the live news scope
+   *   "provide me detailed information about paperclip"
+   *                                      -> its own request: news REFUSED
+   *   "i just asked about paperclip"     -> correction: news REFUSED
+   *
+   * The old gate made the third case a news turn, which is the production loop.
+   */
+  brainNewsIntent(brainTurn, text, relation, workingState) {
+    const interpretation = brainTurn?.interpretation;
+    if (!interpretation) return null;
+
+    const explicit = interpretation.evidence?.explicitNewsDemand === true;
+    // A refinement requires ALL of: the previous turn really was a news
+    // request, this message is not a correction, and this message does not ask
+    // for anything itself. A message that carries its own request frame is a
+    // NEW request, so no active scope can absorb it.
+    const priorWasNews = relation?.priorTaskType === "current_news";
+    const isCorrection = relation?.relation === "correction";
+    const bareQualifier = !brain.carriesNewRequest(text);
+    const refinement = Boolean(priorWasNews && !isCorrection && bareQualifier);
+
+    if (!explicit && !refinement) return null;
+
+    // On a refinement the prior scope is the base, so region/topic carry over.
+    // On an explicit request the prior scope is ignored entirely, so a stale
+    // scope can never widen what the user just asked for.
+    return parseNewsIntent(text, refinement ? workingState.activeSearch : null);
+  }
+
+  /**
+   * Which capabilities the Brain planned. The tool-selection step uses this to
+   * keep unrelated tools — above all getTopNews — out of a research turn.
+   */
+  brainPlannedToolNames(brainTurn) {
+    return (brainTurn?.plan?.capabilities || [])
+      .flatMap((c) => c.names || [])
+      .filter(Boolean);
+  }
+
+  // ---- ARC Brain: governed execution (opt-in) ---------------------------
+  //
+  // The Brain may DECIDE to research, and it may observe a result and decide
+  // whether to research again. It may never EXECUTE. Execution is the host's,
+  // and the host's only execution path is TaskExecutor.executeTool, so
+  // authorization, approval, idempotency, the execution envelope, MCP policy,
+  // observability and the workspace/conversation identity all keep applying.
+  //
+  // ARC_BRAIN_EXEC is OFF by default. It is a separate flag from ARC_BRAIN on
+  // purpose: the decision layer is wanted everywhere, but re-routing execution
+  // is a behavioural change that must be enabled deliberately, per deploy.
+
+  /**
+   * The single, centralized enablement check. Nothing else in this file may ask
+   * the environment whether Brain execution is on.
+   */
+  brainExecEnabled() {
+    return String(process.env.ARC_BRAIN_EXEC ?? "off").toLowerCase() === "on";
+  }
+
+  /**
+   * Build the Brain's executor for one turn.
+   *
+   * Every value TaskExecutor needs is bound HERE, in the host, so the Brain
+   * never has to know what a userId or a socket is — it only carries them. That
+   * is what makes "the Brain cannot drop the workspace identity" true by
+   * construction rather than by discipline.
+   */
+  brainGovernedExecutor({
+    userId,
+    socket,
+    workspaceId,
+    conversationId,
+    signal,
+    turnKey,
+    plannedNames = [],
+    executed = [],
+  }) {
+    const planned = new Set(plannedNames);
+    return async ({ capability, args, reason, context, signal: stepSignal }) => {
+      const runSignal = stepSignal || signal || context?.signal || null;
+
+      if (runSignal?.aborted) {
+        return { success: false, cancelled: true, error: "aborted_before_brain_step" };
+      }
+
+      // Defence in depth. The planner chose this capability, so anything else is
+      // a bug in the Brain and must not reach a governed tool.
+      if (!planned.size || !planned.has(capability)) {
+        return {
+          success: false,
+          error: `capability_not_in_plan:${capability}`,
+          unplanned: true,
+        };
+      }
+
+      // One logical action per (turn, capability, args). A replayed turn, a
+      // retried request, or a Brain replan of the SAME strategy replays the
+      // prior outcome instead of repeating a real side effect.
+      const idempotencyKey = brainStepIdempotencyKey(turnKey, capability, args);
+
+      let result;
+      try {
+        result = await TaskExecutor.executeTool(capability, args, userId, socket, {
+          signal: runSignal,
+          conversationId,
+          workspaceId,
+          idempotencyKey,
+        });
+      } catch (execError) {
+        result = { success: false, error: execError?.message || "Tool execution failed." };
+      }
+
+      // Client-facing side effects (theme, media, confirmation prompts) must
+      // still reach the socket, exactly as they do on the legacy path.
+      if (result?.clientAction && socket) socket.emit("ai:client:action", result.clientAction);
+
+      executed.push({
+        capability,
+        reason,
+        success: Boolean(result?.success),
+        cancelled: Boolean(result?.cancelled),
+        error: result?.success ? null : result?.error || result?.message || null,
+        // Metadata only. The full payload stays out of the log and out of the
+        // conversation state; synthesis reads the real result separately.
+        resultMeta: brainResultMeta(result),
+      });
+
+      console.log("[Brain] governed step", {
+        capability,
+        reason,
+        success: Boolean(result?.success),
+        cancelled: Boolean(result?.cancelled),
+      });
+
+      return result;
+    };
+  }
+
+  /**
+   * Run the Brain's research loop for this turn through the governed path.
+   * Returns null when execution is off or the turn is not research-capable, so
+   * the caller falls through to the untouched legacy behaviour.
+   */
+  async brainRunResearch({
+    brainDecision,
+    text,
+    actorKey,
+    userId,
+    socket,
+    workspaceId,
+    conversationId,
+    signal,
+    turnKey,
+  }) {
+    if (!this.brainExecEnabled()) return null;
+    if (!brainDecision?.enabled || brainDecision.degraded) return null;
+    // The Brain owns a research loop only for a research turn. News stays on
+    // its own single-retrieval path, and non-research turns are untouched.
+    if (brainDecision.newsIntent) return null;
+    const plan = brainDecision.brainTurn?.plan;
+    if (!plan?.researchLoop) return null;
+    if (!this.brainPlannedToolNames(brainDecision.brainTurn).length) return null;
+
+    const runtime = this.getBrain();
+    const plannedNames = this.brainPlannedToolNames(brainDecision.brainTurn);
+    const executed = [];
+    const startedAt = Date.now();
+
+    let research = null;
+    try {
+      research = await runtime.research({
+        brainTurnId: `brain:${turnKey}`,
+        interpretation: brainDecision.brainTurn.interpretation,
+        plan,
+        context: { userId, socket, workspaceId, conversationId, signal, turnKey },
+        execute: this.brainGovernedExecutor({
+          userId,
+          socket,
+          workspaceId,
+          conversationId,
+          signal,
+          turnKey,
+          plannedNames,
+          executed,
+        }),
+      });
+    } catch (brainError) {
+      // The Brain failing must never cost the user their turn: fall through to
+      // the legacy path rather than answering from nothing.
+      console.warn("[Brain] research loop failed; falling back", {
+        reason: String(brainError?.message || brainError).slice(0, 120),
+      });
+      return null;
+    }
+
+    const attempts = Array.isArray(research?.attempts) ? research.attempts : [];
+    const succeeded = attempts.filter((a) => a.succeeded);
+    const useful = attempts.filter((a) => a.succeeded && a.relevance !== "irrelevant");
+
+    // The final state commit happens HERE, after the real outcome is known, and
+    // only for a capability that actually ran. A turn that never executed must
+    // not look like a turn that did.
+    const finalOutcome = research?.aborted
+      ? "cancelled"
+      : useful.length
+        ? "answer_from_observation"
+        : attempts.length
+          ? "truthful_failure"
+          : "degraded";
+    try {
+      runtime.conversationState.commit(
+        actorKey,
+        brainDecision.brainTurn.interpretation,
+        {
+          relation: brainDecision.brainTurn.interpretation?.conversationRelation,
+          outcome: finalOutcome,
+          capabilities: succeeded.map((a) => a.capability),
+        },
+      );
+    } catch (stateError) {
+      console.warn("[Brain] final state commit failed", {
+        reason: String(stateError?.message || stateError).slice(0, 80),
+      });
+    }
+
+    const metrics = {
+      researchSteps: attempts.length,
+      replanCount: Number.isFinite(research?.replanCount) ? research.replanCount : 0,
+      executedCapabilities: executed.map((e) => e.capability),
+      finalOutcome,
+      aborted: Boolean(research?.aborted),
+      durationMs: Date.now() - startedAt,
+    };
+    console.log("[Brain] research metrics", metrics);
+
+    return {
+      ownsLoop: true,
+      attempts,
+      executed,
+      metrics,
+      finalOutcome,
+      // Only real, relevant, successful results may be handed to synthesis. A
+      // failed or rejected rung contributes nothing.
+      synthesisText: this.brainSynthesisText(attempts),
+      // Real successful results, for the working-state refresh. Never a failed
+      // one: the persisted active-search scope is built from these alone.
+      stateResults: succeeded
+        .filter((a) => a.relevance !== "irrelevant")
+        .map((a) => ({
+          tool: a.capability,
+          query: a.query,
+          relevance: a.relevance,
+        })),
+    };
+  }
+
+  /**
+   * The observation block handed to synthesis. Bounded and provenance-labelled
+   * so the model can distinguish "we looked and found this" from "we could not
+   * look at all".
+   */
+  brainSynthesisText(attempts) {
+    const lines = [];
+    for (const attempt of attempts) {
+      if (!attempt.succeeded) {
+        lines.push(
+          `- ${attempt.capability}: FAILED (${String(attempt.failure || "unavailable").slice(0, 120)})`,
+        );
+        continue;
+      }
+      if (attempt.relevance === "irrelevant") {
+        lines.push(
+          `- ${attempt.capability}: returned results that did not answer the question, so they were rejected.`,
+        );
+        continue;
+      }
+      const text = String(attempt.observationText || "").trim();
+      if (!text) continue;
+      lines.push(
+        `- ${attempt.capability} (relevance ${attempt.relevance}): ${text.slice(0, 1200)}`,
+      );
+    }
+    return lines.join("\n");
+  }
+
   getNewsIntentKey(args) {
     return newsIntentKey(args);
   }
@@ -4280,6 +4815,14 @@ class AIService {
     // delivered) and guards the streamed fallback assignments.
     let initialStreamed = false;
     let conversationalStreamed = false;
+    // `ai:tts:mode` is PER-RESPONSE state and the client treats every arrival
+    // as a new-response boundary (hard reset of its playback-ownership machine
+    // + legacy WAV queue, with no stop for the worklet that may still be
+    // speaking). Announcing it twice for one response re-admits the legacy WAV
+    // path while the streaming PCM path is still audible, and because both
+    // engines synthesize the same text the user hears one sentence twice in two
+    // voices. Announce exactly once per response; the first announcement wins.
+    const ttsModeAnnouncer = createTtsModeAnnouncer({ socket });
     try {
       console.log(
         `[Planner] Incoming user command: ${String(text || "").trim()}`,
@@ -4671,15 +5214,30 @@ class AIService {
       } catch {
         turnWorkingState = persistedWorkingState;
       }
+      // ---- ARC Brain: decide BEFORE any tool is exposed -------------------
+      //
+      // The old gate read the PERSISTED news scope to decide the current
+      // intent, and then wrote the news scope back before executing anything.
+      // One bad turn therefore made every later turn a news turn, including a
+      // user who explicitly corrected themselves. The Brain decides from the
+      // user's own words and conversation state, and the news scope is only
+      // persisted after a result has been verified as relevant.
+      const brainDecision = await this.brainDecideTurn({
+        text: baseMessageContent,
+        actorKey: `${userId || "anon"}:${conversationId || "new"}`,
+        workingState: turnWorkingState,
+        // The plan needs the REAL execution-context facts. Without these the
+        // precondition evaluator could not resolve a persisted actor, so
+        // deepResearchSwarm was refused for authenticated users too.
+        userId,
+        signal: controller.signal,
+      });
       const newsIntent =
         !pendingForGate &&
         !imageBase64 &&
         !document &&
         !isCancelText(baseMessageContent)
-          ? this.resolveNewsIntent(
-              baseMessageContent,
-              turnWorkingState?.activeSearch,
-            )
+          ? brainDecision.newsIntent || null
           : null;
       if (newsIntent) {
         const currentSearch =
@@ -4700,7 +5258,45 @@ class AIService {
           1200,
         );
         skipMcpGate = false;
+      } else if (
+        brainDecision?.enabled &&
+        !brainDecision.degraded &&
+        turnWorkingState?.activeSearch &&
+        (turnWorkingState.activeSearch.tool === "getTopNews" ||
+          turnWorkingState.activeSearch.operation === "news")
+      ) {
+        // The Brain decided this is NOT a news turn, so the persisted news scope
+        // is now false. Leaving it would let any other consumer of the working
+        // state keep reasoning about a news request the user never made. The
+        // decision already no longer reads it; this stops it misleading anyone
+        // else.
+        const { activeSearch: _dropped, ...rest } = turnWorkingState;
+        turnWorkingState = Object.keys(rest).length ? rest : null;
+        console.log("[Brain] cleared stale news scope");
       }
+
+      // ---- ARC Brain: governed research execution (opt-in) ---------------
+      //
+      // Off by default. When on, and only for a turn the Brain classified as
+      // research-capable, the Brain owns that research loop for the whole turn:
+      // it plans, the host executes through TaskExecutor, the Brain observes
+      // the REAL result and may replan once within a bounded budget.
+      //
+      // Because the Brain owns the loop, this turn's tool set is emptied below
+      // (tools = []) and the real observations are handed to synthesis. That is
+      // what makes duplicate execution impossible: the model is not offered the
+      // capability a second time, so it cannot call it again.
+      const brainResearch = await this.brainRunResearch({
+        brainDecision,
+        text: baseMessageContent,
+        actorKey: `${userId || "anon"}:${conversationId || "new"}`,
+        userId,
+        socket,
+        workspaceId: workspaceContext.workspaceId || null,
+        conversationId,
+        signal: controller.signal,
+        turnKey: key,
+      });
       if (decisionGate) {
         try {
           skipMcpGate = this.decisionPolicy.shouldSkipMcp(decisionGate, {
@@ -5011,10 +5607,34 @@ class AIService {
             ),
           ].slice(0, 6);
         }
+      } else if (brainDecision?.enabled && !brainDecision.degraded) {
+        // A non-news turn must not be offered the headlines tool. This is the
+        // other half of the fix: even if a selector ranks getTopNews highly
+        // because of a "viral" cue, the capability is not on the table. The
+        // removal is unconditional, including when the plan is empty (a
+        // greeting or a stable-knowledge answer) -- an empty plan means "this
+        // turn needs nothing", never "this turn may fetch headlines".
+        const planned = this.brainPlannedToolNames(brainDecision.brainTurn);
+        toolPick.tools = (toolPick.tools || []).filter((schema) => {
+          const name = schema?.function?.name;
+          if (!name) return false;
+          if (name === "getTopNews") return false;
+          if (planned.length) return planned.includes(name);
+          // No plan to narrow to: keep the caller's tool set (minus headlines)
+          // so a capability the planner did not anticipate is still reachable.
+          return true;
+        });
       }
       const outputIntent = detectOutputIntent(baseMessageContent);
       const currentNewsGuidance = newsIntent
         ? "\n\nCURRENT NEWS TURN: Use the getTopNews result already requested for this turn. Do not call another search, webSearch, or scraping tool. After the one retrieval, synthesize the answer directly from its articles and state when the source data is unavailable or rate-limited."
+        : "";
+      // The Brain already ran (and bounded) this turn's research through the
+      // governed path. The observations below are what those real executions
+      // actually returned, so the answer must come from them -- and from nothing
+      // else. No tool is offered for this turn, so there is nothing to re-call.
+      const brainResearchGuidance = brainResearch?.ownsLoop
+        ? `\n\nBRAIN RESEARCH TURN: The decision layer already researched this request through the governed execution path (${brainResearch.metrics.researchSteps} step(s), ${brainResearch.metrics.replanCount} replan(s), outcome: ${brainResearch.metrics.finalOutcome}). Its real observations are below. Answer the user directly from them. If the observations are empty or report FAILED, say plainly that the information could not be retrieved — never fill the gap from memory as if it were retrieved, and never claim a source you were not given.\n\nOBSERVED RESULTS:\n${brainResearch.synthesisText || "(no usable observation was returned)"}`
         : "";
       const outputBudget =
         outputIntent === "extended"
@@ -5297,7 +5917,7 @@ class AIService {
                     If a user asks "who created you", "who made you", or similar identity/creator questions, reply exactly with:
 
                     "I am ARC-AI, an autonomous multimodal AI platform created by Aashutosh Bairagi — an AI systems engineer focused on realtime architectures, autonomous agents, and next-generation intelligent software systems."
-                     ${mcpPolicyNote}${mcpDegradedNote}${currentNewsGuidance}`;
+                     ${mcpPolicyNote}${mcpDegradedNote}${currentNewsGuidance}${brainResearchGuidance}`;
 
 
       // Working state for this turn: persisted refs (previous tool
@@ -5408,6 +6028,31 @@ class AIService {
       // advertised inventory are now identical by construction.
       let tools = budgeted.tools;
       let systemPrompt = budgeted.systemPrompt;
+      if (brainResearch?.ownsLoop) {
+        // The Brain owns this turn's research loop and its real observations
+        // are already in the system prompt. Offering tools here would let the
+        // model run the SAME capability a second time for the same question --
+        // the duplicate-execution bug this whole layer exists to prevent.
+        tools = [];
+        // The inventory block is rebuilt from the emptied set below, so the
+        // prompt can no longer advertise a tool the turn may not call.
+        systemPrompt = systemPrompt.replace(
+          /MCP INTEGRATIONS[\s\S]*?(?=\n\n[A-Z][A-Z /]*:|$)/,
+          "",
+        );
+        try {
+          systemPrompt = this.refreshInventoryPrompt(
+            systemPrompt,
+            this.mcpInventoryBlockForTools([], { metadata: null, failures: [] }),
+          );
+        } catch {
+          /* never break the path on a prompt rewrite */
+        }
+        console.log("[Brain] research turn owns execution; tool set emptied", {
+          steps: brainResearch.metrics.researchSteps,
+          executed: brainResearch.metrics.executedCapabilities,
+        });
+      }
       let mcpProtectedNames = [
         ...(toolPick.mcpExplicit || []),
         ...(toolPick.mcpCapability || []),
@@ -5722,11 +6367,7 @@ class AIService {
                 voiceStreamer = null;
               }
             }
-            if (socket) {
-              socket.emit("ai:tts:mode", {
-                mode: convServerTts ? "server" : "browser",
-              });
-            }
+            ttsModeAnnouncer.announce(convServerTts);
             const convOnChunk = async (chunkText) => {
               assistantDraftContent += chunkText;
               // Voice first, persist after: the per-delta Mongo round-trip
@@ -5871,6 +6512,17 @@ class AIService {
         // The conversational fast path already created its buffers while
         // streaming; recreating them here would orphan the live stream.
         if (!conversationalStreamed) {
+          // If the conversational round threw AFTER it had already pushed text
+          // into both engines, those instances are still live (own provider
+          // session, still emitting). Overwriting the handles would leave an
+          // orphaned voice stream alongside the new one -- two TTS sessions
+          // for one response, each voicing overlapping text. Close them first.
+          if (ttsBuffer || voiceStreamer) {
+            try { ttsBuffer?.stop(); } catch { /* ignore */ }
+            try { voiceStreamer?.stop("superseded"); } catch { /* ignore */ }
+            ttsBuffer = null;
+            voiceStreamer = null;
+          }
           ttsBuffer = serverTtsActive
             ? new ttsService.TtsStreamBuffer({
                 socket,
@@ -5897,11 +6549,7 @@ class AIService {
             voiceStreamer = null;
           }
         }
-        if (socket) {
-          socket.emit("ai:tts:mode", {
-            mode: serverTtsActive ? "server" : "browser",
-          });
-        }
+        ttsModeAnnouncer.announce(serverTtsActive);
 
         if (!conversationalStreamed) {
           finalOutputText = response?.text || "";

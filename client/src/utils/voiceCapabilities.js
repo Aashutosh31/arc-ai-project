@@ -10,6 +10,18 @@ const API_URL = (() => {
   }
 })();
 
+// Helper for authenticated fetch requests
+const authFetch = async (url, options = {}) => {
+  return fetch(url, {
+    ...options,
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+  });
+};
+
 // Microphone capture + Web Audio (input AudioWorklet framing). The ONLY
 // client-side requirement for streaming STT.
 export const hasUserMediaAudio = () => {
@@ -42,13 +54,8 @@ export const blobToBase64 = (blob) => new Promise((resolve, reject) => {
 // Legacy single-shot blob transcription (kept for non-streaming callers).
 export const transcribeAudioBlob = async (blob, { signal } = {}) => {
   const base64 = await blobToBase64(blob);
-  const token = localStorage.getItem('token');
-  const response = await fetch(`${API_URL}/api/voice/transcribe`, {
+  const response = await authFetch(`${API_URL}/api/voice/transcribe`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
-    },
     body: JSON.stringify({ audio: base64, mimeType: blob?.type || undefined }),
     signal
   });
