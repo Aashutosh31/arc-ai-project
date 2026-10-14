@@ -134,13 +134,26 @@ jobs:
         working-directory: ./server
         run: npm ci
 
+      # The server test suite is intentionally LOCAL-ONLY (server/tests is
+      # gitignored). Run it when present (e.g. if that changes); otherwise
+      # the job still validates that `npm ci` installs cleanly.
       - name: Run server tests
         working-directory: ./server
-        run: npm test
+        run: |
+          if [ -f tests/runAll.js ]; then
+            npm test
+          else
+            echo "server/tests is local-only (gitignored) — skipping unit tests in CI"
+          fi
 
       - name: Run server tests with MongoDB
         working-directory: ./server
-        run: npm run test:mongo
+        run: |
+          if [ -f tests/runAll.js ]; then
+            npm run test:mongo
+          else
+            echo "server/tests is local-only (gitignored) — skipping MongoDB tests in CI"
+          fi
 
   test-client:
     name: Client Tests
@@ -159,9 +172,15 @@ jobs:
         working-directory: ./client
         run: npm ci
 
+      # The client test suite is LOCAL-ONLY (client/tests is gitignored).
       - name: Run client tests
         working-directory: ./client
-        run: npm test
+        run: |
+          if [ -d tests ] && [ -n "$(ls tests/*.test.mjs 2>/dev/null)" ]; then
+            npm test
+          else
+            echo "client/tests is local-only (gitignored) — skipping unit tests in CI"
+          fi
 
   build-client:
     name: Build Client
@@ -210,10 +229,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      # For push/PR events the action scans the event's commits itself;
+      # base/head must NOT be pinned (there is no `main` branch here), and
+      # `--fail` is already passed by the action (passing it again errors).
       - name: Run TruffleHog
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          base: main
-          head: HEAD
-          extra_args: --fail --only-verified
+          extra_args: --only-verified
