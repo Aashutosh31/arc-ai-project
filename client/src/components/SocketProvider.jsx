@@ -51,18 +51,26 @@ export const SocketProvider = ({ children }) => {
             let creditsRemaining = Number(localStorage.getItem('creditsRemaining') || 0);
             let googleLinked = localStorage.getItem('googleLinked') === 'true';
 
-            // Validate existing session by calling /api/auth/me (uses httpOnly cookie)
-            if (userId && authType === 'guest') {
+            // Validate ANY cached session (guest OR user) against the server.
+            // A stale user session — localStorage says user but the cookie is
+            // missing/expired (e.g. the old cross-site cookie bug) — used to
+            // slip through unvalidated: every REST call 401'd and the socket
+            // could never fetch a ticket, leaving a permanent "Offline"
+            // dashboard. Now it self-heals: invalid session is cleared and a
+            // fresh guest session is created below.
+            if (userId) {
                 try {
                     const meResponse = await authFetch(`${API_URL}/api/auth/me`);
-                    if (!meResponse.ok) throw new Error(`stale guest session (HTTP ${meResponse.status})`);
+                    if (!meResponse.ok) throw new Error(`stale session (HTTP ${meResponse.status})`);
                     const meData = await meResponse.json();
                     userId = meData.id || meData._id || userId;
+                    authType = meData.authType || authType;
+                    authProvider = meData.authProvider || authProvider;
                     username = meData.username || username;
                     creditsRemaining = Number(meData.creditsRemaining ?? creditsRemaining);
                     googleLinked = Boolean(meData.googleLinked);
                 } catch (validationError) {
-                    console.warn('Cached guest session invalid, creating a fresh one:', validationError?.message || validationError);
+                    console.warn('Cached session invalid, creating a fresh guest one:', validationError?.message || validationError);
                     for (const key of ['userId', 'authType', 'authProvider', 'username', 'creditsRemaining', 'googleLinked']) {
                         localStorage.removeItem(key);
                     }

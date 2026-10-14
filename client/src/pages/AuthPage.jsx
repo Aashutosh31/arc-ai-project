@@ -699,21 +699,45 @@ const AuthPage = ({ isRegister }) => {
   };
 
   useEffect(() => {
+    const finishGoogleLogin = () => {
+      // Hard navigation (not SPA navigate + reload): guarantees the reload
+      // lands on /dashboard and the SocketProvider re-bootstraps against the
+      // new first-party session cookie instead of stale guest/user state.
+      window.location.assign('/dashboard');
+    };
+
     const handleGoogleMessage = (event) => {
-      // The popup now redirects to the frontend's own /auth/callback route
-      // (which exchanges a one-time ticket for the session cookie through the
-      // same-origin proxy), so the postMessage originates from THIS origin —
-      // not the API host.
+      // Fast path when the popup's opener survived (postMessage origin is
+      // this frontend origin — the popup lands on /auth/callback here).
       if (event.origin !== window.location.origin) return;
       if (event.data?.type !== 'arc-ai-google-auth-success') return;
 
       persistAuthSession(event.data.payload);
-      navigate('/dashboard');
-      window.location.reload();
+      finishGoogleLogin();
+    };
+
+    // PRIMARY path: Google's pages send Cross-Origin-Opener-Policy, which
+    // severs window.opener — the popup's postMessage often never arrives.
+    // localStorage is shared same-origin across windows; when the popup
+    // finishes the ticket exchange it writes the session here, firing this
+    // `storage` event in THIS window.
+    const handleStorage = (event) => {
+      if (event.key !== 'authProvider' && event.key !== 'userId') return;
+      const authProvider = localStorage.getItem('authProvider');
+      const authType = localStorage.getItem('authType');
+      // Only treat as a completed Google sign-in — not the guest bootstrap
+      // that also writes userId/authType on page load.
+      if (authProvider === 'google' || (authType === 'user' && authProvider !== 'guest')) {
+        finishGoogleLogin();
+      }
     };
 
     window.addEventListener('message', handleGoogleMessage);
-    return () => window.removeEventListener('message', handleGoogleMessage);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('message', handleGoogleMessage);
+      window.removeEventListener('storage', handleStorage);
+    };
   }, [navigate]);
 
   const handleGoogleAuth = async () => {
