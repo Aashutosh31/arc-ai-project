@@ -13,7 +13,8 @@
 // double-voice race — two speaking voices for one response.
 //
 // This module owns the transition rule so it is testable without React:
-//   - a legacy WAV segment may play only while the worklet owns nothing;
+//   - a legacy WAV segment may play only while the worklet owns nothing AND
+//     no worklet stream has been announced (see legacyShouldPlay());
 //   - the FIRST worklet chunk for a response preempts any live legacy audio
 //     (the hook calls its `resetAudio()`), so the hand-off is immediate,
 //     not mute-only; subsequent legacy segments are dropped outright.
@@ -34,13 +35,28 @@ export const createVoiceOwnership = () => {
   let streamLive = false;
 
   return {
-    // Legacy WAV arrival: may it open/continue? True while the worklet has
-    // delivered nothing for this response (legacy remains the fallback).
+    // Legacy WAV arrival: may it open/continue? True only while the worklet
+    // has delivered nothing AND no worklet stream is live for this response.
+    //
+    // Checking `streamLive` is essential: `voice:tts:start` fires on the
+    // first LLM text push (synchronous), while the legacy WAV arrives only
+    // after provider synthesis of the first sentence (~1-2s later). So when
+    // a stream has been announced, the worklet WILL deliver audio imminently
+    // — admitting the legacy opener here is the reported double-voice race:
+    // the WAV speaks the first sentence, then the worklet's first chunk
+    // preempts it mid-way and re-speaks the whole response from the start.
+    // Legacy is only the true fallback when NO stream was announced (server
+    // voice inactive, VoiceTtsStreamer init failed, or stream cancelled —
+    // cancel/reset clears streamLive and re-admits it).
     legacyShouldPlay() {
-      return !workletSeen;
+      return !workletSeen && !streamLive;
     },
     // The legacy queue admitted a segment (caller actually enqueued it).
-    // Only meaningful while the worklet owns nothing.
+    // Deliberately NOT gated on streamLive: admission (legacyShouldPlay) is
+    // the primary lock, but if a legacy segment ever IS audible, this bit
+    // must record it so the first worklet chunk preempts it — dropping the
+    // record would let two voices run. Only meaningful while the worklet
+    // has delivered nothing.
     markLegacyLive() {
       if (!workletSeen) legacyLive = true;
     },
@@ -58,19 +74,23 @@ export const createVoiceOwnership = () => {
       return workletSeen;
     },
     // A `voice:tts:start` arrived.
-    //   continuation === false -> first stream of this response; stale state
-    //                             was cleared here so the response starts
-    //                             with no owner.
+    //   continuation === false -> first stream of this response; stale
+    //                             worklet ownership was cleared here so the
+    //                             response starts with no worklet owner.
     //   continuation === true  -> another stream inside the SAME response
-    //                             (a superseding session). Ownership is
-    //                             deliberately PRESERVED: clearing it would
-    //                             re-admit the legacy WAV path on top of the
-    //                             voice already playing.
+    //                             (a superseding session).
+    // `legacyLive` is deliberately PRESERVED in both cases: it records a WAV
+    // segment that is actually audible right now (a WAV can open before any
+    // stream is announced — it is the fallback). Clearing it would strand
+    // that open segment: the first worklet chunk would find nothing to
+    // preempt and the two voices would run together. A phantom from a
+    // previous response is impossible (every response boundary — mode
+    // announcement, cancel — runs reset()) and would only cost a harmless
+    // extra resetAudio() anyway.
     beginStream() {
       const continuation = streamLive;
       if (!continuation) {
         workletSeen = false;
-        legacyLive = false;
       }
       streamLive = true;
       return { continuation, first: !continuation };

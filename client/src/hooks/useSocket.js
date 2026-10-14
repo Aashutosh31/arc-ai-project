@@ -353,21 +353,23 @@ export const useSocket = () => {
 
       if (!isFinal) {
         appendBotChunk(displayText || chunk);
-        const settings = getVoiceSettings();
-        // Voice Runtime 2.0: when streaming server TTS is enabled and the
-        // server announced server mode, the AudioWorklet owns speech — the
-        // browser SpeechSynthesis fallback stays silent (no double voice).
-        // Otherwise SpeechSynthesis remains the fallback path.
-        const streamingOwnsSpeech = settings.streamingEnabled && ttsModeRef.current === 'server';
-        if (!suppressSpeechRef.current && !streamingOwnsSpeech) {
+        // Voice Runtime 2.0: when the server announced server mode it ALWAYS
+        // emits its own audio for this response (legacy `ai:tts:audio` WAV
+        // and/or the `voice:tts:*` PCM stream — same `isServerTtsActive()`
+        // gate that produced the announcement). SpeechSynthesis must stay
+        // silent regardless of the client's `streamingEnabled` preference:
+        // gating on that flag too meant a streaming-disabled client played
+        // BOTH the browser voice and the server WAV for the whole response
+        // (second double-voice path). Browser speech is for browser mode.
+        const serverOwnsSpeech = ttsModeRef.current === 'server';
+        if (!suppressSpeechRef.current && !serverOwnsSpeech) {
           processStreamChunk(displayText || chunk, false);
         }
       } else {
         finishBotStream();
         setAgentStatus(null);
-        const settings = getVoiceSettings();
-        const streamingOwnsSpeech = settings.streamingEnabled && ttsModeRef.current === 'server';
-        if (!suppressSpeechRef.current && !streamingOwnsSpeech) {
+        const serverOwnsSpeech = ttsModeRef.current === 'server';
+        if (!suppressSpeechRef.current && !serverOwnsSpeech) {
           processStreamChunk('', true);
         }
         speechCharCountRef.current = 0;
