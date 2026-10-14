@@ -1,8 +1,7 @@
 import React, { createContext, useState, useContext, useCallback, useEffect } from 'react';
 import { SocketContext } from './SocketContext';
 import { useWorkspace } from './WorkspaceContext';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+import { API_URL } from '../config';
 
 // Helper for authenticated fetch requests
 const authFetch = async (url, options = {}) => {

@@ -17,6 +17,7 @@ const voiceRoutes = require('./routes/voice.js');
 const AIService = require('./services/AIService.js'); 
 const { resolveSocketConversation } = require('./lib/conversationAccess');
 const operatorPolicySource = require('./lib/capabilities/operatorPolicySource');
+const ticketStore = require('./lib/oneTimeTicketStore');
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -66,6 +67,11 @@ if (process.env.JWT_SECRET && process.env.JWT_SECRET.length < 32) {
 }
 
 const app = express();
+
+// Render (and most PaaS hosts) terminate TLS at an upstream proxy. Without
+// this, Express sees http:// and req.secure is false, which breaks secure
+// cookie handling and any https-only logic downstream.
+app.set('trust proxy', 1);
 const server = http.createServer(app); 
 const PORT = process.env.PORT || 5000;
 
@@ -153,6 +159,30 @@ try {
 }
 
 io.use((socket, next) => {
+    // Handshake auth, in order of production reliability:
+    //   1. one-time ticket — the client fetched it over the same-origin
+    //      /api proxy (first-party cookie) and presents it here because the
+    //      DIRECT cross-site socket handshake would need a third-party
+    //      cookie (blocked by Safari/Firefox, phased out in Chrome).
+    //   2. httpOnly cookie — first-party setups / permissive browsers.
+    //   3. auth.token — legacy clients.
+    const ticket = socket.handshake.auth && socket.handshake.auth.ticket;
+    if (ticket) {
+        const ticketData = ticketStore.consume('socket', ticket);
+        if (ticketData && ticketData.userId) {
+            socket.userId = String(ticketData.userId);
+            socket.authType = ticketData.authType || 'user';
+            socket.actor = {
+                type: socket.authType === 'guest' ? 'guest' : 'user',
+                id: socket.userId
+            };
+            console.log(`✅ Socket authenticated via one-time ticket: ${socket.userId}`);
+            return next();
+        }
+        // Expired/replayed ticket: fall through to cookie/token so a
+        // permissive browser still connects instead of hard-failing.
+    }
+
     // Try to get token from auth object (backwards compatibility)
     let token = socket.handshake.auth.token;
     

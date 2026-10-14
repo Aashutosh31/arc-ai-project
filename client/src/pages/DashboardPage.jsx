@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { useSocket } from '../hooks/useSocket';
+import { API_URL } from '../config';
 import { ConversationProvider, useConversation } from '../contexts/ConversationContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useExecution } from '../contexts/ExecutionContext';
@@ -212,7 +213,7 @@ const DashboardPageContent = () => {
   const [googleNote, setGoogleNote] = useState('');
   const [whatsappConnected, setWhatsappConnected] = useState(false);
 
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+  const apiUrl = API_URL;
   const showWhatsAppDebug = import.meta.env.DEV && typeof localStorage !== 'undefined' && localStorage.getItem('arc_whatsapp_debug') === 'true';
 
   // Helper for authenticated fetch requests

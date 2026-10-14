@@ -7,7 +7,7 @@
  * only — secret values never cross this boundary.
  */
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+import { API_URL } from '../config';
 
 // Helper for authenticated fetch requests
 const authFetch = async (url, options = {}) => {

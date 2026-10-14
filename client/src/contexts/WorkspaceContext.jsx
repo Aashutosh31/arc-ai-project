@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { SocketContext } from './SocketContext';
+import { API_URL } from '../config';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 const ACTIVE_WORKSPACE_STORAGE_KEY = 'arc.activeWorkspaceId';
 
 // Helper for authenticated fetch requests

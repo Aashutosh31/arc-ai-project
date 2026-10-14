@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import styled, { keyframes } from 'styled-components';
+import { API_URL } from '../config';
 
 // Animations
 const float = keyframes`
@@ -596,14 +597,8 @@ const AuthPage = ({ isRegister }) => {
   const [passwordStrength, setPasswordStrength] = useState(0);
   
   const navigate = useNavigate();
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-  const API_ORIGIN = (() => {
-    try {
-      return new URL(API_URL).origin;
-    } catch {
-      return 'http://localhost:5000';
-    }
-  })();
+  // Same-origin /api proxy in production; direct backend in dev. See config.js.
+  // (API_URL is imported at the top of this file.)
 
   // Calculate password strength
   const calculatePasswordStrength = (pass) => {
@@ -705,7 +700,11 @@ const AuthPage = ({ isRegister }) => {
 
   useEffect(() => {
     const handleGoogleMessage = (event) => {
-      if (event.origin !== API_ORIGIN) return;
+      // The popup now redirects to the frontend's own /auth/callback route
+      // (which exchanges a one-time ticket for the session cookie through the
+      // same-origin proxy), so the postMessage originates from THIS origin —
+      // not the API host.
+      if (event.origin !== window.location.origin) return;
       if (event.data?.type !== 'arc-ai-google-auth-success') return;
 
       persistAuthSession(event.data.payload);
@@ -715,14 +714,14 @@ const AuthPage = ({ isRegister }) => {
 
     window.addEventListener('message', handleGoogleMessage);
     return () => window.removeEventListener('message', handleGoogleMessage);
-  }, [API_ORIGIN, navigate]);
+  }, [navigate]);
 
   const handleGoogleAuth = async () => {
     setError('');
     setLoading(true);
 
     try {
-      const res = await axios.get(`${API_URL}/api/auth/google/url`);
+      const res = await axios.get(`${API_URL}/api/auth/google/url`, { withCredentials: true });
       const { url } = res.data;
 
       if (!url) {

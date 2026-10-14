@@ -14,6 +14,7 @@ import { applyTheme, getStoredTheme } from './utils/theme';
 applyTheme(getStoredTheme());
 
 const AuthPage = lazy(() => import('./pages/AuthPage'));
+const AuthCallbackPage = lazy(() => import('./pages/AuthCallbackPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const Features = lazy(() => import('./pages/Features'));
 const RAGMemory = lazy(() => import('./pages/RAGMemory'));
@@ -144,6 +145,9 @@ const App = () => {
                       <Route path="/about" element={<About />} />
                       <Route path="/login" element={<AuthPage isRegister={false} />} />
                       <Route path="/register" element={<AuthPage isRegister={true} />} />
+                      {/* Google OAuth popup landing: exchanges the one-time
+                          ticket for the first-party session cookie. */}
+                      <Route path="/auth/callback" element={<AuthCallbackPage />} />
                       <Route path="/dashboard" element={<DashboardPage />} />
                     </Routes>
                   </Suspense>

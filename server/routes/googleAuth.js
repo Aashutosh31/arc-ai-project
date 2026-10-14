@@ -1,18 +1,7 @@
 const express = require('express');
 const { protect } = require('../middleware/authMiddleware');
 const { buildAuthUrl, isGoogleConnected, handleGoogleOAuthCallback } = require('../services/googleCalendarService');
-
-const isProduction = process.env.NODE_ENV === 'production';
-
-const setTokenCookie = (res, token) => {
-    res.cookie('token', token, {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? 'none' : 'lax',
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-        path: '/'
-    });
-};
+const ticketStore = require('../lib/oneTimeTicketStore');
 
 const router = express.Router();
 
@@ -48,40 +37,22 @@ const handleCallbackRequest = async (req, res) => {
         }
 
         if (result.kind === 'auth') {
-            // Set httpOnly cookie with the token
-            setTokenCookie(res, result.token);
-            
-            // Send only user data in postMessage (no token)
-            const payload = JSON.stringify({
-                kind: 'auth',
-                user: result.user
-            }).replace(/</g, '\\u003c');
+            // This callback runs on the API host. A cookie set here would be
+            // third-party for the frontend host and is blocked by
+            // Safari/Firefox (and phased out in Chrome) — the exact failure
+            // that emptied dashboards in production. Instead: hand the popup
+            // a one-time ticket and REDIRECT it to the frontend's
+            // /auth/callback page, which exchanges the ticket through the
+            // same-origin /api proxy so the session cookie is attributed to
+            // the frontend host (first-party).
             const frontendUrls = (process.env.FRONTEND_URL || '').split(',').map((origin) => origin.trim()).filter(Boolean);
             if (frontendUrls.length === 0) {
                 console.error('[Google OAuth] FRONTEND_URL not configured; cannot complete auth callback');
                 return res.status(500).send('Server configuration error: FRONTEND_URL not set');
             }
-            const frontendOrigin = JSON.stringify(frontendUrls[0]);
-
-            return res.status(200).send(`
-                <html>
-                    <head><title>ARC-AI Google Sign-In Complete</title></head>
-                    <body style="font-family: Arial, sans-serif; padding: 32px; background: #0b1020; color: #e6f0ff;">
-                        <h1>Google sign-in complete</h1>
-                        <p>You can close this window and return to ARC-AI.</p>
-                        <script>
-                            (function () {
-                                const payload = ${payload};
-                                const targetOrigin = ${frontendOrigin};
-                                if (window.opener) {
-                                    window.opener.postMessage({ type: 'arc-ai-google-auth-success', payload }, targetOrigin);
-                                }
-                                window.close();
-                            })();
-                        </script>
-                    </body>
-                </html>
-            `);
+            const { ticket } = ticketStore.issue('auth', { token: result.token, user: result.user });
+            const callbackUrl = `${frontendUrls[0].replace(/\/$/, '')}/auth/callback?ticket=${encodeURIComponent(ticket)}`;
+            return res.redirect(302, callbackUrl);
         }
 
         return res.status(500).send('Unknown Google OAuth callback result.');

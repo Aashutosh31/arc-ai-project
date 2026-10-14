@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { buildGoogleAppAuthUrl } = require('../services/googleCalendarService');
+const ticketStore = require('../lib/oneTimeTicketStore');
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -206,6 +207,47 @@ const logout = async (req, res) => {
     res.json({ success: true, message: 'Logged out successfully' });
 };
 
+// @desc    Issue a one-time Socket.IO handshake ticket
+// @route   GET /api/auth/socket-ticket
+// The realtime socket connects DIRECTLY to this API host (the frontend's
+// hosting proxy cannot forward WebSocket upgrades), so the browser would
+// need a third-party cookie for the handshake — blocked by Safari/Firefox
+// and phased out in Chrome. The client instead fetches this ticket over
+// the same-origin /api proxy (first-party cookie) and presents it in
+// `handshake.auth.ticket`.
+const getSocketTicket = async (req, res) => {
+    try {
+        const userId = req.actor?.id || req.user?._id;
+        if (!userId) {
+            return res.status(401).json({ message: 'Not authorized, no token' });
+        }
+        const { ticket, expiresInMs } = ticketStore.issue('socket', {
+            userId: String(userId),
+            authType: req.authType || 'user',
+        });
+        res.json({ ticket, expiresInMs });
+    } catch (error) {
+        console.error('[socket-ticket] issue failed:', error?.message || error);
+        res.status(500).json({ message: 'Failed to issue socket ticket' });
+    }
+};
+
+// @desc    Exchange an OAuth popup ticket for the session cookie
+// @route   POST /api/auth/session
+// The Google OAuth callback runs on the API host and cannot set a cookie
+// the frontend host will send (cross-site). It hands the popup a one-time
+// ticket; the frontend's /auth/callback page posts it HERE through the
+// same-origin proxy, so the Set-Cookie is attributed to the frontend host.
+const exchangeSession = async (req, res) => {
+    const { ticket } = req.body || {};
+    const data = ticketStore.consume('auth', ticket);
+    if (!data || !data.token) {
+        return res.status(401).json({ message: 'Invalid or expired sign-in ticket' });
+    }
+    setTokenCookie(res, data.token);
+    res.json({ success: true, user: data.user || null });
+};
+
 module.exports = {
     registerUser,
     loginUser,
@@ -213,5 +255,7 @@ module.exports = {
     guestUser,
     getGoogleAuthUrl,
     getGoogleLinkUrl,
-    logout
+    logout,
+    getSocketTicket,
+    exchangeSession
 };

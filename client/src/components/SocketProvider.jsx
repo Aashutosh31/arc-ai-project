@@ -2,8 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 import { SocketContext } from '../contexts/SocketContext'; // Import the Context
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+import { API_URL, SOCKET_URL } from '../config';
 
 // Helper for authenticated fetch requests
 const authFetch = async (url, options = {}) => {
@@ -32,6 +31,15 @@ export const SocketProvider = ({ children }) => {
     });
 
     useEffect(() => {
+        // The /auth/callback route (Google OAuth popup landing) manages its
+        // own session exchange and must not race a guest-session bootstrap —
+        // a stray POST /api/auth/guest here would overwrite the freshly
+        // exchanged httpOnly cookie and localStorage identity with a guest
+        // session, logging the user back out. Skip bootstrap there.
+        if (window.location.pathname === '/auth/callback') {
+            return undefined;
+        }
+
         let isCancelled = false;
         let activeSocket = null;
 
@@ -114,29 +122,59 @@ export const SocketProvider = ({ children }) => {
     useEffect(() => {
         if (!authInfo.ready || !authInfo.userId) return;
 
-        // For socket auth, we need a token. Since we can't read httpOnly cookies from JS,
-        // we'll use a workaround: the socket.io server can also read cookies if we configure it.
-        // For now, we'll use a separate short-lived token or rely on the session cookie.
-        // The socket.io handshake will include cookies if we use polling transport.
-        const newSocket = io(API_URL, {
-            auth: { userId: authInfo.userId },
-            transports: ['websocket', 'polling'],
-            withCredentials: true
+        let isCancelled = false;
+        let newSocket = null;
+
+        // The realtime socket connects DIRECTLY to the API host (the
+        // production hosting proxy cannot forward WebSocket upgrades). A
+        // cookie on that cross-site handshake would be third-party — blocked
+        // by Safari/Firefox and phased out in Chrome — so we fetch a ONE-TIME
+        // ticket over the same-origin /api proxy (first-party cookie) and
+        // present it in the handshake. The httpOnly cookie remains a fallback
+        // for first-party/dev setups.
+        const connect = async () => {
+            let handshakeAuth = { userId: authInfo.userId };
+            try {
+                const ticketRes = await authFetch(`${API_URL}/api/auth/socket-ticket`);
+                if (ticketRes.ok) {
+                    const { ticket } = await ticketRes.json();
+                    handshakeAuth = { ...handshakeAuth, ticket };
+                } else {
+                    console.warn('[socket] ticket fetch failed (HTTP ' + ticketRes.status + '); relying on cookie handshake');
+                }
+            } catch (ticketError) {
+                console.warn('[socket] ticket fetch error; relying on cookie handshake:', ticketError?.message || ticketError);
+            }
+
+            if (isCancelled) return;
+
+            newSocket = io(SOCKET_URL, {
+                auth: handshakeAuth,
+                transports: ['websocket', 'polling'],
+                withCredentials: true
+            });
+
+            newSocket.on('connect', () => {
+                setIsConnected(true);
+                console.log('✅ Socket connected for user:', authInfo.userId || 'GUEST');
+            });
+
+            newSocket.on('disconnect', () => {
+                setIsConnected(false);
+                console.log('❌ Socket disconnected.');
+            });
+
+            setSocket(newSocket);
+        };
+
+        connect().catch((error) => {
+            console.error('[socket] connection setup failed:', error);
         });
 
-        newSocket.on('connect', () => {
-            setIsConnected(true);
-            console.log('✅ Socket connected for user:', authInfo.userId || 'GUEST');
-        });
-
-        newSocket.on('disconnect', () => {
-            setIsConnected(false);
-            console.log('❌ Socket disconnected.');
-        });
-
-        setSocket(newSocket);
-
-        return () => newSocket.close();
+        return () => {
+            isCancelled = true;
+            if (newSocket) newSocket.close();
+        };
     }, [authInfo.ready, authInfo.userId]);
 
     return (

@@ -2,13 +2,7 @@
 // sniffing, and NO browser-side recognition APIs: the browser only captures
 // microphone audio (getUserMedia → PCM frames over the socket) and the ARC
 // server performs transcription. 'server' = streaming STT.
-const API_URL = (() => {
-  try {
-    return import.meta.env?.VITE_API_URL || 'http://localhost:5000';
-  } catch {
-    return 'http://localhost:5000';
-  }
-})();
+import { API_URL } from '../config';
 
 // Helper for authenticated fetch requests
 const authFetch = async (url, options = {}) => {
