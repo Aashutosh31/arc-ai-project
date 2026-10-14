@@ -378,9 +378,16 @@ const classifyProviderFailure = (error) => {
   // chance. Never treated as transient-retries against the SAME provider —
   // only as cross-provider failover. Matched narrowly to avoid masking
   // genuinely malformed requests.
+  //
+  // Also covers tool_use_failed ("Tool choice is none, but model called a
+  // tool"): the payload was valid (tools were intentionally empty) but THIS
+  // model hallucinated a tool call anyway — a provider/model behavioral
+  // quirk (seen with gpt-oss-120b), not a malformed request. The identical
+  // payload is fine on a backup provider, so it must fail over, not die.
   const isModelError =
     (status === 400 || status === 404) &&
-    /(invalid_model|model_not_found|unknown model|does not exist|unsupported model|model .*not (available|found|supported))/.test(message);
+    (/(invalid_model|model_not_found|unknown model|does not exist|unsupported model|model .*not (available|found|supported))/.test(message) ||
+      /tool choice is none|tool_use_failed/i.test(message));
 
   const isTransient =
     isRateLimit ||
@@ -403,9 +410,23 @@ const normalizeProviderError = (error, providerId = null) => {
   if (!error || typeof error !== 'object') return error;
 
   if (error.statusCode == null) {
-    const status = Number(error.status ?? error.code ?? 0);
-    if (Number.isFinite(status) && status >= 100 && status < 600) {
-      error.statusCode = status;
+    // OpenAI-compatible SDKs (Groq) often nest the HTTP status inside the
+    // parsed error body (error.error.status_code) while the top-level
+    // .status is undefined and .code carries a machine tag like
+    // 'tool_use_failed' (Number() -> NaN). Read every known location.
+    const candidates = [
+      error.status,
+      error.statusCode,
+      error.error?.status,
+      error.error?.status_code,
+      error.response?.status,
+    ];
+    for (const candidate of candidates) {
+      const status = Number(candidate);
+      if (Number.isFinite(status) && status >= 100 && status < 600) {
+        error.statusCode = status;
+        break;
+      }
     }
   }
 
@@ -413,10 +434,11 @@ const normalizeProviderError = (error, providerId = null) => {
 
   if (error.providerCode == null) {
     const message = safeString(error.message);
+    const nestedCode = safeString(error.error?.code || error.code);
     if (/api key not valid|invalid api key/i.test(message)) {
       error.providerCode = 'API_KEY_INVALID';
     } else {
-      const match = message.match(/(API_KEY_INVALID|invalid_model|INVALID_ARGUMENT|SAFETY|RESOURCE_EXHAUSTED|model_not_found|rate_limit_exceeded|context_length_exceeded|request_too_large)/i);
+      const match = (message + ' ' + nestedCode).match(/(API_KEY_INVALID|invalid_model|INVALID_ARGUMENT|SAFETY|RESOURCE_EXHAUSTED|model_not_found|rate_limit_exceeded|context_length_exceeded|request_too_large|tool_use_failed)/i);
       if (match) error.providerCode = match[1];
     }
   }

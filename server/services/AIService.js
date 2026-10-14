@@ -5614,14 +5614,20 @@ class AIService {
         // removal is unconditional, including when the plan is empty (a
         // greeting or a stable-knowledge answer) -- an empty plan means "this
         // turn needs nothing", never "this turn may fetch headlines".
-        const planned = this.brainPlannedToolNames(brainDecision.brainTurn);
+        //
+        // Deliberately NOT narrowing to the Brain's planned tool list: that
+        // narrowing was never load-bearing (when the Brain actually owns the
+        // loop, tools are emptied wholesale further below anyway) and it
+        // actively broke non-executed turns — e.g. "Play <song>" classified
+        // as topic_research lost playMedia, left the model with zero tools,
+        // and the model then hallucinated tool calls the provider rejects
+        // ("tool choice is none, but model called a tool"). A capability the
+        // planner did not anticipate (or chose not to run) must stay
+        // reachable; getTopNews removal is the only unconditional cut.
         toolPick.tools = (toolPick.tools || []).filter((schema) => {
           const name = schema?.function?.name;
           if (!name) return false;
           if (name === "getTopNews") return false;
-          if (planned.length) return planned.includes(name);
-          // No plan to narrow to: keep the caller's tool set (minus headlines)
-          // so a capability the planner did not anticipate is still reachable.
           return true;
         });
       }
