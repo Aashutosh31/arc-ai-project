@@ -141,7 +141,8 @@ const App = () => {
                       <Route path="/features/rag-memory" element={<RAGMemory />} />
                       <Route path="/features/web-research" element={<WebResearch />} />
                       <Route path="/features/automation" element={<Automation />} />
-                      <Route path="/features/architecture" element={<Architecture />} />
+                      <Route path="/architecture" element={<Architecture />} />
+                      <Route path="/features/architecture" element={<Navigate to="/architecture" replace />} />
                       <Route path="/about" element={<About />} />
                       <Route path="/login" element={<AuthPage isRegister={false} />} />
                       <Route path="/register" element={<AuthPage isRegister={true} />} />
