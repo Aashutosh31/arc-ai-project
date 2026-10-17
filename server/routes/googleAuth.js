@@ -1,6 +1,6 @@
 const express = require('express');
 const { protect } = require('../middleware/authMiddleware');
-const { buildAuthUrl, isGoogleConnected, handleGoogleOAuthCallback } = require('../services/googleCalendarService');
+const { buildAuthUrl, isGoogleConnected, handleGoogleOAuthCallback, isAllowedNativeRedirect } = require('../services/googleCalendarService');
 const ticketStore = require('../lib/oneTimeTicketStore');
 
 const router = express.Router();
@@ -37,6 +37,20 @@ const handleCallbackRequest = async (req, res) => {
         }
 
         if (result.kind === 'auth') {
+            // Native clients (the ARC-AI app) ask for a deep-link redirect in
+            // the signed OAuth state; bounce straight back to the app with a
+            // one-time ticket so it can establish its own session. The target
+            // was validated when the state was signed and is re-validated here.
+            const nativeRedirect = typeof result.redirect === 'string' ? result.redirect : null;
+            if (nativeRedirect && isAllowedNativeRedirect(nativeRedirect)) {
+                const separator = nativeRedirect.includes('?') ? '&' : '?';
+                if (result.mode === 'link') {
+                    return res.redirect(302, `${nativeRedirect}${separator}linked=true`);
+                }
+                const { ticket } = ticketStore.issue('auth', { token: result.token, user: result.user });
+                return res.redirect(302, `${nativeRedirect}${separator}ticket=${encodeURIComponent(ticket)}`);
+            }
+
             // This callback runs on the API host. A cookie set here would be
             // third-party for the frontend host and is blocked by
             // Safari/Firefox (and phased out in Chrome) — the exact failure

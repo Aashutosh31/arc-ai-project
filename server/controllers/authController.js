@@ -186,7 +186,8 @@ const guestUser = async (req, res) => {
 
 const getGoogleAuthUrl = async (req, res) => {
     try {
-        const url = buildGoogleAppAuthUrl({ mode: 'login' });
+        const redirect = typeof req.query.redirect === 'string' ? req.query.redirect : null;
+        const url = buildGoogleAppAuthUrl({ mode: 'login', redirect });
         res.json({ success: true, url });
     } catch (error) {
         console.error(error);
@@ -196,7 +197,8 @@ const getGoogleAuthUrl = async (req, res) => {
 
 const getGoogleLinkUrl = async (req, res) => {
     try {
-        const url = buildGoogleAppAuthUrl({ mode: 'link', userId: req.user._id });
+        const redirect = typeof req.query.redirect === 'string' ? req.query.redirect : null;
+        const url = buildGoogleAppAuthUrl({ mode: 'link', userId: req.user._id, redirect });
         res.json({ success: true, url });
     } catch (error) {
         console.error(error);
