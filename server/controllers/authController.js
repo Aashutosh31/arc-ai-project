@@ -109,6 +109,10 @@ const registerUser = async (req, res) => {
                 authProvider: user.authProvider || 'local',
                 googleLinked: Boolean(user.googleIdentity?.googleId),
                 creditsRemaining: user.creditsRemaining,
+                // Additive: native clients (React Native) cannot rely on the
+                // httpOnly cookie, so the token is also returned in the body.
+                // Browser clients ignore this field and keep using the cookie.
+                token,
                 message: 'Registration successful. ARC-AI memory initialized.'
             });
         } else {
@@ -150,6 +154,8 @@ const loginUser = async (req, res) => {
                 authProvider: user.authProvider || 'local',
                 googleLinked: Boolean(user.googleIdentity?.googleId),
                 creditsRemaining: user.creditsRemaining,
+                // Additive: see registerUser. Native clients read this token.
+                token,
             });
         } else if (user && user.authProvider === 'google') {
             return res.status(400).json({
@@ -168,9 +174,10 @@ const guestUser = async (req, res) => {
     try {
         const guest = await createGuestSession();
         setTokenCookie(res, guest.token);
-        // Don't send token in response body
-        const { token, ...guestWithoutToken } = guest;
-        res.status(201).json(guestWithoutToken);
+        // Additive: also return the token in the body so native clients can
+        // authenticate without an httpOnly cookie. The cookie remains the
+        // authoritative path for browser clients.
+        res.status(201).json(guest);
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Failed to create guest session' });
@@ -245,7 +252,9 @@ const exchangeSession = async (req, res) => {
         return res.status(401).json({ message: 'Invalid or expired sign-in ticket' });
     }
     setTokenCookie(res, data.token);
-    res.json({ success: true, user: data.user || null });
+    // Additive: native clients cannot receive the redirect cookie, so the
+    // token is also returned in the body for them.
+    res.json({ success: true, user: data.user || null, token: data.token });
 };
 
 module.exports = {
