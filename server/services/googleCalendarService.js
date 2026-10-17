@@ -72,6 +72,27 @@ const getFrontendOrigin = () => {
     return configured || '*';
 };
 
+// Native (app) OAuth redirects: after Google consent we bounce back to the
+// app's deep link with a one-time ticket instead of the web dashboard. The
+// target is embedded in the signed OAuth `state` and validated against this
+// allowlist on the way in AND on the way out, so it can never be turned into
+// an open redirect.
+const getNativeRedirectAllowlist = () => {
+    const configured = (process.env.NATIVE_REDIRECT_ALLOWLIST || '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    // The ARC-AI app registers this scheme (see mobile app.json "scheme").
+    return ['arcaimobile://', ...configured];
+};
+
+const isAllowedNativeRedirect = (redirect) => {
+    if (typeof redirect !== 'string' || redirect.length === 0 || redirect.length > 2048) {
+        return false;
+    }
+    return getNativeRedirectAllowlist().some((prefix) => redirect.startsWith(prefix));
+};
+
 const signState = (payload) => {
     if (!process.env.JWT_SECRET) {
         throw new Error('JWT_SECRET must be configured to sign Google OAuth state.');
@@ -104,7 +125,7 @@ const buildAuthUrl = (userId) => {
     });
 };
 
-const buildGoogleAppAuthUrl = ({ mode = 'login', userId = null } = {}) => {
+const buildGoogleAppAuthUrl = ({ mode = 'login', userId = null, redirect = null } = {}) => {
     const oauth2Client = getOAuthClient();
     return oauth2Client.generateAuthUrl({
         access_type: 'offline',
@@ -114,7 +135,8 @@ const buildGoogleAppAuthUrl = ({ mode = 'login', userId = null } = {}) => {
         state: signState({
             purpose: 'app-auth',
             mode,
-            userId: userId ? String(userId) : null
+            userId: userId ? String(userId) : null,
+            redirect: isAllowedNativeRedirect(redirect) ? redirect : null
         })
     });
 };
@@ -368,6 +390,8 @@ const handleGoogleOAuthCallback = async ({ code, state }) => {
 
     return {
         kind: 'auth',
+        mode: decoded.mode === 'link' ? 'link' : 'login',
+        redirect: decoded.redirect || null,
         token: generateAppToken(user._id),
         user: buildGoogleUserPayload(user, decoded.mode === 'link' ? 'linked' : 'signed-in')
     };
@@ -383,6 +407,7 @@ module.exports = {
     GOOGLE_APP_SCOPES,
     buildAuthUrl,
     buildGoogleAppAuthUrl,
+    isAllowedNativeRedirect,
     exchangeCodeForTokens,
     handleGoogleOAuthCallback,
     getAuthorizedOAuthClient,
