@@ -6351,13 +6351,6 @@ class AIService {
             const convTtsLanguage = String(
               voiceLanguage || ttsService.getDefaultTtsLanguage() || "en-US",
             ).slice(0, 16);
-            if (!ttsBuffer && convServerTts) {
-              ttsBuffer = new ttsService.TtsStreamBuffer({
-                socket,
-                signal: controller.signal,
-                language: convTtsLanguage,
-              });
-            }
             if (!voiceStreamer && convServerTts) {
               try {
                 voiceStreamer = new ttsService.VoiceTtsStreamer({
@@ -6372,6 +6365,17 @@ class AIService {
                 );
                 voiceStreamer = null;
               }
+            }
+            // Streaming PCM is the primary channel. The legacy WAV channel is
+            // synthesized from the SAME text, so emitting both let any client
+            // that plays them overlap the reply in two voices. Only fall back
+            // to legacy when the streaming streamer could not be constructed.
+            if (!ttsBuffer && convServerTts && !voiceStreamer) {
+              ttsBuffer = new ttsService.TtsStreamBuffer({
+                socket,
+                signal: controller.signal,
+                language: convTtsLanguage,
+              });
             }
             ttsModeAnnouncer.announce(convServerTts);
             const convOnChunk = async (chunkText) => {
@@ -6529,13 +6533,6 @@ class AIService {
             ttsBuffer = null;
             voiceStreamer = null;
           }
-          ttsBuffer = serverTtsActive
-            ? new ttsService.TtsStreamBuffer({
-                socket,
-                signal: controller.signal,
-                language: ttsLanguage,
-              })
-            : null;
           // Voice Runtime 2.0 primary path: binary PCM stream. Created under
           // the same activation gate so text delivery is unaffected either
           // way, and the client always gets a truthful `ai:tts:mode`.
@@ -6554,6 +6551,18 @@ class AIService {
             );
             voiceStreamer = null;
           }
+          // Legacy WAV channel is the fallback ONLY when the streaming
+          // streamer is unavailable. Emitting both at once synthesized the
+          // same text twice; clients that played both heard two overlapping
+          // voices (the reported "same sentence, two voices" bug).
+          ttsBuffer =
+            serverTtsActive && !voiceStreamer
+              ? new ttsService.TtsStreamBuffer({
+                  socket,
+                  signal: controller.signal,
+                  language: ttsLanguage,
+                })
+              : null;
         }
         ttsModeAnnouncer.announce(serverTtsActive);
 
