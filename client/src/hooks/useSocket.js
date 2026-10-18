@@ -361,14 +361,28 @@ export const useSocket = () => {
         // gating on that flag too meant a streaming-disabled client played
         // BOTH the browser voice and the server WAV for the whole response
         // (second double-voice path). Browser speech is for browser mode.
-        const serverOwnsSpeech = ttsModeRef.current === 'server';
+        // Server owns speech only when streaming is enabled on this client.
+        // The server now sends exactly ONE audio channel — streaming PCM —
+        // while streaming is available (legacy WAV is a fallback only when the
+        // streaming streamer cannot be built). A client that disabled
+        // streaming never plays that PCM, so it must use browser speech
+        // instead of staying silent.
+        const serverOwnsSpeech =
+          ttsModeRef.current === 'server' && getVoiceSettings().streamingEnabled;
         if (!suppressSpeechRef.current && !serverOwnsSpeech) {
           processStreamChunk(displayText || chunk, false);
         }
       } else {
         finishBotStream();
         setAgentStatus(null);
-        const serverOwnsSpeech = ttsModeRef.current === 'server';
+        // Server owns speech only when streaming is enabled on this client.
+        // The server now sends exactly ONE audio channel — streaming PCM —
+        // while streaming is available (legacy WAV is a fallback only when the
+        // streaming streamer cannot be built). A client that disabled
+        // streaming never plays that PCM, so it must use browser speech
+        // instead of staying silent.
+        const serverOwnsSpeech =
+          ttsModeRef.current === 'server' && getVoiceSettings().streamingEnabled;
         if (!suppressSpeechRef.current && !serverOwnsSpeech) {
           processStreamChunk('', true);
         }
