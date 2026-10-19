@@ -6648,7 +6648,16 @@ class AIService {
         // (textless) chunk exactly like continuation turns. Abort/error
         // propagates to the outer try/catch (TTS stop + partial
         // persistence run there unchanged).
+        // The conversational fast path above has ALREADY streamed its own
+        // round (`response === convGen`, stream exhausted). Re-entering this
+        // block would re-consume that exhausted generator: `consume`
+        // returns "" (no chunks), wiping the delivered text out of
+        // `finalOutputText` — the persisted reply then degrades to the
+        // empty-answer filler ("Done."), while other devices remember the
+        // message by that degraded content after a refresh. Never re-enter
+        // for already-streamed turns.
         initialStreamed = Boolean(
+          !conversationalStreamed &&
           initialStreamAllowed &&
           response &&
           typeof response.stream !== "undefined",
@@ -6682,7 +6691,11 @@ class AIService {
               yield chunk;
             }
           })();
-          finalOutputText =
+          // Never let an EMPTY initial stream (e.g. an aborted round that
+          // produced no chunks) wipe out text this turn already accumulated
+          // — an empty overwrite is what triggers the filler/persistence
+          // downgrade below. Keep previously captured text as the fallback.
+          const initialStreamedText =
             (await this.llmRouter.streamingRuntime.consume(
               tapped,
               socket,
@@ -6690,6 +6703,9 @@ class AIService {
               initialStreamOnChunk || null,
               deliveryHooks,
             )) || "";
+          finalOutputText = String(initialStreamedText).trim()
+            ? initialStreamedText
+            : finalOutputText || "";
           if (initialFollowUp.length) toolCalls = initialFollowUp;
           console.log("[AIService] initial.stream.completed", {
             elapsedMs:
