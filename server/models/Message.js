@@ -22,7 +22,10 @@ const MessageSchema = new mongoose.Schema({
       type: String,
       url: String,
       mimeType: String,
-      size: Number
+      size: Number,
+      // Client-supplied display name (documents) — previously stripped by the
+      // schema, so plain filenames were lost between sessions (bug B-06).
+      name: String
     }
   ],
   toolCalls: [
