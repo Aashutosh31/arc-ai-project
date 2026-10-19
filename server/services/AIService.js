@@ -4648,11 +4648,30 @@ class AIService {
     conversationId = null,
     workspaceId = null,
     voiceLanguage = null,
+    turnAck = null,
   ) {
+    // Turn delivery receipt. A client MAY attach an ack to `ai:stt:final`;
+    // this is how its optimistic bubble gets bound to the DURABLE server
+    // document (conversationId + persisted userMessageId). Delivered at most
+    // once per turn, never touches credits or provider state, and is a no-op
+    // for legacy clients that emit without an ack callback.
+    let turnAckDelivered = false;
+    const deliverTurnAck = (info) => {
+      if (turnAckDelivered) return;
+      turnAckDelivered = true;
+      if (typeof turnAck !== "function") return;
+      try {
+        turnAck(info);
+      } catch (ackErr) {
+        console.warn("[AIService] turn-ack delivery failed:", ackErr?.message || ackErr);
+      }
+    };
+
     const creditCharge = await consumeCredits(userId, 1, "ai request");
     if (!creditCharge.success) {
       if (socket) {
         socket.emit("bot_error", creditCharge.error);
+        deliverTurnAck({ accepted: false, error: creditCharge.error, code: "CREDITS_EXHAUSTED" });
         socket.emit("ai:tts:response:chunk", {
           chunk: "",
           displayText: "",
@@ -4735,9 +4754,11 @@ class AIService {
         }
 
         // Saving an already-addressed user turn must not delay the response
-        // stream.  A newly-created conversation above is still awaited for
+        // stream. A newly-created conversation above is still awaited for
         // its id; the message write is durable but deliberately detached from
-        // first-token delivery.
+        // first-token delivery. The turn RECEIPT rides on the same detached
+        // write's completion — so "acked" always means "persisted", without
+        // ever stalling the turn when Mongo is slow.
         void Message.create({
           conversationId,
           workspaceId: workspaceContext.workspaceId || null,
@@ -4752,13 +4773,27 @@ class AIService {
           metadata: {
             streaming: false,
           },
-        }).catch((err) => {
-          console.error("[AIService] Error saving user message:", err);
-        });
+        })
+          .then((userDoc) => {
+            deliverTurnAck({
+              accepted: true,
+              conversationId: String(conversationId),
+              userMessageId: userDoc ? String(userDoc._id) : null,
+            });
+          })
+          .catch((err) => {
+            console.error("[AIService] Error saving user message:", err);
+            deliverTurnAck({ accepted: false, error: "Turn not persisted" });
+          });
       } catch (err) {
         console.error("[AIService] Error handling conversation:", err);
         // Don't block query on conversation error
+        deliverTurnAck({ accepted: false, error: "Conversation handling failed" });
       }
+    } else {
+      // Guests own no durable thread and persist no messages, so the receipt
+      // simply acknowledges acceptance — ids stay null by design.
+      deliverTurnAck({ accepted: true, conversationId: null, userMessageId: null });
     }
     const { key, controller } = this.beginRequest(socket, userId);
     // Declared outside try: the catch handler below reads these for abort

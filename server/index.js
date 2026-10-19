@@ -323,10 +323,28 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('ai:stt:final', async (data) => {
-        const { command, image, document, conversationId, workspaceId: incomingWorkspaceId, language } = data; 
+    socket.on('ai:stt:final', async (data, ack) => {
+        const { command, image, document, conversationId, workspaceId: incomingWorkspaceId, language } = data;
         const userId = socket.userId;
-        socket.isInterrupted = false; 
+        socket.isInterrupted = false;
+
+        // Turn receipt plumbing. A legacy client (web pre-sync) emits without
+        // an ack and is completely unaffected. `clientTurnId` is a client
+        // correlation label echoed verbatim — never stored, never interpreted —
+        // so a receipt can be bound to one exact optimistic bubble even when
+        // turns overlap (preempt/abort re-submits).
+        const clientTurnId =
+            typeof data?.clientTurnId === 'string' && data.clientTurnId
+                ? data.clientTurnId.slice(0, 64)
+                : null;
+        const emitTurnAck = (info) => {
+            if (typeof ack !== 'function') return;
+            try {
+                ack({ ...info, clientTurnId });
+            } catch (ackErr) {
+                console.warn('[Turn:Ack] delivery failed:', ackErr?.message || ackErr);
+            }
+        };
 
         // P0 conversation ownership boundary (slice 4F). The client asserts
         // conversationId; the AUTHENTICATED socket actor is the authority.
@@ -349,6 +367,7 @@ io.on('connection', (socket) => {
             // closes the client stream exactly like the credit-failure path.
             if (socket) {
                 socket.emit('bot_error', access.error);
+                emitTurnAck({ accepted: false, error: access.error, code: access.code });
                 socket.emit('ai:tts:response:chunk', {
                     chunk: '',
                     displayText: '',
@@ -392,7 +411,7 @@ io.on('connection', (socket) => {
         // It only shapes the server TTS voice for THIS reply — never stored.
         // `ownedConversationId` was verified against socket.userId above, so no
         // downstream query can address a conversation this actor does not own.
-        await AIService.processQuery(userId, command, socket, image, document, ownedConversationId, effectiveWorkspaceId, language);
+        await AIService.processQuery(userId, command, socket, image, document, ownedConversationId, effectiveWorkspaceId, language, emitTurnAck);
     });
 
     socket.on('disconnect', () => {
