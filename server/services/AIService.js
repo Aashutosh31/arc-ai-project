@@ -4152,7 +4152,10 @@ class AIService {
     // On a refinement the prior scope is the base, so region/topic carry over.
     // On an explicit request the prior scope is ignored entirely, so a stale
     // scope can never widen what the user just asked for.
-    return parseNewsIntent(text, refinement ? workingState.activeSearch : null);
+    // `workingState` is null on the early gate / first turn (see the callers),
+    // so the refinement branch must not dereference it directly — reading
+    // `.activeSearch` off null aborted the whole turn.
+    return parseNewsIntent(text, refinement ? workingState?.activeSearch : null);
   }
 
   /**

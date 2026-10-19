@@ -1,5 +1,25 @@
 const mongoose = require('mongoose');
 
+// Attachments are stored as subdocuments. This MUST be an explicit subschema:
+// inside an inline array-of-objects literal, a `type` key is the reserved
+// SchemaType declaration, so `attachments: [{ type: String, url, ... }]` is
+// interpreted as an array of STRINGS (everything else becomes ignored options)
+// — every object attachment then fails with
+// "Cast to [string] failed ... at path attachments.0". Declaring `type` as a
+// real field on its own schema removes the collision.
+const AttachmentSchema = new mongoose.Schema(
+  {
+    type: { type: String },
+    url: String,
+    mimeType: String,
+    size: Number,
+    // Client-supplied display name (documents) — previously stripped by the
+    // schema, so plain filenames were lost between sessions (bug B-06).
+    name: String,
+  },
+  { _id: false },
+);
+
 const MessageSchema = new mongoose.Schema({
   conversationId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -17,17 +37,7 @@ const MessageSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  attachments: [
-    {
-      type: String,
-      url: String,
-      mimeType: String,
-      size: Number,
-      // Client-supplied display name (documents) — previously stripped by the
-      // schema, so plain filenames were lost between sessions (bug B-06).
-      name: String
-    }
-  ],
+  attachments: [AttachmentSchema],
   toolCalls: [
     {
       toolName: String,
