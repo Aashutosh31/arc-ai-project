@@ -548,18 +548,37 @@ export const useSocket = () => {
       
       const displayImage = imageBase64 ? `data:image/jpeg;base64,${imageBase64}` : null;
       const displayDoc = documentData ? documentData.name : null;
-      
-      addMessage({ sender: 'user', text, image: displayImage, documentName: displayDoc }); 
-      
-      socket.emit('ai:stt:final', { 
-        command: text, 
+
+      // Turn receipt (Phase C): the optimistic bubble is tagged with a
+      // clientTurnId that the server echoes on the ack so this exact bubble
+      // can be bound to the durable server `_id` (prevents the fan-out echo
+      // from ever duplicating it; see conversation.message.appended).
+      const clientTurnId = `web_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+      addMessage({ sender: 'user', text, image: displayImage, documentName: displayDoc, clientTurnId });
+
+      socket.emit('ai:stt:final', {
+        command: text,
         image: imageBase64,
         document: documentData,
         conversationId,
         workspaceId: activeWorkspaceId || null,
         // Per-turn voice language auto-detected by server STT (Sarvam), if any.
-        language: typeof voiceLanguage === 'string' && voiceLanguage ? voiceLanguage : null
-      }); 
+        language: typeof voiceLanguage === 'string' && voiceLanguage ? voiceLanguage : null,
+        clientTurnId
+      }, (ack) => {
+        try {
+          // Additive only: old servers never ack and this callback stays
+          // silent. Guests receive conversationId/userMessageId null.
+          window.dispatchEvent(new CustomEvent('arc:turn-receipt', {
+            detail: {
+              clientTurnId: ack?.clientTurnId ?? clientTurnId,
+              conversationId: ack?.conversationId ?? null,
+              userMessageId: ack?.userMessageId ?? null,
+              accepted: ack?.accepted !== false,
+            },
+          }));
+        } catch { /* receipts are best-effort */ }
+      });
     }
   };
 

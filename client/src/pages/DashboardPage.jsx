@@ -151,7 +151,7 @@ const StatusDot = styled.span`
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: ${({ $on }) => ($on ? 'var(--success)' : 'var(--destructive)')});
+  background: ${({ $on }) => ($on ? 'var(--success)' : 'var(--destructive)')};
 `;
 
 const ChatArea = styled.div`

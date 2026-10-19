@@ -31,11 +31,26 @@ export const sanitizeHistoryText = (text) => {
 // live socket messages (which carry no identity yet). Accepts both server
 // ({role, content}) and socket ({sender, text}) raw shapes so one helper
 // covers history and live messages without rewriting socket payloads.
+// Durable attachment replay (bug B-06). Since the server persists documents
+// with `{ type: 'document', name }` and images with `{ type: 'image', url }
+// (a data URL), history records carry enough to redraw their attachments.
+// Derive the renderer fields (image / documentName) from them; the raw
+// `raw.image` / `raw.documentName` echoes stay supported for live sockets.
+export function deriveAttachmentFields(attachments) {
+  const image = attachments.find((a) => a && a.type === 'image' && a.url);
+  const document = attachments.find((a) => a && a.type === 'document' && a.name);
+  return {
+    ...(image && image.url ? { image: String(image.url) } : {}),
+    ...(document ? { documentName: String(document.name) } : {}),
+  };
+}
+
 export function normalizeHistoryMessage(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const content = raw.content ?? raw.text ?? '';
   const id = raw._id ?? raw.id ?? null;
   const attachments = Array.isArray(raw.attachments) ? raw.attachments : [];
+  const derived = attachments.length > 0 ? deriveAttachmentFields(attachments) : {};
   const hasText = content !== null && content !== undefined && String(content) !== '';
   // Genuinely invalid: no identity, no text, no attachments, no media echo.
   if (id === null && !hasText && attachments.length === 0 && !raw.image && !raw.documentName) return null;
@@ -44,11 +59,21 @@ export function normalizeHistoryMessage(raw) {
     id: id === null || id === undefined ? null : String(id),
     sender: role === 'user' ? 'user' : 'ai',
     text: sanitizeHistoryText(String(content ?? '')),
-    isStreaming: false,
+    isStreaming: Boolean(raw.streaming ?? false),
     interrupted: Boolean(raw.interrupted ?? raw.metadata?.interrupted ?? false),
     ...(attachments.length > 0 ? { attachments } : {}),
-    ...(raw.image ? { image: raw.image } : {}),
-    ...(raw.documentName ? { documentName: raw.documentName } : {})
+    ...(raw.image
+      ? { image: raw.image }
+      : derived.image
+        ? { image: derived.image }
+        : {}),
+    ...(raw.documentName
+      ? { documentName: raw.documentName }
+      : derived.documentName
+        ? { documentName: derived.documentName }
+        : {}),
+    // Fan-out records can override the streaming tail (Phase A reconciliation
+    // replaces drafts by _id); history loads always carry the definitive flag.
   };
 }
 
