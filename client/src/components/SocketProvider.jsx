@@ -158,7 +158,13 @@ export const SocketProvider = ({ children }) => {
 
             newSocket = io(SOCKET_URL, {
                 auth: handshakeAuth,
+                // Websocket-first (matching mobile). Every engine.io attempt
+                // starts with transports[0], and without tryAllTransports a
+                // failed websocket never retries the next one — networks that
+                // block the WS upgrade would pin the session on
+                // "websocket error" forever.
                 transports: ['websocket', 'polling'],
+                tryAllTransports: true,
                 withCredentials: true
             });
 
