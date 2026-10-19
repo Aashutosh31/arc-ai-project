@@ -465,7 +465,7 @@ const ChatMessage = memo(({ msg, isSpeaking, isLast }) => {
 
   if (msg.sender === 'user') {
     return (
-      <MessageRow $role="user">
+      <MessageRow $role="user" data-message-id={msg.id ? String(msg.id) : undefined}>
         <UserBubble>
           <UserText>{text}</UserText>
           {msg.image && <BubbleImage src={msg.image} alt="Upload" />}
@@ -476,7 +476,7 @@ const ChatMessage = memo(({ msg, isSpeaking, isLast }) => {
   }
 
   return (
-    <MessageRow $role="assistant">
+    <MessageRow $role="assistant" data-message-id={msg.id ? String(msg.id) : undefined}>
       <AssistantDoc>
         <AssistantLabel>
           <AssistantAvatar>A</AssistantAvatar>
@@ -498,7 +498,7 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
   const { interruptStream, sendCommand, socket, isConnected } = useSocket();
   const { activeExecution, presence, cancelActiveExecution } = useExecution();
   const { approvals, now, resolveApproval } = useApprovals();
-  const { activeConversationId, activeConversationRevision, switchConversation, fetchConversations, fetchConversationMessages, updateConversationTitle, ensureConversationReady, isFirstMessageSendingRef } = useConversation();
+  const { activeConversationId, activeConversationRevision, switchConversation, fetchConversations, fetchConversationMessages, updateConversationTitle, ensureConversationReady, isFirstMessageSendingRef, focusedMessageId } = useConversation();
   const { activeWorkspaceId } = useWorkspace();
 
   const [inputText, setInputText] = useState('');
@@ -581,6 +581,73 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
     socket.on('ai:conversation:title', onTitle);
     return () => socket.off('ai:conversation:title', onTitle);
   }, [socket, updateConversationTitle, activeWorkspaceId]);
+
+  // Realtime sync Phase B ([planning 05]): fold fan-out records for the OPEN
+  // thread into the live transcript (dedupe/replace by canonical `_id`).
+  // Records for other threads are ignored — the sidebar already refreshes on
+  // title/workspace events; unread previews are a later phase.
+  const mergeServerMessage = useChat().mergeServerMessage;
+  useEffect(() => {
+    if (!socket) return;
+    const onAppended = (data) => {
+      const convId = data && data.conversationId ? String(data.conversationId) : null;
+      const message = data && data.message ? data.message : null;
+      if (!convId || !message || !message._id) return;
+      if (convId !== String(activeConversationId || '')) return;
+      try {
+        mergeServerMessage({
+          _id: message._id,
+          role: message.role,
+          content: message.content,
+          attachments: message.attachments,
+          interrupted: message.interrupted,
+          streaming: message.streaming,
+          createdAt: message.createdAt,
+        });
+      } catch { /* fan-out reconciliation must never crash the chat */ }
+    };
+    socket.on('conversation.message.appended', onAppended);
+    return () => socket.off('conversation.message.appended', onAppended);
+  }, [socket, activeConversationId, mergeServerMessage]);
+
+  // Turn receipt (Phase C): adopt the durable conversation id when the turn
+  // created a new thread, and bind the optimistic bubble to its server `_id`
+  // so history refetches/fan-out echoes dedupe instead of duplicating.
+  const stampMessageTurn = useChat().stampMessageTurn;
+  useEffect(() => {
+    const onReceipt = (event) => {
+      const detail = event?.detail || {};
+      try {
+        if (detail.clientTurnId && detail.userMessageId && detail.accepted) {
+          stampMessageTurn(detail.clientTurnId, detail.userMessageId);
+        }
+        if (detail.conversationId && String(detail.conversationId) !== String(activeConversationId || '')) {
+          switchConversation(detail.conversationId);
+          fetchConversations().catch(() => {});
+        }
+      } catch { /* receipts are additive bookkeeping */ }
+    };
+    window.addEventListener('arc:turn-receipt', onReceipt);
+    return () => window.removeEventListener('arc:turn-receipt', onReceipt);
+  }, [stampMessageTurn, activeConversationId, switchConversation, fetchConversations]);
+
+  // Bug B-14: search hits set focusedMessageId; this is its consumer — jump
+  // the thread window to the hit and flash it. Cleared by switchConversation.
+  useEffect(() => {
+    if (!focusedMessageId) return;
+    const t = setTimeout(() => {
+      try {
+        const row = messageAreaRef.current?.querySelector?.(
+          `[data-message-id="${String(focusedMessageId)}"]`
+        );
+        if (!row) return;
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        row.classList.add('message-focused');
+        setTimeout(() => row.classList.remove('message-focused'), 2400);
+      } catch { /* focus is cosmetic */ }
+    }, 120);
+    return () => clearTimeout(t);
+  }, [focusedMessageId, activeConversationId]);
 
   // Keep async-history mirrors current (assigned during render — refs only).
   fetchMessagesRef.current = fetchConversationMessages;
