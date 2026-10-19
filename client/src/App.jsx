@@ -57,6 +57,16 @@ const GlobalStyle = createGlobalStyle`
     outline-offset: 3px;
   }
 
+  /* Bug B-14: search-hit focus flash on the target transcript row. */
+  .message-focused {
+    animation: messageFocusFlash 2.4s ease-out;
+    border-radius: 10px;
+  }
+  @keyframes messageFocusFlash {
+    0%, 60% { background-color: rgba(var(--primary-rgb), 0.12); }
+    100% { background-color: transparent; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       animation-duration: 0.01ms !important;

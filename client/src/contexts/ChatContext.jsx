@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { useWorkspace } from './WorkspaceContext';
+import { normalizeHistoryMessage } from '../lib/conversationHistory.js';
 
 const ChatContext = createContext();
 
@@ -79,6 +80,40 @@ export const ChatProvider = ({ children }) => {
     setMessages([]);
     setIsProcessing(false);
     setIsStreaming(false);
+  }, []);
+
+  // Realtime sync Phase B ([planning 05]): fold one durable
+  // `conversation.message.appended` record into the live transcript.
+  // Reconciliation is by the canonical server `_id`: known ids are replaced
+  // in place (a streaming draft converging to its final form), unknown ids
+  // append at the end. No-ops silently for malformed payloads.
+  const mergeServerMessage = useCallback((serverMessage) => {
+    if (!serverMessage || !serverMessage._id) return;
+    const normalized = normalizeHistoryMessage(serverMessage);
+    if (!normalized) return;
+    setMessages((prev) => {
+      const sid = String(serverMessage._id);
+      const existing = prev.findIndex((m) => String(m.id) === sid);
+      const next = [...prev];
+      if (existing !== -1) {
+        next[existing] = { ...normalized, id: sid };
+      } else {
+        next.push({ ...normalized, id: sid });
+      }
+      return next;
+    });
+  }, []);
+
+  // Turn receipt (Phase C): an ack binds the LIVE optimistic bubble (tagged
+  // with clientTurnId in useSocket) to its durable server `_id`, so any
+  // later history/fan-out reconciliation dedupes instead of duplicating.
+  const stampMessageTurn = useCallback((clientTurnId, serverId) => {
+    if (!clientTurnId || !serverId) return;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m && m.clientTurnId === clientTurnId ? { ...m, id: String(serverId) } : m
+      )
+    );
   }, []);
 
   const appendBotChunk = useCallback((chunk) => {
@@ -168,6 +203,8 @@ export const ChatProvider = ({ children }) => {
       addMessage,
       replaceMessages,
       prependMessages,
+      mergeServerMessage,
+      stampMessageTurn,
       clearMessages,
       appendBotChunk,
       finishBotStream,
@@ -196,6 +233,8 @@ export const ChatProvider = ({ children }) => {
       addMessage,
       replaceMessages,
       prependMessages,
+      mergeServerMessage,
+      stampMessageTurn,
       clearMessages,
       appendBotChunk,
       finishBotStream,
