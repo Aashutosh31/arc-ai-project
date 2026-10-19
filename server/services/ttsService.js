@@ -25,10 +25,20 @@ const getTtsMode = () =>
     .trim()
     .toLowerCase();
 
+// ARC deliberately does not speak: text-to-speech OUTPUT was removed on
+// 2026-10-19 (product decision — ARC must not dictate replies aloud on web or
+// mobile). Microphone/STT input is unaffected. This constant is the single
+// server kill switch for speech: while false, isServerTtsActive() reports
+// false, so no server audio is ever synthesized or streamed (neither
+// `ai:tts:audio` nor `voice:tts:*` is emitted) and `ai:tts:mode` announces the
+// (now silent) browser mode. Kept named so re-enabling speech is one line.
+const SPEECH_OUTPUT_ENABLED = false;
+
 // "Will the selected mode produce speech right now?" Mirrors the provider
 // fallback chain in voiceTtsProvider.selectStreamingProvider so the client
 // config and the runtime never disagree: sarvam → gemini → unavailable.
 const isServerTtsActive = () => {
+  if (!SPEECH_OUTPUT_ENABLED) return false;
   const mode = getTtsMode();
   if (mode === "gemini") return Boolean(process.env.GEMINI_API_KEY);
   if (mode === "sarvam") {
