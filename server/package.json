@@ -19,10 +19,9 @@
     "test:capability-preconditions": "node tests/capabilityPreconditions.test.js",
     "test:mongo": "node tests/runAll.js --mongo",
     "test:live": "node tests/runAll.js --include-live",
-    "test:voice": "node tests/voiceRuntime.test.js",
-    "test:tts": "node tests/ttsService.test.js",
-    "test:sarvam": "node tests/sarvamLanguage.test.js && node tests/sarvamAudio.test.js && node tests/sarvamStt.test.js && node tests/sarvamTts.test.js && node tests/sttServiceSarvam.test.js",
-    "test:sarvam:live": "node tests/sarvamLive.test.js",
+    "test:voice": "node tests/voiceSingleOwnerMode.test.js",
+    "test:ownership": "node tests/conversationOwnership.security.test.js && node tests/conversationOwnership.socket.test.js && node tests/approvalSocketBinding.socket.test.js && node tests/approvalStore.test.js",
+
     "google:calendar:clear-stale": "node scripts/clearStaleGoogleCalendarTokens.js",
     "google:calendar:clear-stale:apply": "node scripts/clearStaleGoogleCalendarTokens.js --apply",
     "backfill:idempotency": "node scripts/backfillIdempotencyExpiresAt.js",

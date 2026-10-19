@@ -17,6 +17,7 @@ const LLMRouter = require("../lib/llm/LLMRouter");
 const StreamingRuntime = require("../lib/llm/StreamingRuntime");
 const brain = require("../lib/brain");
 const { createLlmReasoner, createHybridReasoner } = require("../lib/brain/reasonerLlm");
+const { emitMessageAppended } = require("../lib/messageFanout");
 const { discoverNative, preconditions: capabilityPreconditions } = require("../lib/capabilities");
 const {
   buildMemoryContext,
@@ -4759,17 +4760,28 @@ class AIService {
         // first-token delivery. The turn RECEIPT rides on the same detached
         // write's completion — so "acked" always means "persisted", without
         // ever stalling the turn when Mongo is slow.
+        // Attachment parity across devices/sessions (bug B-06): the user
+        // message stores enough to REPLAY the attachment later. Images are
+        // inlined as data URLs (the same shape the live bubble renders) and
+        // documents keep their display name in the schema's `name` field.
+        const replayAttachments = imageBase64
+          ? [{
+              type: "image",
+              url: imageBase64.startsWith("data:")
+                ? imageBase64
+                : `data:image/jpeg;base64,${imageBase64}`,
+            }]
+          : document
+            ? [{ type: "document", name: document.name, mimeType: document.type || null }]
+            : [];
+
         void Message.create({
           conversationId,
           workspaceId: workspaceContext.workspaceId || null,
           role: "user",
           content:
             text || (document ? `Attached document: ${document.name}` : ""),
-          attachments: imageBase64
-            ? [{ type: "image" }]
-            : document
-              ? [{ type: "document", name: document.name }]
-              : [],
+          attachments: replayAttachments,
           metadata: {
             streaming: false,
           },
@@ -4780,6 +4792,16 @@ class AIService {
               conversationId: String(conversationId),
               userMessageId: userDoc ? String(userDoc._id) : null,
             });
+            // Sync Phase A: every durable message fans out to the actor's
+            // OTHER devices (origin socket excluded by the helper).
+            if (userDoc) {
+              emitMessageAppended(
+                String(userId),
+                conversationId,
+                userDoc,
+                socket?.id || null,
+              );
+            }
           })
           .catch((err) => {
             console.error("[AIService] Error saving user message:", err);
@@ -4918,6 +4940,15 @@ class AIService {
             },
           });
           assistantDraftMessageId = draftMessage._id;
+
+          // Sync Phase A: other devices see the streaming bubble starting
+          // here; the final fan-out (below) replaces this record by `_id`.
+          emitMessageAppended(
+            String(userId),
+            conversationId,
+            draftMessage,
+            socket?.id || null,
+          );
 
           console.log("[AIService] assistant draft created", {
             conversationId: String(conversationId),
@@ -8249,6 +8280,15 @@ class AIService {
                 },
               });
             }
+
+            // Sync Phase A: the durable final assistant message replaces any
+            // streaming draft on other devices (clients key on `_id`).
+            emitMessageAppended(
+              String(userId),
+              conversationId,
+              savedMessage,
+              socket?.id || null,
+            );
 
             if (shouldSaveMemory) {
               setImmediate(() => {

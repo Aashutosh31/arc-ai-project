@@ -3,11 +3,11 @@ const Message = require('../models/Message');
 const LLMRouter = require('../lib/llm/LLMRouter');
 const mongoose = require('mongoose');
 const { getActor, isGuestActor } = require('../lib/actor');
-const {
-  findOwnedConversation,
+const { findOwnedConversation,
   isConversationOwned,
   updateOwnedConversation,
 } = require('../lib/conversationAccess');
+const { emitMessageAppended } = require('../lib/messageFanout');
 const WorkspaceRuntimeManager = require('../services/WorkspaceRuntimeManager');
 
 const workspaceRuntime = new WorkspaceRuntimeManager({ logger: console });
@@ -330,6 +330,10 @@ exports.addMessage = async (userId, conversationId, role, content, metadata = {}
     });
 
     await message.save();
+
+    // Sync Phase A ([planning 05]): durable messages from the REST primitive
+    // fan out to the actor's other devices too (no origin socket to exclude).
+    emitMessageAppended(String(userId), conversationId, message, null);
 
     // Update conversation's lastMessage and messageCount (owner-scoped)
     await updateOwnedConversation(userId, conversationId, {

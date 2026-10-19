@@ -224,6 +224,18 @@ io.on('connection', (socket) => {
     }
     global.connectedSockets.get(socket.userId).add(socket);
 
+    // Realtime-sync Phase A ([planning 05]): every authenticated socket joins
+    // its actor's user room so any device of the same user receives
+    // `conversation.message.appended` fan-outs (dedupe is client-side, by the
+    // canonical message `_id`). Guests join too — `emitMessageAppended`
+    // refuses to fan out to guests, so the room stays empty of traffic.
+    try {
+        socket.join(`user:${socket.userId}`);
+        socket.data.userRoom = `user:${socket.userId}`;
+    } catch (roomErr) {
+        console.warn('[Sync] user-room join failed:', roomErr?.message || roomErr);
+    }
+
     // Initialize workspace context for this socket (will be overridden by client)
     socket.activeWorkspaceId = null;
 
