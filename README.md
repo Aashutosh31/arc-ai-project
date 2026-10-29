@@ -11,6 +11,8 @@
 <img src="https://img.shields.io/badge/TOOLS-22--Tool%20Registry-ff2ee6?style=for-the-badge&labelColor=0d0221&color=ff2ee6" />
 <img src="https://img.shields.io/badge/STREAMING-Socket.IO%20Real--time-39ff14?style=for-the-badge&labelColor=0d0221&color=39ff14" />
 
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/Aashutosh31/badge.svg)](https://hub.xerj.org/contributors/Aashutosh31)
+
 <br/><br/>
 
 <a href="https://arc-ai-project.vercel.app/" target="_blank">
