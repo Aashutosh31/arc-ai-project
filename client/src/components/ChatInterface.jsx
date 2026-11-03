@@ -9,6 +9,7 @@ import { useApprovals } from '../contexts/ApprovalContext';
 import ApprovalCard from './ApprovalCard';
 import { HistoryLoader } from '../lib/conversationHistory';
 import MarkdownRenderer from './MarkdownRenderer';
+import ToolCallList from './ToolCallCard';
 import { Button as UiButton } from './ui';
 import { getSharedVoiceEngine } from '../audio/voiceEngineSingleton';
 
@@ -482,6 +483,7 @@ const ChatMessage = memo(({ msg, isSpeaking, isLast }) => {
           <AssistantAvatar>A</AssistantAvatar>
           ARC-AI
         </AssistantLabel>
+        <ToolCallList calls={msg.toolCalls} />
         <MarkdownRenderer content={text} isStreaming={Boolean(msg.isStreaming)} />
         {(msg.isStreaming || (isSpeaking && isLast)) && (
           <WaveformBars><div /><div /><div /><div /></WaveformBars>
@@ -600,6 +602,7 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
           role: message.role,
           content: message.content,
           attachments: message.attachments,
+          toolCalls: message.toolCalls,
           interrupted: message.interrupted,
           streaming: message.streaming,
           createdAt: message.createdAt,
@@ -609,6 +612,37 @@ const ChatInterface = ({ onOpenVoice, onOpenVision, onOpenTools, seedText }) => 
     socket.on('conversation.message.appended', onAppended);
     return () => socket.off('conversation.message.appended', onAppended);
   }, [socket, activeConversationId, mergeServerMessage]);
+
+  // Origin-device finalize: the durable assistant record (including
+  // `toolCalls`) for the turn THIS device just streamed. Fan-out excludes the
+  // sending socket, so without this the sender would only see tool cards after
+  // a reload. Settle the streamed bubble first, then fold the canonical record
+  // into it so it gains the server id + tool calls.
+  const finishBotStream = useChat().finishBotStream;
+  useEffect(() => {
+    if (!socket) return;
+    const onFinalized = (data) => {
+      const convId = data && data.conversationId ? String(data.conversationId) : null;
+      const message = data && data.message ? data.message : null;
+      if (!convId || !message || !message._id) return;
+      if (convId !== String(activeConversationId || '')) return;
+      try {
+        finishBotStream();
+        mergeServerMessage({
+          _id: message._id,
+          role: message.role,
+          content: message.content,
+          attachments: message.attachments,
+          toolCalls: message.toolCalls,
+          interrupted: message.interrupted,
+          streaming: message.streaming,
+          createdAt: message.createdAt,
+        }, { foldLocalAssistant: true });
+      } catch { /* finalize folding must never crash the chat */ }
+    };
+    socket.on('ai:assistant:finalized', onFinalized);
+    return () => socket.off('ai:assistant:finalized', onFinalized);
+  }, [socket, activeConversationId, mergeServerMessage, finishBotStream]);
 
   // Turn receipt (Phase C): adopt the durable conversation id when the turn
   // created a new thread, and bind the optimistic bubble to its server `_id`

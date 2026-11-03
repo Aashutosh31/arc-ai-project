@@ -87,16 +87,28 @@ export const ChatProvider = ({ children }) => {
   // Reconciliation is by the canonical server `_id`: known ids are replaced
   // in place (a streaming draft converging to its final form), unknown ids
   // append at the end. No-ops silently for malformed payloads.
-  const mergeServerMessage = useCallback((serverMessage) => {
+  const mergeServerMessage = useCallback((serverMessage, options = {}) => {
     if (!serverMessage || !serverMessage._id) return;
     const normalized = normalizeHistoryMessage(serverMessage);
     if (!normalized) return;
     setMessages((prev) => {
       const sid = String(serverMessage._id);
-      const existing = prev.findIndex((m) => String(m.id) === sid);
       const next = [...prev];
-      if (existing !== -1) {
-        next[existing] = { ...normalized, id: sid };
+      let index = prev.findIndex((m) => m.id !== null && m.id !== undefined && String(m.id) === sid);
+      if (index === -1 && options.foldLocalAssistant && normalized.sender === 'ai') {
+        // Origin-device finalize (`ai:assistant:finalized`): the sending
+        // socket already holds the streamed bubble, which has no durable id.
+        // Fold the canonical record into the tail when it is that finished
+        // local assistant bubble so it gains the server id + tool calls.
+        // Anchoring on the tail (not "last assistant anywhere") avoids
+        // overwriting a previous answer if this turn never streamed a bubble.
+        const tail = prev[prev.length - 1];
+        if (tail && tail.sender === 'ai' && (tail.id === null || tail.id === undefined) && !tail.isStreaming) {
+          index = prev.length - 1;
+        }
+      }
+      if (index !== -1) {
+        next[index] = { ...normalized, id: sid };
       } else {
         next.push({ ...normalized, id: sid });
       }

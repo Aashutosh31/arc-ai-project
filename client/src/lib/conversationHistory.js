@@ -45,6 +45,30 @@ export function deriveAttachmentFields(attachments) {
   };
 }
 
+// Persisted tool calls (mobile parity, v1.0.22). The server stores one entry
+// per executed tool as `{ toolName, input, output, status }`; accept the
+// OpenAI-shaped `{ function: { name, arguments } }` echo too so fan-out and
+// history can never disagree on the render shape.
+const TOOL_STATUSES = new Set(['success', 'failed', 'pending']);
+
+export function normalizeToolCalls(rawCalls) {
+  if (!Array.isArray(rawCalls)) return [];
+  const out = [];
+  for (const raw of rawCalls) {
+    if (!raw || typeof raw !== 'object') continue;
+    const name = raw.toolName ?? raw.name ?? raw.function?.name ?? null;
+    if (!name) continue;
+    const status = TOOL_STATUSES.has(raw.status) ? raw.status : 'pending';
+    out.push({
+      toolName: String(name),
+      input: raw.input ?? raw.args ?? raw.function?.arguments ?? null,
+      output: raw.output ?? raw.result ?? null,
+      status,
+    });
+  }
+  return out;
+}
+
 export function normalizeHistoryMessage(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const content = raw.content ?? raw.text ?? '';
@@ -55,12 +79,14 @@ export function normalizeHistoryMessage(raw) {
   // Genuinely invalid: no identity, no text, no attachments, no media echo.
   if (id === null && !hasText && attachments.length === 0 && !raw.image && !raw.documentName) return null;
   const role = raw.role ?? raw.sender ?? 'ai';
+  const toolCalls = normalizeToolCalls(raw.toolCalls);
   return {
     id: id === null || id === undefined ? null : String(id),
     sender: role === 'user' ? 'user' : 'ai',
     text: sanitizeHistoryText(String(content ?? '')),
     isStreaming: Boolean(raw.streaming ?? false),
     interrupted: Boolean(raw.interrupted ?? raw.metadata?.interrupted ?? false),
+    ...(toolCalls.length > 0 ? { toolCalls } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(raw.image
       ? { image: raw.image }
