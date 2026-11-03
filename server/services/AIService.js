@@ -17,7 +17,7 @@ const LLMRouter = require("../lib/llm/LLMRouter");
 const StreamingRuntime = require("../lib/llm/StreamingRuntime");
 const brain = require("../lib/brain");
 const { createLlmReasoner, createHybridReasoner } = require("../lib/brain/reasonerLlm");
-const { emitMessageAppended } = require("../lib/messageFanout");
+const { emitMessageAppended, buildPayload } = require("../lib/messageFanout");
 const { discoverNative, preconditions: capabilityPreconditions } = require("../lib/capabilities");
 const {
   buildMemoryContext,
@@ -7025,6 +7025,10 @@ class AIService {
       };
 
       let turnToolResults = [];
+      // Planner step statuses for the persisted per-message tool-call cards.
+      // `turnToolResults` only carries results (no status), so keep the
+      // execution steps separately to distinguish failed/blocked calls.
+      let turnStepStatuses = [];
       const makeContinuationGeneration = async ({
         assistantMessage,
         toolResults,
@@ -7768,6 +7772,11 @@ class AIService {
               content: step.result || {},
             }));
           turnToolResults = plannerToolResults;
+          turnStepStatuses = (execResult.steps || []).map((step) => ({
+            toolCallId: step.toolCallId,
+            tool: step.tool,
+            status: step.status,
+          }));
 
           // Persist compact working-state refs so the NEXT turn
           // can resolve "that"/"it" against this tool activity.
@@ -8230,6 +8239,23 @@ class AIService {
             // (name + compact input summary + success flag) —
             // never full outputs verbatim.
             let storedToolCalls = [];
+            const toolStatusFor = (tc) => {
+              const step =
+                turnStepStatuses.find(
+                  (s) => s.toolCallId && s.toolCallId === tc?.id,
+                ) ||
+                turnStepStatuses.find(
+                  (s) => s.tool && s.tool === tc?.function?.name,
+                );
+              const raw = String(step?.status || "").toUpperCase();
+              if (raw === "FAILED" || raw === "BLOCKED" || raw === "CANCELLED") {
+                return "failed";
+              }
+              if (raw === "RUNNING" || raw === "PENDING" || raw === "PLANNED") {
+                return "pending";
+              }
+              return "success";
+            };
             try {
               storedToolCalls = (toolCalls || [])
                 .slice(0, 6)
@@ -8255,7 +8281,7 @@ class AIService {
                     toolName: String(tc?.function?.name || ""),
                     input: { summary: argSummary },
                     output: { summarized: true },
-                    status: "success",
+                    status: toolStatusFor(tc),
                   };
                 })
                 .filter((e) => e.toolName);
@@ -8308,6 +8334,23 @@ class AIService {
               savedMessage,
               socket?.id || null,
             );
+
+            // The origin device is deliberately excluded from the fan-out
+            // above (it already holds the streamed bubble), so it never sees
+            // the persisted `toolCalls`. Hand it the canonical finalized
+            // record directly: the client folds it into its local assistant
+            // bubble, stamping the server id and rendering tool-call cards.
+            const finalizedPayload = buildPayload(conversationId, savedMessage);
+            if (socket && finalizedPayload) {
+              try {
+                socket.emit("ai:assistant:finalized", finalizedPayload);
+              } catch (finalizeErr) {
+                console.warn(
+                  "[Sync] origin finalize emit failed:",
+                  finalizeErr?.message || finalizeErr,
+                );
+              }
+            }
 
             if (shouldSaveMemory) {
               setImmediate(() => {
