@@ -10,6 +10,7 @@ import { Sidebar } from '../components/Sidebar';
 import ChatInterface from '../components/ChatInterface.jsx';
 import ExecutionPanel from '../components/ExecutionPanel.jsx';
 import TaskHistory from '../components/TaskHistory.jsx';
+import JobsPanel from '../components/JobsPanel.jsx';
 import TestUserAccessModal from '../components/TestUserAccessModal';
 import WhatsAppModal from '../components/WhatsAppModal.jsx';
 import WhatsAppConnectModal from '../components/WhatsAppConnectModal.jsx';
@@ -405,6 +406,7 @@ const DashboardPageContent = () => {
         <ExecutionDrawer $lifted={showVoice}>
           <ExecutionPanel />
           <TaskHistory />
+          <JobsPanel />
         </ExecutionDrawer>
       )}
 

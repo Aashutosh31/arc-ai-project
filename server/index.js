@@ -142,6 +142,33 @@ const io = new Server(server, {
     }
 });
 
+// Phase 4 job notifications fan out through the same per-user room as chat
+// sync. Bound once, before any route/socket handler can create a job.
+require('./lib/jobs/notifier').bind(io);
+
+// JARVIS Phase 4 — proactive autonomy ticker. Starts only once Mongo is
+// connected so the first tick never buffers queries against a dead
+// connection. Disabled with PROACTIVE_JOBS_ENABLED=false.
+const startProactiveJobScheduler = () => {
+    try {
+        const jobScheduler = require('./services/jobScheduler');
+        void jobScheduler.start({ io }).then((state) => {
+            if (!state.started) {
+                console.log(`[Jobs] scheduler not started (${state.reason}).`);
+            }
+        }).catch((err) => {
+            console.error('⚠️ Proactive job scheduler failed to start; server continues without it.', err?.message || err);
+        });
+    } catch (err) {
+        console.error('⚠️ Proactive job scheduler failed to load; server continues without it.', err?.message || err);
+    }
+};
+if (mongoose.connection.readyState === 1) {
+    startProactiveJobScheduler();
+} else {
+    mongoose.connection.once('open', startProactiveJobScheduler);
+}
+
 // Apply cookie-parser to socket.io handshake
 io.use((socket, next) => {
     cookieParser()(socket.handshake, {}, next);
@@ -493,6 +520,7 @@ app.use('/api/workspaces', workspaceRoutes);
 app.use('/api/voice', voiceRoutes);
 app.use('/api/mcp', require('./routes/mcp.js'));
 app.use('/api/executions', require('./routes/executions.js'));
+app.use('/api/jobs', require('./routes/jobs.js'));
 app.use('/api/debug', require('./routes/debug.js'));
 
 server.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));

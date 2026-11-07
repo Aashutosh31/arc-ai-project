@@ -110,6 +110,11 @@ const ResumeButton = styled.button`
   &:disabled { opacity: 0.55; cursor: default; }
 `;
 
+const ScheduleButton = styled(ResumeButton)`
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+`;
+
 const ErrorText = styled.div`
   padding: 0 10px 8px;
   font-size: 10px;
@@ -191,6 +196,17 @@ const TaskHistory = () => {
                     {busyId === plan.executionId ? 'Resuming…' : 'Resume'}
                   </ResumeButton>
                 )}
+                <ScheduleButton
+                  type="button"
+                  title="Schedule this plan as a durable job"
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('arc:schedule-plan', {
+                      detail: { executionId: plan.executionId }
+                    }));
+                  }}
+                >
+                  Schedule
+                </ScheduleButton>
               </Row>
             );
           })}
