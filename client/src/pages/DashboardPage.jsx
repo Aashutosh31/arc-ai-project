@@ -9,6 +9,7 @@ import { useWorkspaceViewport } from '../hooks/useWorkspaceViewport';
 import { Sidebar } from '../components/Sidebar';
 import ChatInterface from '../components/ChatInterface.jsx';
 import ExecutionPanel from '../components/ExecutionPanel.jsx';
+import TaskHistory from '../components/TaskHistory.jsx';
 import TestUserAccessModal from '../components/TestUserAccessModal';
 import WhatsAppModal from '../components/WhatsAppModal.jsx';
 import WhatsAppConnectModal from '../components/WhatsAppConnectModal.jsx';
@@ -180,6 +181,9 @@ const ExecutionDrawer = styled.div`
   z-index: 50;
   border-radius: var(--radius-md);
   pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 
   &:empty {
     display: none;
@@ -190,7 +194,7 @@ const DashboardPageContent = () => {
   const { isConnected, authInfo, socket } = useSocket();
   const { conversations, activeConversationId, createNewConversation } = useConversation();
   const { activeWorkspace } = useWorkspace();
-  const { activeExecution } = useExecution();
+  const { activeExecution, plans } = useExecution();
   const { isDesktopWide, isDesktopCompact } = useWorkspaceViewport();
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -397,9 +401,10 @@ const DashboardPageContent = () => {
         </ChatArea>
       </MainContent>
 
-      {activeExecution && (
+      {(activeExecution || (plans && plans.length > 0)) && (
         <ExecutionDrawer $lifted={showVoice}>
           <ExecutionPanel />
+          <TaskHistory />
         </ExecutionDrawer>
       )}
 

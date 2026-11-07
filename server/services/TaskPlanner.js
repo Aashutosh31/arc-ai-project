@@ -17,6 +17,11 @@ const WorkspaceLogger = require('../lib/WorkspaceLogger');
 class TaskPlanner {
   constructor() {
     this.wsLog = new WorkspaceLogger('TaskPlanner');
+    // Single-node in-process guard: the server runs on one Render instance,
+    // so this prevents two concurrent resumes of the same plan from racing
+    // the persisted RUNNING state. Persisted state remains the source of
+    // truth after a restart.
+    this.activeExecutions = new Set();
   }
 
   async createPlan({ userId, title, prompt, steps = [], workspaceId = null }) {
@@ -35,11 +40,25 @@ class TaskPlanner {
   }
 
   async executePlan(executionId, socket = null, options = {}) {
+    const key = String(executionId || '');
+    if (!key) throw new Error('Execution not found');
+    if (this.activeExecutions.has(key)) throw new Error('Execution already running');
+    this.activeExecutions.add(key);
+    try {
+      return await this.runPlan(executionId, socket, options);
+    } finally {
+      this.activeExecutions.delete(key);
+    }
+  }
+
+  async runPlan(executionId, socket = null, options = {}) {
     const exec = await Execution.findById(executionId);
     if (!exec) throw new Error('Execution not found');
     
     // Verify execution belongs to the requesting user (workspace isolation)
-    const requestWorkspaceId = options.workspaceId || null;
+    const requestWorkspaceId = options.workspaceId && String(options.workspaceId) !== 'global'
+      ? options.workspaceId
+      : null;
     if (requestWorkspaceId && String(exec.workspaceId || '') !== String(requestWorkspaceId)) {
       throw new Error('Execution not found in this workspace');
     }
@@ -50,35 +69,97 @@ class TaskPlanner {
     if (requesterId && String(exec.userId || '') !== String(requesterId)) {
       throw new Error('Execution not found');
     }
-    
-    if (exec.status === 'RUNNING') throw new Error('Execution already running');
 
+    const resume = Boolean(options.resume);
+    const resumeFromStatus = exec.status;
+    if (exec.status === 'RUNNING' && !resume) throw new Error('Execution already running');
+    if (exec.status === 'COMPLETED' && !resume) return exec;
+
+    if (resume) exec.resumeCount = (exec.resumeCount || 0) + 1;
     exec.status = 'RUNNING';
+    exec.lastError = null;
+    exec.completedAt = null;
     await exec.save();
     this.wsLog.executionStarted(exec.userId, executionId, exec.workspaceId, exec.steps.length);
 
     const controller = options.controller || null;
     const signal = controller ? controller.signal : null;
     const isCancelled = () => Boolean(signal?.aborted || socket?.isInterrupted);
+    // A cancelled plan is resumed because the user explicitly asked for it,
+    // so its cancelled steps are retryable by default. Failed/blocked steps
+    // are likewise retried on resume; callers may opt out explicitly.
+    const retryFailed = options.retryFailed !== false;
+    const retryBlocked = options.retryBlocked !== false;
+    const retryCancelled = options.retryCancelled !== undefined
+      ? Boolean(options.retryCancelled)
+      : resumeFromStatus === 'CANCELLED';
 
     if (socket) {
       socket.emit('ai:plan:status', { executionId, status: 'RUNNING' });
       socket.emit('execution.started', { executionId, status: 'RUNNING' });
+      if (resume) {
+        socket.emit('execution.resumed', {
+          executionId,
+          status: 'RUNNING',
+          resumeCount: exec.resumeCount,
+          workspaceId: exec.workspaceId ? String(exec.workspaceId) : null
+        });
+      }
     }
+
+    // Persist terminal plan state atomically with the reason. Resume reads
+    // this to decide what work remains, and the UI renders it after reload.
+    const finishExecution = async (status, error = null) => {
+      exec.status = status;
+      exec.lastError = error || null;
+      exec.completedAt = new Date();
+      await exec.save();
+    };
 
     for (let i = 0; i < exec.steps.length; i++) {
       const step = exec.steps[i];
+
+      // Durable execution: a successful step is never run again. On resume we
+      // re-run only non-terminal (crash-left RUNNING) or explicitly retryable
+      // (FAILED/BLOCKED/CANCELLED) work.
+      if (step.status === 'SUCCEEDED') continue;
+      if (step.status !== 'PENDING') {
+        const retryable =
+          resume && (
+            step.status === 'RUNNING' ||
+            (step.status === 'FAILED' && retryFailed) ||
+            (step.status === 'BLOCKED' && retryBlocked) ||
+            (step.status === 'CANCELLED' && retryCancelled)
+          );
+        if (!retryable) continue;
+      }
+
       if (isCancelled()) {
         step.status = 'CANCELLED';
         await exec.save();
-        exec.status = 'CANCELLED';
-        await exec.save();
+        await finishExecution('CANCELLED');
         if (socket) socket.emit('ai:plan:status', { executionId, status: 'CANCELLED' });
         return exec;
       }
 
+      // Assign/reuse the logical action identity BEFORE the side effect. A
+      // crash after this save keeps the same key, so the capability layer
+      // replays the completed side effect instead of duplicating it. A
+      // deliberate retry of a terminal failure gets a fresh identity so the
+      // previous failure is not replayed.
+      const deliberateRetry =
+        resume && ['FAILED', 'BLOCKED', 'CANCELLED'].includes(step.status);
+      if (!step.idempotencyKey || deliberateRetry) {
+        step.idempotencyKey = deliberateRetry
+          ? `${executionId}:${step.id}:retry:${uuidv4()}`
+          : `${executionId}:${step.id}`;
+      }
       step.status = 'RUNNING';
+      step.attempts = (step.attempts || 0) + 1;
+      step.lastAttemptAt = new Date();
       step.startedAt = new Date();
+      step.finishedAt = null;
+      step.failureReason = null;
       await exec.save();
       if (socket) {
         socket.emit('ai:plan:step', { executionId, stepId: step.id, status: 'RUNNING', tool: step.tool });
@@ -98,8 +179,7 @@ class TaskPlanner {
             socket.emit('ai:plan:step', { executionId, stepId: step.id, status: 'CANCELLED', error: step.failureReason });
             socket.emit('execution.step.completed', { executionId, stepId: step.id, status: 'CANCELLED', result: { cancelled: true } });
           }
-          exec.status = 'CANCELLED';
-          await exec.save();
+          await finishExecution('CANCELLED');
           this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
           if (socket) {
             socket.emit('ai:plan:status', { executionId, status: 'CANCELLED' });
@@ -108,7 +188,12 @@ class TaskPlanner {
           return exec;
         }
 
-        const result = await TaskExecutor.executeTool(step.tool, step.args || {}, exec.userId, socket, { signal, workspaceId: exec.workspaceId, conversationId: options.conversationId || null });
+        const result = await TaskExecutor.executeTool(step.tool, step.args || {}, exec.userId, socket, {
+          signal,
+          workspaceId: exec.workspaceId,
+          conversationId: options.conversationId || null,
+          idempotencyKey: step.idempotencyKey
+        });
         if (result?.cancelled || signal?.aborted) {
           step.status = 'CANCELLED';
           step.failureReason = result?.error || 'Execution cancelled by user.';
@@ -124,8 +209,7 @@ class TaskPlanner {
             socket.emit('ai:plan:status', { executionId, status: 'CANCELLED' });
             socket.emit('execution.completed', { executionId, status: 'CANCELLED' });
           }
-          exec.status = 'CANCELLED';
-          await exec.save();
+          await finishExecution('CANCELLED');
           this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
           return exec;
         }
@@ -150,8 +234,7 @@ class TaskPlanner {
             socket.emit('execution.blocked', { executionId, stepId: step.id, status: 'BLOCKED', reason: blockedReason, creditsRemaining: result?.creditsRemaining ?? null });
             socket.emit('ai:plan:status', { executionId, status: 'BLOCKED' });
           }
-          exec.status = 'BLOCKED';
-          await exec.save();
+          await finishExecution('BLOCKED', blockedReason);
           this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
           if (socket) {
             socket.emit('execution.completed', { executionId, status: 'BLOCKED', reason: blockedReason });
@@ -199,8 +282,7 @@ class TaskPlanner {
               socket.emit('ai:plan:status', { executionId, status: 'BLOCKED' });
               socket.emit('execution.completed', { executionId, status: 'BLOCKED', reason: blockedReason });
             }
-            exec.status = 'BLOCKED';
-            await exec.save();
+            await finishExecution('BLOCKED', blockedReason);
             this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
             return exec;
           }
@@ -220,8 +302,7 @@ class TaskPlanner {
               socket.emit('ai:plan:status', { executionId, status: 'CANCELLED' });
               socket.emit('execution.completed', { executionId, status: 'CANCELLED' });
             }
-            exec.status = 'CANCELLED';
-            await exec.save();
+            await finishExecution('CANCELLED');
             this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
             return exec;
           }
@@ -278,8 +359,7 @@ class TaskPlanner {
             socket.emit('ai:plan:status', { executionId, status: 'CANCELLED' });
             socket.emit('execution.completed', { executionId, status: 'CANCELLED' });
           }
-          exec.status = 'CANCELLED';
-          await exec.save();
+          await finishExecution('CANCELLED');
           this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
           return exec;
         }
@@ -311,8 +391,7 @@ class TaskPlanner {
             socket.emit('ai:plan:status', { executionId, status: 'CANCELLED' });
             socket.emit('execution.completed', { executionId, status: 'CANCELLED' });
           }
-          exec.status = 'CANCELLED';
-          await exec.save();
+          await finishExecution('CANCELLED');
           this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
           return exec;
         }
@@ -349,8 +428,7 @@ class TaskPlanner {
     }
 
     if (isCancelled()) {
-      exec.status = 'CANCELLED';
-      await exec.save();
+      await finishExecution('CANCELLED');
       this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
       if (socket) {
         socket.emit('ai:plan:status', { executionId, status: 'CANCELLED' });
@@ -359,9 +437,9 @@ class TaskPlanner {
       return exec;
     }
 
-    if (exec.steps.some((step) => step.status === 'BLOCKED')) {
-      exec.status = 'BLOCKED';
-      await exec.save();
+    const blockedStep = exec.steps.find((step) => step.status === 'BLOCKED');
+    if (blockedStep) {
+      await finishExecution('BLOCKED', blockedStep.failureReason || 'Execution blocked');
       this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
       if (socket) {
         socket.emit('ai:plan:status', { executionId, status: 'BLOCKED' });
@@ -370,9 +448,9 @@ class TaskPlanner {
       return exec;
     }
 
-    const hasHardFailures = exec.steps.some((step) => step.status === 'FAILED' && !step.recovered);
-    exec.status = hasHardFailures ? 'FAILED' : 'COMPLETED';
-    await exec.save();
+    const failedStep = exec.steps.find((step) => step.status === 'FAILED' && !step.recovered);
+    const hasHardFailures = Boolean(failedStep);
+    await finishExecution(hasHardFailures ? 'FAILED' : 'COMPLETED', failedStep?.failureReason || null);
     this.wsLog.executionCompleted(exec.userId, executionId, exec.workspaceId, exec.status);
     if (socket) {
       socket.emit('ai:plan:status', { executionId, status: exec.status });
@@ -384,21 +462,98 @@ class TaskPlanner {
   async resumePlan(executionId, socket = null, options = {}) {
     const exec = await Execution.findById(executionId);
     if (!exec) throw new Error('Execution not found');
-    
-    // Verify execution belongs to the requesting user (workspace isolation)
-    const requestWorkspaceId = options.workspaceId || null;
+
+    // Ownership is bound to the authenticated requester, exactly like
+    // executePlan. A client-asserted userId is never trusted on its own.
+    const requesterId = (options.userId || (socket && socket.userId)) || null;
+    if (requesterId && String(exec.userId || '') !== String(requesterId)) {
+      throw new Error('Execution not found');
+    }
+    const requestWorkspaceId = options.workspaceId && String(options.workspaceId) !== 'global'
+      ? options.workspaceId
+      : null;
     if (requestWorkspaceId && String(exec.workspaceId || '') !== String(requestWorkspaceId)) {
       throw new Error('Execution not found in this workspace');
     }
-    
-    if (exec.status !== 'PLANNED' && exec.status !== 'RUNNING') throw new Error('Execution cannot be resumed');
 
-    // Find first non-terminal step
-    const nextIndex = exec.steps.findIndex((s) => ['PENDING', 'RUNNING'].includes(s.status));
-    if (nextIndex < 0) return exec;
+    if (exec.status === 'COMPLETED') throw new Error('Execution already completed');
+    if (!exec.steps.length) throw new Error('Execution has no steps to resume');
 
-    // Reuse executePlan which picks up from the document state
-    return this.executePlan(executionId, socket, options);
+    // A plan left RUNNING (crash/restart) is resumable: completed steps are
+    // skipped and the interrupted step reuses its persisted idempotency key.
+    // Reuse executePlan so there is exactly one execution path.
+    return this.executePlan(executionId, socket, { ...options, resume: true });
+  }
+
+  async getPlan(executionId, { userId = null, workspaceId = null } = {}) {
+    const exec = await Execution.findById(executionId).lean();
+    if (!exec) return null;
+    if (userId && String(exec.userId || '') !== String(userId)) return null;
+    if (workspaceId) {
+      const expected = String(workspaceId);
+      const actual = exec.workspaceId ? String(exec.workspaceId) : 'global';
+      if (actual !== expected) return null;
+    }
+    return this.serializePlan(exec);
+  }
+
+  async listPlans({ userId, workspaceId = null, limit = 20, status = null } = {}) {
+    if (!userId) return [];
+    const query = { userId };
+    if (workspaceId && String(workspaceId) !== 'global') {
+      query.workspaceId = workspaceId;
+    } else if (String(workspaceId) === 'global') {
+      query.workspaceId = null;
+    }
+    if (status) query.status = status;
+    const capped = Math.max(1, Math.min(Number(limit) || 20, 50));
+    const docs = await Execution.find(query)
+      .sort({ updatedAt: -1 })
+      .limit(capped)
+      .lean();
+    return docs.map((doc) => this.serializePlan(doc, { summary: true }));
+  }
+
+  serializePlan(doc, { summary = false } = {}) {
+    const steps = Array.isArray(doc.steps) ? doc.steps : [];
+    const base = {
+      executionId: String(doc._id || doc.id || ''),
+      id: String(doc._id || doc.id || ''),
+      title: doc.title || 'Autonomous plan',
+      prompt: doc.prompt || '',
+      status: doc.status || 'PLANNED',
+      workspaceId: doc.workspaceId ? String(doc.workspaceId) : null,
+      resumeCount: doc.resumeCount || 0,
+      lastError: doc.lastError || null,
+      createdAt: doc.createdAt || null,
+      updatedAt: doc.updatedAt || null,
+      completedAt: doc.completedAt || null,
+      stepCount: steps.length,
+      succeeded: steps.filter((s) => s.status === 'SUCCEEDED').length,
+      failed: steps.filter((s) => s.status === 'FAILED').length,
+      blocked: steps.filter((s) => s.status === 'BLOCKED').length,
+      resumable: Boolean(doc.status && doc.status !== 'COMPLETED' && steps.length > 0)
+    };
+    if (summary) return base;
+    return {
+      ...base,
+      steps: steps.map((step) => ({
+        id: step.id,
+        stepId: step.id,
+        tool: step.tool,
+        args: step.args || {},
+        status: step.status || 'PENDING',
+        attempts: step.attempts || 0,
+        retryCount: step.retryCount || 0,
+        failureReason: step.failureReason || null,
+        recovered: Boolean(step.recovered),
+        recoveryStrategy: step.recoveryStrategy || null,
+        result: step.result,
+        startedAt: step.startedAt || null,
+        finishedAt: step.finishedAt || null,
+        lastAttemptAt: step.lastAttemptAt || null
+      }))
+    };
   }
 }
 

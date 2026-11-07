@@ -278,6 +278,48 @@ io.on('connection', (socket) => {
         if (typeof ack === 'function') ack(result);
     });
 
+    // JARVIS Phase 2 — durable plans. Plan history is persisted separately
+    // from chat and is owner-scoped from the authenticated socket, never from
+    // a client-asserted userId. Resume reuses the single execution path and
+    // skips steps that already succeeded.
+    socket.on('execution.list', async (data, ack) => {
+        try {
+            const taskPlanner = require('./services/TaskPlanner');
+            const plans = await taskPlanner.listPlans({
+                userId: socket.userId,
+                workspaceId: (data && data.workspaceId) || null,
+                limit: data && data.limit,
+            });
+            if (typeof ack === 'function') ack({ ok: true, plans });
+        } catch (err) {
+            console.error('[Execution] list error:', err?.message || err);
+            if (typeof ack === 'function') ack({ ok: false, error: err?.message || 'list_failed' });
+        }
+    });
+
+    socket.on('execution.resume', async (data, ack) => {
+        try {
+            const executionId = data && data.executionId;
+            if (!executionId) throw new Error('executionId required');
+            const taskPlanner = require('./services/TaskPlanner');
+            const exec = await taskPlanner.resumePlan(executionId, socket, {
+                userId: socket.userId,
+                workspaceId: (data && data.workspaceId) || null,
+            });
+            if (typeof ack === 'function') {
+                ack({
+                    ok: true,
+                    executionId: String(exec._id),
+                    status: exec.status,
+                    resumeCount: exec.resumeCount || 0,
+                });
+            }
+        } catch (err) {
+            console.error('[Execution] resume error:', err?.message || err);
+            if (typeof ack === 'function') ack({ ok: false, error: err?.message || 'resume_failed' });
+        }
+    });
+
     // Voice Runtime 2.0 — client barge-in on the streaming voice channel.
     // Cancels in-flight LLM generation (which aborts TTS synthesis via the
     // shared AbortSignal) and marks the socket interrupted so late audio is
@@ -450,6 +492,7 @@ app.use('/api/memory', memoryRoutes);
 app.use('/api/workspaces', workspaceRoutes);
 app.use('/api/voice', voiceRoutes);
 app.use('/api/mcp', require('./routes/mcp.js'));
+app.use('/api/executions', require('./routes/executions.js'));
 app.use('/api/debug', require('./routes/debug.js'));
 
 server.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));

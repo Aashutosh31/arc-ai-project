@@ -44,6 +44,7 @@ export const ExecutionProvider = ({ children }) => {
   const { socket } = useContext(SocketContext) || {};
   const { activeWorkspaceId, workspaceRevision } = useWorkspace();
   const [executionBuckets, setExecutionBuckets] = useState({});
+  const [plans, setPlans] = useState([]);
   const executionWorkspaceMapRef = useRef(new Map());
 
   const updateBucket = useCallback((workspaceId, updater) => {
@@ -116,10 +117,79 @@ export const ExecutionProvider = ({ children }) => {
     });
   }, []);
 
+  const loadPlans = useCallback(() => new Promise((resolve) => {
+    if (!socket) { resolve([]); return; }
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve([]);
+    }, 5000);
+    const finish = (list) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (Array.isArray(list)) setPlans(list);
+      resolve(Array.isArray(list) ? list : []);
+    };
+    try {
+      socket.emit('execution.list', {
+        workspaceId: activeWorkspaceId || 'global',
+        limit: 12
+      }, (res) => {
+        if (res && res.ok) finish(res.plans);
+        else finish(null);
+      });
+    } catch {
+      finish(null);
+    }
+  }), [socket, activeWorkspaceId]);
+
+  const resumeExecution = useCallback((planOrId) => new Promise((resolve) => {
+    const isPlan = planOrId && typeof planOrId === 'object';
+    const executionId = isPlan ? (planOrId.executionId || planOrId.id) : planOrId;
+    if (!socket || !executionId) {
+      resolve({ ok: false, error: 'Execution unavailable' });
+      return;
+    }
+    const planWorkspaceId = isPlan ? (planOrId.workspaceId ?? null) : null;
+    const workspaceId = planWorkspaceId || activeWorkspaceId || null;
+    const key = workspaceId ? String(workspaceId) : 'global';
+    executionWorkspaceMapRef.current.set(executionId, key);
+    setBucketActiveExecutionId(key, executionId);
+    setBucketPresence(key, 'Resuming...');
+    upsertExecution(key, executionId, {
+      executionId,
+      title: (isPlan && planOrId.title) || 'Autonomous plan',
+      status: 'RUNNING',
+      steps: (isPlan && Array.isArray(planOrId.steps)) ? planOrId.steps : undefined
+    });
+    socket.emit('execution.resume', {
+      executionId,
+      // The plan's own workspace is authoritative for server-side ownership.
+      // null means the global workspace; it must not be replaced by the
+      // currently-viewed workspace or a cross-workspace resume would fail.
+      workspaceId: planWorkspaceId
+    }, (res) => {
+      if (res && res.ok) {
+        void loadPlans();
+        resolve(res);
+      } else {
+        setBucketPresence(key, 'Resume failed');
+        resolve(res || { ok: false, error: 'resume_failed' });
+      }
+    });
+  }), [socket, activeWorkspaceId, setBucketActiveExecutionId, setBucketPresence, upsertExecution, loadPlans]);
+
   const bucket = executionBuckets[String(activeWorkspaceId || 'global')] || emptyBucket();
   const executions = bucket.executions;
   const activeExecutionId = bucket.activeExecutionId;
   const presence = bucket.presence || 'Thinking...';
+
+  useEffect(() => {
+    if (!socket) return;
+    void loadPlans();
+  }, [socket, activeWorkspaceId, workspaceRevision, loadPlans]);
 
   useEffect(() => {
     if (!socket) return;
@@ -149,6 +219,17 @@ export const ExecutionProvider = ({ children }) => {
       setBucketPresence(workspaceId, presenceFromStatus(data?.status || 'running'));
     };
 
+    const onResumed = (data) => {
+      const executionId = data?.executionId || data?._id || data?.id;
+      if (!executionId) return;
+      const workspaceId = resolveWorkspaceId(data?.workspaceId, executionId, executionWorkspaceMapRef, activeWorkspaceId);
+      executionWorkspaceMapRef.current.set(executionId, workspaceId);
+      setBucketActiveExecutionId(workspaceId, executionId);
+      upsertExecution(workspaceId, executionId, { status: data?.status || 'RUNNING' });
+      setBucketPresence(workspaceId, 'Resuming...');
+      void loadPlans();
+    };
+
     const onStepStarted = (data) => {
       const executionId = data?.executionId;
       const stepId = data?.stepId;
@@ -160,7 +241,12 @@ export const ExecutionProvider = ({ children }) => {
       setBucketActiveExecutionId(workspaceId, executionId);
       setBucketPresence(workspaceId, `Executing ${data?.tool || 'step'}...`);
       updateBucket(workspaceId, (current) => {
-        const nextSteps = (current.executions.find((execution) => execution.executionId === executionId)?.steps || []).map((step) => step.id === stepId ? { ...step, status: 'RUNNING', startedAt: step.startedAt || Date.now(), tool: data?.tool || step.tool } : step);
+        const currentExecution = current.executions.find((execution) => execution.executionId === executionId);
+        const currentSteps = currentExecution?.steps || [];
+        const known = currentSteps.some((step) => step.id === stepId);
+        const nextSteps = known
+          ? currentSteps.map((step) => step.id === stepId ? { ...step, status: 'RUNNING', startedAt: step.startedAt || Date.now(), tool: data?.tool || step.tool } : step)
+          : [...currentSteps, { id: stepId, tool: data?.tool || 'Step', status: 'RUNNING', startedAt: Date.now() }];
         return {
           ...current,
           executions: current.executions.map((execution) => execution.executionId === executionId ? { ...execution, status: 'RUNNING', steps: nextSteps, updatedAt: Date.now() } : execution)
@@ -214,6 +300,7 @@ export const ExecutionProvider = ({ children }) => {
         executions: current.executions.map((execution) => execution.executionId === executionId ? { ...execution, status: normalizedStatus, updatedAt: Date.now() } : execution)
       }));
       setBucketPresence(workspaceId, normalizedStatus === 'BLOCKED' ? 'Blocked — insufficient credits' : 'Completed');
+      void loadPlans();
     };
 
     const onFailed = (data) => {
@@ -225,6 +312,7 @@ export const ExecutionProvider = ({ children }) => {
         executions: current.executions.map((execution) => execution.executionId === executionId ? { ...execution, status: 'FAILED', updatedAt: Date.now() } : execution)
       }));
       setBucketPresence(workspaceId, 'Failed');
+      void loadPlans();
     };
 
     const onBlocked = (data) => {
@@ -236,10 +324,12 @@ export const ExecutionProvider = ({ children }) => {
         executions: current.executions.map((execution) => execution.executionId === executionId ? { ...execution, status: 'BLOCKED', updatedAt: Date.now() } : execution)
       }));
       setBucketPresence(workspaceId, 'Blocked — insufficient credits');
+      void loadPlans();
     };
 
     socket.on('execution.created', onCreated);
     socket.on('execution.started', onStarted);
+    socket.on('execution.resumed', onResumed);
     socket.on('execution.step.started', onStepStarted);
     socket.on('execution.step.completed', onStepCompleted);
     socket.on('execution.step.failed', onStepFailed);
@@ -250,6 +340,7 @@ export const ExecutionProvider = ({ children }) => {
     return () => {
       socket.off('execution.created', onCreated);
       socket.off('execution.started', onStarted);
+      socket.off('execution.resumed', onResumed);
       socket.off('execution.step.started', onStepStarted);
       socket.off('execution.step.completed', onStepCompleted);
       socket.off('execution.step.failed', onStepFailed);
@@ -257,7 +348,7 @@ export const ExecutionProvider = ({ children }) => {
       socket.off('execution.completed', onCompleted);
       socket.off('execution.failed', onFailed);
     };
-  }, [socket, activeWorkspaceId, workspaceRevision, upsertExecution, setBucketActiveExecutionId, setBucketPresence, updateBucket]);
+  }, [socket, activeWorkspaceId, workspaceRevision, upsertExecution, setBucketActiveExecutionId, setBucketPresence, updateBucket, loadPlans]);
 
   useEffect(() => {
     if (!socket) return;
@@ -288,10 +379,13 @@ export const ExecutionProvider = ({ children }) => {
     activeExecution,
     activeExecutionId,
     executions,
+    plans,
     presence,
+    loadPlans,
+    resumeExecution,
     cancelActiveExecution,
     setActiveExecutionId: (executionId) => setBucketActiveExecutionId(activeWorkspaceId, executionId)
-  }), [activeExecution, activeExecutionId, executions, presence, activeWorkspaceId, setBucketActiveExecutionId]);
+  }), [activeExecution, activeExecutionId, executions, plans, presence, loadPlans, resumeExecution, activeWorkspaceId, setBucketActiveExecutionId]);
 
   return <ExecutionContext.Provider value={value}>{children}</ExecutionContext.Provider>;
 };
