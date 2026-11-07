@@ -1,5 +1,4 @@
 const AIMemory = require("../models/AIMemory");
-const UserFact = require("../models/UserFact");
 const User = require("../models/User");
 const Conversation = require("../models/Conversation");
 const Message = require("../models/Message");
@@ -24,6 +23,7 @@ const {
   searchWorkspace,
 } = require("./workspaceSearchService");
 const WorkspaceContextManager = require("./WorkspaceContextManager");
+const { loadMemoryCandidates, loadFactCandidates } = require("./memoryRetrievalService");
 const TaskPlanner = require("./TaskPlanner");
 const ToolRecoveryManager = require("./ToolRecoveryManager");
 const { upsertTextVector } = require("./workspaceIndexService");
@@ -5031,9 +5031,15 @@ class AIService {
         if (!isGuestActorId(userId) && memoryLearningEnabled) {
           const newMemory = new AIMemory({
             userId,
+            workspaceId: workspaceContext?.workspaceId || null,
             query: text || "Schedule meeting request",
             response: scheduleResponse,
             source: "conversation",
+            layer: "episodic",
+            importance: 0.5,
+            confidence: 0.8,
+            summary: String(text || "Schedule meeting request").slice(0, 180),
+            conversationId: conversationId || null,
           });
           await newMemory.save();
         }
@@ -5083,29 +5089,30 @@ class AIService {
         });
       }
 
-      // Candidate pools for the budget pipeline: fetched wider than the
-      // old fixed top-N so ranking (pinned > relevance > recency) can
-      // choose by value instead of recency alone. The pipeline caps
-      // what is actually sent; memories are never injected verbatim.
+      // Candidate pools for the budget pipeline. Relevance-first: the text
+      // index supplies older-but-relevant records, then pinned/recent records
+      // are merged in. The budget ranker (layer + importance + confidence +
+      // recency + keyword overlap) decides what is actually sent; memories are
+      // never injected verbatim.
       const memoryDocs = isGuest || isFirstConversationTurn
         ? []
-        : await AIMemory.find({
+        : await loadMemoryCandidates({
             userId,
             workspaceId: workspaceContext.workspaceId || null,
-          })
-            .sort({ pinned: -1, timestamp: -1 })
-            .limit(20)
-            .lean();
+            query: baseMessageContent,
+            recentLimit: 20,
+            relevantLimit: 20,
+          });
 
       const factDocs = isGuest || isFirstConversationTurn
         ? []
-        : await UserFact.find({
+        : await loadFactCandidates({
             userId,
             workspaceId: workspaceContext.workspaceId || null,
-          })
-            .sort({ pinned: -1, createdAt: -1 })
-            .limit(20)
-            .lean();
+            query: baseMessageContent,
+            recentLimit: 20,
+            relevantLimit: 20,
+          });
 
       let retrievalItems = [];
       if (!isGuest && !isFirstConversationTurn) {
@@ -8214,6 +8221,11 @@ class AIService {
             query: memoryQuery,
             response: finalOutputText,
             source: "conversation",
+            layer: "episodic",
+            importance: 0.5,
+            confidence: 0.8,
+            summary: String(memoryQuery).slice(0, 180),
+            conversationId: conversationId || null,
           });
           await newMemory.save();
         }

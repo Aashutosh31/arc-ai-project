@@ -6,6 +6,7 @@ const { protect } = require('../middleware/authMiddleware');
 router.use(protect);
 router.get('/', memoryController.getMemoryDashboard);
 router.patch('/preferences', memoryController.updatePreferences);
+router.post('/facts', memoryController.createFact);
 router.patch('/facts/:memoryId', memoryController.updateFact);
 router.delete('/facts/:memoryId', memoryController.deleteFact);
 router.patch('/semantic/:memoryId', memoryController.updateSemanticMemory);

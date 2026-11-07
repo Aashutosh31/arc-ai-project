@@ -138,9 +138,10 @@ const searchStructuredMemory = async (userId, query, limit = 8, workspaceId = nu
   // records there, so skip those collections instead of hitting ObjectId casts.
   if (actorType === 'guest') return [];
   const regex = buildSearchRegex(query);
+  const scopedWorkspaceId = workspaceId ? String(workspaceId) : null;
   const [facts, memories] = await Promise.all([
-    UserFact.find({ userId: String(userId), ...(regex ? { fact: regex } : {}), ...(workspaceId ? { workspaceId: String(workspaceId) } : {}) }).sort({ pinned: -1, createdAt: -1 }).limit(limit).lean(),
-    AIMemory.find({ userId: String(userId), ...(regex ? { $or: [{ query: regex }, { response: regex }, { tags: regex }] } : {}), ...(workspaceId ? { workspaceId: String(workspaceId) } : {}) })
+    UserFact.find({ userId: String(userId), workspaceId: scopedWorkspaceId, ...(regex ? { fact: regex } : {}) }).sort({ pinned: -1, createdAt: -1 }).limit(limit).lean(),
+    AIMemory.find({ userId: String(userId), workspaceId: scopedWorkspaceId, ...(regex ? { $or: [{ query: regex }, { response: regex }, { tags: regex }] } : {}) })
       .sort({ pinned: -1, timestamp: -1 })
       .limit(limit)
       .lean()
@@ -153,6 +154,9 @@ const searchStructuredMemory = async (userId, query, limit = 8, workspaceId = nu
     memoryId: String(fact._id),
     snippet: fact.fact,
     category: fact.category || 'general',
+    layer: fact.layer || 'semantic',
+    confidence: Number(fact.confidence ?? 0.9),
+    importance: Number(fact.importance ?? 0.6),
     pinned: Boolean(fact.pinned),
     timestamp: fact.createdAt,
     score: 0.85 + scoreRecency(fact.createdAt)
@@ -163,9 +167,12 @@ const searchStructuredMemory = async (userId, query, limit = 8, workspaceId = nu
     source: 'keyword',
     id: String(memory._id),
     memoryId: String(memory._id),
-    snippet: memory.query || memory.response,
+    snippet: memory.summary || memory.query || memory.response,
     response: memory.response,
     tags: memory.tags || [],
+    layer: memory.layer || 'episodic',
+    confidence: Number(memory.confidence ?? 0.7),
+    importance: Number(memory.importance ?? 0.5),
     pinned: Boolean(memory.pinned),
     timestamp: memory.timestamp,
     score: 0.75 + scoreRecency(memory.timestamp)
@@ -198,6 +205,7 @@ const searchSemanticVectors = async (userId, query, signal = null, limit = 8, wo
     title: match.metadata?.title || null,
     snippet: match.metadata?.text || '',
     timestamp: match.metadata?.timestamp || null,
+    layer: match.metadata?.layer || null,
     score: Number(match.score || 0),
     metadata: match.metadata || {}
   }));

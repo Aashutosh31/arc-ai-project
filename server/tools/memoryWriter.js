@@ -1,6 +1,7 @@
-const { Pinecone } = require('@pinecone-database/pinecone');
-const { getNamespace } = require('../services/workspaceIndexService');
-const { getEmbedding } = require('../services/embeddingService');
+const mongoose = require('mongoose');
+const AIMemory = require('../models/AIMemory');
+const { upsertTextVector } = require('../services/workspaceIndexService');
+const { inferLayerFromText } = require('../lib/memoryLayers');
 
 module.exports = {
     schema: {
@@ -27,45 +28,85 @@ module.exports = {
     
     execute: async (args, passedUserId) => {
         console.log(`[Tool: memorize] Encoding new memory into Vector Database...`);
-        
-        let uid = typeof passedUserId === 'object' && passedUserId !== null ? (passedUserId.userId || passedUserId.id || passedUserId._id) : passedUserId;
-        const workspaceId = typeof passedUserId === 'object' && passedUserId !== null ? (passedUserId.workspaceId || null) : null;
-        uid = String(uid);
+
+        const context = typeof passedUserId === 'object' && passedUserId !== null ? passedUserId : {};
+        const uid = String(context.userId || context.id || context._id || passedUserId || '');
+        const workspaceId = context.workspaceId || null;
+        const conversationId = context.conversationId || null;
+
+        if (!uid) {
+            return { success: false, error: "No user context available for memory." };
+        }
+
+        const content = String(args.content || '').trim();
+        if (!content) {
+            return { success: false, error: "Nothing to memorize." };
+        }
+
+        const tagList = String(args.tags || '')
+            .split(',')
+            .map((tag) => tag.trim())
+            .filter(Boolean)
+            .slice(0, 12);
+        const layer = inferLayerFromText(`${content} ${tagList.join(' ')}`, 'semantic');
 
         try {
-            // 1. Convert the text into a Vector (shared embedding provider)
-            const vector = await getEmbedding(args.content);
-            if (!vector) throw new Error("Failed to generate vector embedding.");
-
-            // 2. Connect to Pinecone and Save it!
-            const pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-            const index = pc.index('arc-brain'); // Must match the name you created!
-
-            // Generate a unique ID for this memory
-            const memoryId = `mem_${Date.now()}`;
-            const namespace = getNamespace(uid, workspaceId);
-            const tagList = String(args.tags || '')
-                .split(',')
-                .map((tag) => tag.trim())
-                .filter(Boolean);
-
-            await index.upsert({
-                records: [{
-                    id: memoryId,
-                    values: vector,
-                    metadata: {
+            // Persist the memory in Mongo as well as the vector index. Before
+            // Phase 3 `memorize` wrote only Pinecone, so the record could not be
+            // viewed, edited, or deleted from the memory dashboard. The Mongo
+            // row is the manageable source of truth; the vector is an index.
+            let memoryDoc = null;
+            if (mongoose.isValidObjectId(uid)) {
+                try {
+                    memoryDoc = await AIMemory.create({
                         userId: uid,
-                        text: args.content,
+                        workspaceId: workspaceId || null,
+                        query: content.slice(0, 280),
+                        response: content,
                         tags: tagList,
-                        timestamp: new Date().toISOString(),
-                        kind: 'semanticMemory'
-                    }
-                }],
-                namespace
-            });
+                        layer,
+                        source: 'memorize',
+                        importance: 0.7,
+                        confidence: 0.9,
+                        summary: content.slice(0, 180),
+                        conversationId: mongoose.isValidObjectId(conversationId) ? conversationId : null
+                    });
+                } catch (persistError) {
+                    // Vector memory is still useful; do not fail the tool just
+                    // because the manageable row could not be written.
+                    console.warn('[Tool: memorize] Mongo persistence failed:', persistError?.message || persistError);
+                }
+            }
 
-            console.log(`[Tool: memorize] Memory saved successfully! ID: ${memoryId}`);
-            return { success: true, message: "Information has been permanently encoded into my long-term memory." };
+            const entityId = memoryDoc?._id || `mem_${Date.now()}`;
+            let indexed = { skipped: true };
+            try {
+                indexed = await upsertTextVector({
+                    userId: uid,
+                    workspaceId,
+                    kind: 'semanticMemory',
+                    entityId,
+                    text: content,
+                    metadata: {
+                        tags: tagList,
+                        layer,
+                        source: 'memorize',
+                        ...(memoryDoc ? { memoryId: String(memoryDoc._id) } : {})
+                    }
+                });
+            } catch (indexError) {
+                // Mongo already holds the manageable row; do not fail the tool
+                // and trigger a model retry that would duplicate it.
+                console.warn('[Tool: memorize] Vector indexing failed:', indexError?.message || indexError);
+            }
+
+            console.log(`[Tool: memorize] Memory saved successfully! ID: ${entityId}`);
+            return {
+                success: true,
+                message: "Information has been permanently encoded into my long-term memory.",
+                memoryId: String(entityId),
+                indexed: !indexed?.skipped
+            };
 
         } catch (error) {
             console.error(`[Tool: memorize] Error:`, error);

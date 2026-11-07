@@ -6,6 +6,9 @@ exports.searchWorkspace = async (req, res) => {
   const userId = actor?.id || null;
   const query = String(req.query.q || req.body?.q || '').trim();
   const limit = Math.min(Number(req.query.limit || req.body?.limit || 10) || 10, 20);
+  // Workspace isolation: the web client already sends workspaceId; forwarding
+  // it is what makes the promised per-workspace search boundary real.
+  const workspaceId = req.query.workspaceId || req.body?.workspaceId || null;
 
   if (!userId) {
     return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
@@ -27,6 +30,7 @@ exports.searchWorkspace = async (req, res) => {
       query,
       signal: controller?.signal || null,
       limit,
+      workspaceId,
       // Guests persist no UserFact/AIMemory records (ObjectId-typed); the
       // search service skips those collections for guest actors.
       actorType: actor?.type || 'user'

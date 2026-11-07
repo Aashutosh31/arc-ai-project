@@ -160,6 +160,16 @@ export const ConversationProvider = ({ children }) => {
     return response.json();
   }, [activeWorkspaceId]);
 
+  const createMemoryFact = useCallback(async (payload) => {
+    const response = await authFetch(`${API_URL}/api/memory/facts`, {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, workspaceId: activeWorkspaceId })
+    });
+
+    if (!response.ok) throw new Error('Failed to create memory fact');
+    return response.json();
+  }, [activeWorkspaceId]);
+
   const updateMemoryFact = useCallback(async (memoryId, updates) => {
     const response = await authFetch(`${API_URL}/api/memory/facts/${memoryId}`, {
       method: 'PATCH',
@@ -171,7 +181,7 @@ export const ConversationProvider = ({ children }) => {
   }, [activeWorkspaceId]);
 
   const deleteMemoryFact = useCallback(async (memoryId) => {
-    const response = await authFetch(`${API_URL}/api/memory/facts/${memoryId}`, {
+    const response = await authFetch(`${API_URL}/api/memory/facts/${memoryId}${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ''}`, {
       method: 'DELETE'
     });
 
@@ -190,13 +200,13 @@ export const ConversationProvider = ({ children }) => {
   }, [activeWorkspaceId]);
 
   const deleteSemanticMemory = useCallback(async (memoryId) => {
-    const response = await authFetch(`${API_URL}/api/memory/semantic/${memoryId}`, {
+    const response = await authFetch(`${API_URL}/api/memory/semantic/${memoryId}${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ''}`, {
       method: 'DELETE'
     });
 
     if (!response.ok) throw new Error('Failed to delete semantic memory');
     return response.json();
-  }, []);
+  }, [activeWorkspaceId]);
 
   // Delete conversation
   const deleteConversation = useCallback(async (conversationId) => {
@@ -354,6 +364,7 @@ export const ConversationProvider = ({ children }) => {
     searchWorkspace,
     fetchMemoryDashboard,
     updateMemoryPreferences,
+    createMemoryFact,
     updateMemoryFact,
     deleteMemoryFact,
     updateSemanticMemory,

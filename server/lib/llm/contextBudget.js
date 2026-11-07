@@ -10,6 +10,7 @@
 // Budgets (tokens) for the current Groq on-demand environment (8000 TPM):
 //   SAFE_TOTAL 7000 = INPUT (~5400-5800, derived) + OUTPUT (1200/1600).
 const { GROUP_PRIORITY, CAPABILITY_GROUPS } = require('./toolSelection');
+const { MEMORY_LAYER_PRIORITY } = require('../memoryLayers');
 const {
     estimateTokens,
     estimateMessagesTokens,
@@ -83,16 +84,29 @@ const timeValue = (v) => {
   return Number.isFinite(t) ? t : 0;
 };
 
-// Rank: pinned first, then query relevance, then recency. No embeddings.
+// Rank: pinned first, then query relevance, then layer/importance/confidence,
+// then recency. No embeddings here — retrieval widens the candidate pool with
+// the text index before this deterministic budget ranker runs.
 function rankDocs(docs, query, textOf) {
   const words = queryWords(query);
   const withTime = (docs || []).map((d, i) => ({ d, i }));
   withTime.sort((a, b) => timeValue(b.d.timestamp || b.d.createdAt) - timeValue(a.d.timestamp || a.d.createdAt));
+  const numberOr = (value, fallback) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const layerBoost = (doc) => MEMORY_LAYER_PRIORITY[String(doc?.layer || '').toLowerCase()] || 0;
   const scored = withTime.map(({ d }, recencyRank) => ({
     d,
-    score: (d.pinned ? 1000 : 0) + overlapScore(textOf(d), words) * 10 + (withTime.length - recencyRank)
+    score: (d.pinned ? 1000 : 0)
+      + overlapScore(textOf(d), words) * 10
+      + (withTime.length - recencyRank)
+      + layerBoost(d)
+      + numberOr(d.importance, 0.5) * 8
+      + numberOr(d.confidence, 0.7) * 4
   }));
-  scored.sort((a, b) => b.score - a.score);
+  scored.sort((a, b) => b.score - a.score
+    || timeValue(b.d.timestamp || b.d.createdAt) - timeValue(a.d.timestamp || a.d.createdAt));
   return scored.map((s) => s.d);
 }
 
@@ -102,16 +116,20 @@ const truncateTo = (text, maxChars) => {
 };
 
 // Compact memory docs into short bullets — NEVER verbatim documents.
-// Format: `- <query…140> → <response…220>`.
+// Format: `- [layer] <summary|query…140> → <response…220>`.
 function compactMemories(docs, query, budgetTokens = MEMORY_BUDGET_TOKENS) {
   const budgetChars = Math.max(0, budgetTokens * CHARS_PER_TOKEN);
-  const ranked = rankDocs(docs, query, (d) => `${d.query || ''} ${d.response || ''}`);
+  const ranked = rankDocs(docs, query, (d) => `${d.query || ''} ${d.response || ''} ${d.summary || ''}`);
   const lines = [];
   let chars = 0;
   let kept = 0;
   for (const d of ranked) {
-    if (!d.query && !d.response) continue;
-    const line = `- ${truncateTo(d.query || '(saved note)', 140)} → ${truncateTo(d.response || '', 220)}`;
+    if (!d.query && !d.response && !d.summary) continue;
+    const layer = String(d.layer || '').trim().toLowerCase();
+    const label = layer ? `[${layer}] ` : '';
+    const title = d.summary || d.query || '(saved note)';
+    const showResponse = d.response && !(d.summary && d.response.startsWith(d.summary));
+    const line = `- ${label}${truncateTo(title, 140)}${showResponse ? ` → ${truncateTo(d.response, 220)}` : ''}`;
     if (chars + line.length + 1 > budgetChars) break;
     lines.push(line);
     chars += line.length + 1;
@@ -129,7 +147,9 @@ function compactFacts(docs, query, budgetTokens = FACTS_BUDGET_TOKENS) {
   let kept = 0;
   for (const d of ranked) {
     if (!d.fact) continue;
-    const line = `- ${truncateTo(d.fact, 160)}`;
+    const layer = String(d.layer || 'semantic').trim().toLowerCase();
+    const category = d.category && d.category !== 'general' ? `/${d.category}` : '';
+    const line = `- [${layer}${category}] ${truncateTo(d.fact, 160)}`;
     if (chars + line.length + 1 > budgetChars) break;
     lines.push(line);
     chars += line.length + 1;
@@ -642,6 +662,7 @@ module.exports = {
   estTokensForChars,
   estMessagesTokens,
   estToolsTokens,
+  rankDocs,
   compactMemories,
   compactFacts,
   compactRag,
