@@ -14,6 +14,7 @@ const searchRoutes = require('./routes/search.js');
 const memoryRoutes = require('./routes/memory.js');
 const workspaceRoutes = require('./routes/workspaces.js');
 const voiceRoutes = require('./routes/voice.js');
+const agensiRoutes = require('./routes/agensi.js');
 const AIService = require('./services/AIService.js'); 
 const { resolveSocketConversation } = require('./lib/conversationAccess');
 const operatorPolicySource = require('./lib/capabilities/operatorPolicySource');
@@ -66,6 +67,12 @@ if (process.env.JWT_SECRET && process.env.JWT_SECRET.length < 32) {
     process.exit(1);
 }
 
+// The Agensi marketplace skill is optional infrastructure. Missing config must
+// degrade to a closed endpoint (503), never take the whole server down.
+if (!process.env.AGENSI_SKILL_SECRET) {
+    console.warn('⚠️ AGENSI_SKILL_SECRET is not set; /api/agensi/skill/query will return 503.');
+}
+
 const app = express();
 
 // Render (and most PaaS hosts) terminate TLS at an upstream proxy. Without
@@ -110,6 +117,9 @@ app.use(cookieParser());
 // 64 KB JSON body cap is authoritative (a policy PUT has no business parsing
 // anything large; the strict limit is part of the route contract).
 app.use('/api/policy', require('./routes/policy.js'));
+// Agensi marketplace skill — isolated read-only surface. Mounted above the
+// global 8 MB JSON parser so this route has its own strict 16 KB limit.
+app.use('/api/agensi', express.json({ limit: '16kb' }), agensiRoutes);
 app.use(express.json({ limit: '8mb' }));
 
 const mongoUri = process.env.MONGO_URI || process.env.DATABASE_URL;
